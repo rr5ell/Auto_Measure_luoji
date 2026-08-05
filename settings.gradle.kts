@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Auto_Measure_luoji"
+rootProject.name = "Auto_measure"
 include(":app")
  
