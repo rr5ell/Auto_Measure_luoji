@@ -465,7 +465,7 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
         builder.set(CaptureRequest.SCALER_CROP_REGION, calculateCenteredCrop(lens, zoomRatio))
-        publishZoomState("SCALER_CROP_REGION", zoomRatio.coerceAtLeast(1f), "unbounded crop")
+        publishZoomState("SCALER_CROP_REGION", zoomRatio.coerceAtLeast(1f), "center crop")
     }
 
     private fun publishZoomState(backend: String, ratio: Float, detail: String) {

@@ -17,24 +17,21 @@ import androidx.compose.ui.unit.sp
  *
  * @param currentRatio    当前等效倍率
  * @param minRatio        最小倍率（光学底倍）
- * @param maxRatio        最大倍率；为 null 时表示普通模式无固定上限
+ * @param maxRatio        最大倍率
  * @param onRatioChanged  倍率变化回调
  */
 @Composable
 fun ZoomSlider(
     currentRatio: Float,
     minRatio: Float,
-    maxRatio: Float?,
+    maxRatio: Float,
     labelSuffix: String = "",
     onRatioChanged: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val safeMinRatio = minRatio.coerceAtLeast(1f)
-    val safeCurrentRatio = currentRatio.coerceAtLeast(safeMinRatio)
-    val sliderMaxRatio = maxRatio
-        ?.coerceAtLeast(safeMinRatio)
-        ?: maxOf(safeMinRatio + 1f, safeMinRatio * 2f, safeCurrentRatio * 2f)
-    val sliderValue = safeCurrentRatio.coerceIn(safeMinRatio, sliderMaxRatio)
+    val safeMaxRatio = maxRatio.coerceAtLeast(safeMinRatio)
+    val sliderValue = currentRatio.coerceIn(safeMinRatio, safeMaxRatio)
 
     Column(
         modifier = modifier
@@ -44,7 +41,7 @@ fun ZoomSlider(
     ) {
         // 倍率显示
         Text(
-            text = "%.1fx%s".format(safeCurrentRatio, labelSuffix),
+            text = "%.1fx%s".format(sliderValue, labelSuffix),
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold
@@ -55,8 +52,8 @@ fun ZoomSlider(
         // 滑块
         Slider(
             value = sliderValue,
-            onValueChange = { onRatioChanged(it.coerceAtLeast(safeMinRatio)) },
-            valueRange = safeMinRatio..sliderMaxRatio,
+            onValueChange = { onRatioChanged(it.coerceIn(safeMinRatio, safeMaxRatio)) },
+            valueRange = safeMinRatio..safeMaxRatio,
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
                 thumbColor = Color.White,
@@ -76,7 +73,7 @@ fun ZoomSlider(
                 fontSize = 12.sp
             )
             Text(
-                text = maxRatio?.let { "%.1fx".format(it) } ?: "不限",
+                text = "%.1fx".format(safeMaxRatio),
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp
             )

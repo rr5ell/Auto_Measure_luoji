@@ -5,6 +5,9 @@ import android.util.Log
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.domain.Camera2Controller
 
+private const val MAX_EQUIV_ZOOM = 24f
+private const val MIN_EQUIV_ZOOM_OFFSET = 0.1f
+
 /**
  * 放大逻辑控制器
  *
@@ -21,13 +24,15 @@ class ZoomController(
 
     fun setup(selectedLens: LensCandidate, widestLens: LensCandidate?) {
         this.selectedLens = selectedLens
-        this.opticalBase = if (widestLens != null && widestLens != selectedLens) {
+        val rawOpticalBase = if (widestLens != null && widestLens != selectedLens) {
             kotlin.math.round(selectedLens.eq35mm / widestLens.eq35mm)
         } else { 1f }
+        this.opticalBase = (rawOpticalBase.coerceAtLeast(1f) + MIN_EQUIV_ZOOM_OFFSET)
+            .coerceAtMost(MAX_EQUIV_ZOOM)
     }
 
     fun getOpticalBase(): Float = opticalBase
-    fun getMaxEquivRatio(): Float = Float.POSITIVE_INFINITY
+    fun getMaxEquivRatio(): Float = MAX_EQUIV_ZOOM
 
     /**
      * 应用普通倍率放大，不碰 TextureView Matrix。
@@ -39,7 +44,7 @@ class ZoomController(
         viewHeight: Int = 0
     ): ZoomState {
         if (selectedLens == null) return ZoomState(zoomRatio, 1f, false, 1f, opticalBase)
-        val clamped = zoomRatio.coerceAtLeast(opticalBase)
+        val clamped = zoomRatio.coerceIn(opticalBase, MAX_EQUIV_ZOOM)
         cameraController.setZoomRatio(clamped)
         return ZoomState(clamped, clamped, false, 1f, opticalBase)
     }
@@ -57,7 +62,7 @@ class ZoomController(
         sensorOrientation: Int,
     ): ZoomState {
         val lens = selectedLens ?: return ZoomState(zoom, 1f, false, 1f, opticalBase)
-        val clamped = zoom.coerceAtLeast(opticalBase)
+        val clamped = zoom.coerceIn(opticalBase, MAX_EQUIV_ZOOM)
         val crop = calculateCropRegionCenteredOn(lens, clamped, anchor, sensorOrientation)
         cameraController.setCropRegion(crop)
         return ZoomState(clamped, clamped, false, 1f, opticalBase)
@@ -76,7 +81,7 @@ class ZoomController(
         sensorOrientation: Int,
     ): AnchorZoomResult {
         val lens = selectedLens ?: return AnchorZoomResult(ZoomState(zoom, 1f, false, 1f, opticalBase), null)
-        val clamped = zoom.coerceAtLeast(opticalBase)
+        val clamped = zoom.coerceIn(opticalBase, MAX_EQUIV_ZOOM)
         val crop = calculateCropRegionCenteredOn916(lens, clamped, anchor, sensorOrientation)
         cameraController.setCropRegion(crop)
         return AnchorZoomResult(ZoomState(clamped, clamped, false, 1f, opticalBase), crop)

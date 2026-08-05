@@ -82,6 +82,8 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 private const val WIDE_CALIBRATION_ZOOM = 5f
+private const val NORMAL_PREVIEW_MAX_ZOOM = 24f
+private const val NORMAL_MIN_ZOOM_OFFSET = 0.1f
 private const val CALIBRATION_EXPOSURE_EV = -2.0f
 
 /**
@@ -470,15 +472,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         } else {
             1f
         }
-        return rawOpticalBase.coerceAtLeast(1f)
+        return (rawOpticalBase.coerceAtLeast(1f) + NORMAL_MIN_ZOOM_OFFSET)
+            .coerceAtMost(NORMAL_PREVIEW_MAX_ZOOM)
+    }
+
+    fun normalMaxZoomFor(lens: LensCandidate?): Float {
+        return NORMAL_PREVIEW_MAX_ZOOM.coerceAtLeast(normalMinZoomFor(lens))
     }
 
     fun clampNormalZoom(zoom: Float, lens: LensCandidate?): Float {
-        return zoom.coerceAtLeast(normalMinZoomFor(lens))
+        return zoom.coerceIn(normalMinZoomFor(lens), normalMaxZoomFor(lens))
     }
 
     fun postCalibrationZoomFor(lens: LensCandidate?): Float {
-        return max(2f, normalMinZoomFor(lens))
+        return max(2f, normalMinZoomFor(lens)).coerceAtMost(normalMaxZoomFor(lens))
     }
 
     fun applyLensSwitch(target: LensCandidate, message: String) {
@@ -1680,7 +1687,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 maxRatio = if (isDualCalibMode) {
                     dualTelephotoMag.toFloat()
                 } else {
-                    null
+                    normalMaxZoomFor(selectedLens)
                 },
                 labelSuffix = if (isDualCalibMode) {
                     if (isUsingDualTele) " (T)" else " (W)"

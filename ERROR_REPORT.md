@@ -1,6 +1,27 @@
 # Error Report
 
+## [2026-08-05] 普通预览 24x 上限与 0.1x 下限偏移报告
+
+### 发现的问题
+- 上一版普通预览最大倍率改为“不限”，但当前需求需要恢复固定最大 `24x`。
+- 普通模式最低倍率仍等于最大焦距对应光学基准倍率，缺少额外 `0.1x` 偏移。
+- 严重程度：中。倍率范围与当前真机验证预期不一致，会影响进入预览后的默认倍率和滑块可调范围。
+
+### 解决方案
+- 新增普通预览常量 `NORMAL_PREVIEW_MAX_ZOOM = 24f` 和 `NORMAL_MIN_ZOOM_OFFSET = 0.1f`。
+- `normalMinZoomFor()` 返回光学基准倍率 + `0.1x`，并保证不超过 `24x`；`clampNormalZoom()` 恢复 `min..24x` 裁剪。
+- `ZoomSlider.maxRatio` 恢复为固定 `Float`，普通模式传入 `24x`，不再显示 `不限`。
+- `ZoomController` 历史入口同步使用 `24x` 上限和 `0.1x` 下限偏移。
+- 双摄像头校准 `applyDualZoom()`、`strictPhysical` 物理镜头路径和 `1x..长焦倍率` 范围保持不变。
+
+### 预防措施
+- 后续普通模式最大倍率调整必须优先修改 `NORMAL_PREVIEW_MAX_ZOOM`，不要重新散落硬编码。
+- 后续普通模式最低倍率调整必须通过 `NORMAL_MIN_ZOOM_OFFSET`，保证镜头切换、入场倍率、滑块和普通校准一致。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-05] 普通预览最大倍率固定上限报告
+
+状态：已被同日“普通预览 24x 上限与 0.1x 下限偏移报告”覆盖；本节只保留上一版“不限”需求的历史记录。
 
 ### 发现的问题
 - 普通模式倍率最大值仍按父逻辑相机 `maxDigitalZoom` / `CONTROL_ZOOM_RATIO_RANGE` 做应用层限制，不能满足普通预览最大倍数“不限制”的要求。
@@ -14,8 +35,8 @@
 - 双摄像头校准 `applyDualZoom()`、`strictPhysical` 物理镜头路径和 `1x..长焦倍率` 范围保持不变。
 
 ### 预防措施
-- 后续普通模式倍率逻辑禁止重新引入 `coerceAtMost(maxDigitalZoom)` 或 `normalMaxZoomFor()` 之类固定上限。
-- 普通模式最大“不限制”指不做应用层固定最大裁剪；实际画面效果仍需通过真机 HAL 行为和 `zoom: backend=...` 日志确认。
+- 当前普通模式倍率逻辑应使用 `NORMAL_PREVIEW_MAX_ZOOM` / `normalMaxZoomFor()` 固定为 `24x`，不得继续沿用本节的“不限”策略。
+- 当前普通模式仍需通过真机 HAL 行为和 `zoom: backend=...` 日志确认 `CONTROL_ZOOM_RATIO` 与 fallback crop 的实际效果。
 - Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
 
 ## [2026-08-05] 普通相机物理镜头与倍率下限报告

@@ -5,7 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-normal-zoom-24-2026-08-05] - 2026-08-05
+
+### Changed
+- 普通预览倍率最大值从“不限”改回固定 `24x`，普通 `ZoomSlider` 右侧显示 `24.0x`。
+- 普通模式最低倍率改为最大焦距对应光学基准倍率 + `0.1x`，镜头切换、入场倍率、滑块拖动和普通校准保持同一限制。
+- `ZoomController` 历史入口同步恢复 `24x` 上限，避免后续复用时绕过普通倍率范围。
+- 双摄像头校准仍保留 `1x..长焦倍率` 范围、`strictPhysical=true` 物理镜头绑定和原有广角/长焦切换逻辑。
+
 ## [camera-unbounded-normal-zoom-2026-08-05] - 2026-08-05
+
+> 已被 `camera-normal-zoom-24-2026-08-05` 覆盖；当前普通预览最大倍率固定为 `24x`。
 
 ### Changed
 - 普通预览倍率最大值取消应用层固定上限；`ZoomSlider` 在普通模式显示 `不限`，并随当前倍率动态扩展可拖动范围。
