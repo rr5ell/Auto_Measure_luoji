@@ -1,5 +1,23 @@
 # Error Report
 
+## [2026-08-05] 普通相机物理镜头与倍率下限报告
+
+### 发现的问题
+- 普通入口选中最大焦距候选时，只要候选带有 `physicalId`，`Camera2Controller` 就会创建物理镜头会话。
+- 普通模式 `currentEquivRatio` 和倍率滑块最小值仍从 `1x` 开始，无法表达“已进入最大焦距对应光学倍率”的状态。
+- 严重程度：中。普通预览和用户期望的逻辑多摄 zoom 行为不一致，且可能和后续逻辑相机自动镜头切换能力冲突。
+
+### 解决方案
+- `Camera2Controller` 只有在 `strictPhysical=true` 且存在物理 ID 时才创建物理会话；普通入口统一打开父逻辑相机。
+- `LensCandidate` 额外记录父逻辑相机的 active array、max digital zoom、`CONTROL_ZOOM_RATIO_RANGE` 和 OIS 能力，普通入口使用逻辑相机能力下发请求。
+- 普通模式按最大焦距候选相对同一逻辑相机广角候选的等效焦距比计算光学基准倍率，并把它作为进入倍率和滑块最小值。
+- 双摄像头校准的 `applyDualZoom()`、`strictPhysical` 打开路径、广角 `5x` 和长焦物理 `1x` 采集逻辑保持不变。
+
+### 预防措施
+- 后续改普通相机入口时，不能再用 `physicalId != null` 直接决定是否创建物理会话，必须区分普通预览和双摄校准。
+- 普通模式滑块最小值必须跟 `normalMinZoomFor()` 保持一致，不得写回固定 `1f`。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-05] 副本 App 标识重复报告
 
 ### 发现的问题

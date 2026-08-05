@@ -5,8 +5,8 @@
 - tech: Android | Kotlin
 - tags: compose, yolo, textureview, capture-resolution, model-input
 - canonical_code_paths:
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\camera\ui\CameraScreen.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\detection\domain\YoloDetector.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\detection\domain\YoloDetector.kt
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md

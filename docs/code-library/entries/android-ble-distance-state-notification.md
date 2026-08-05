@@ -5,9 +5,9 @@
 - tech: Android | Kotlin
 - tags: ble, compose-state, distance-measurement, calibration
 - canonical_code_paths:
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\bluetooth\domain\BleConnectionManager.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\calibration\ui\CalibrationPanel.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\calibration\ui\DualCalibrationPanel.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\bluetooth\domain\BleConnectionManager.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\calibration\ui\CalibrationPanel.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\calibration\ui\DualCalibrationPanel.kt
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md

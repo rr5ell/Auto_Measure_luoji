@@ -5,8 +5,8 @@
 - tech: Android | Kotlin
 - tags: speech-recognition, model-download, http-range, resumable-download
 - canonical_code_paths:
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\voice\domain\ThirdPartyVoiceModelDownloader.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\voice\domain\ChineseVoiceHotwordRecognizer.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\voice\domain\ThirdPartyVoiceModelDownloader.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\voice\domain\ChineseVoiceHotwordRecognizer.kt
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\DEV_GUIDE.md
   - E:\StudioProjects\Auto_Measure_luoji\关于VAD.md

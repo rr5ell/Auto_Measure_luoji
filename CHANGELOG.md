@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-logic-zoom-2026-08-05] - 2026-08-05
+
+### Changed
+- 普通相机入口不再因选中物理长焦候选而创建物理镜头会话；默认使用候选所属父逻辑相机打开预览。
+- 普通模式进入后会把 Camera2 zoom 直接设为最大焦距候选相对同一逻辑相机广角的光学基准倍率。
+- 普通模式倍率滑块最小值改为该光学基准倍率，不能再滑回 `1x`；最大值使用父逻辑相机可用 zoom 上限。
+- 双摄像头校准路径保持 `strictPhysical=true` 的物理镜头绑定和原有广角/长焦切换逻辑不变。
+
 ## [copy-rename-2026-08-05] - 2026-08-05
 
 ### Changed

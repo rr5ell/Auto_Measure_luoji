@@ -17,10 +17,12 @@
 - `laserCompare` 对比包必须保留固定可见的 `绿光对比` 按钮，不能只藏在 `更多` 菜单里。
 - 镜头切换按钮必须在普通/双镜头校准流程中禁用，切换镜头时需要清理旧锚点和检测框。
 - 倍率放大优先使用 Camera2 `CONTROL_ZOOM_RATIO`；UI wrapper 只用于校准点居中和平移覆盖，不得重新承担普通倍率放大。
+- 普通预览即使选中物理长焦候选，也必须打开父逻辑相机；只有双摄校准 `strictPhysical=true` 时才允许绑定物理子镜头。
+- 普通模式倍率滑块最小值必须是最大焦距候选相对同一逻辑相机广角的光学基准倍率，禁止固定回 `1x`。
 - Camera2 zoom 后端选择必须通过 `zoom: backend=...` 摘要暴露到 `Camera2Ctrl`、`CameraScreen` 和主界面状态区，方便真机验证。
 - `ZoomController.applyZoom()` 只能委托 `Camera2Controller.setZoomRatio()`；锚点 crop 方法属于历史实验路径，不能作为普通倍率默认实现。
 - 普通校准开始时，若当前镜头为 `LensCategory.WIDE`，必须先将 Camera2 倍率切到 `5x` 再采集；可用倍率不足时记录实际请求倍率。
-- 普通校准在长焦/非广角镜头下暂时保持当前倍率采集，不得自动切到相对广角的原生光学倍率；该原生倍率策略重新启用前必须先确认。
+- 普通校准在长焦/非广角镜头下保持当前逻辑相机倍率采集，不得低于普通模式光学基准倍率。
 - 普通校准距离输入为空且 BLE 已连接时，应触发自动测距；收到 `line > 0` 后回填距离并采集，绿光识别失败不得更新 `lastCollectedDistance`，必须允许同一距离重试。
 - BLE 测距数据对 UI 和校准流程是事件语义，`lastDistance` 必须使用同值也通知的 Compose state 策略，避免连续两次相同距离值被结构相等过滤。
 - 普通校准和双镜头校准采集期间必须通过 Camera2 `CONTROL_AE_EXPOSURE_COMPENSATION` 设置 `-2.0 EV`；退出校准面板后恢复 `0 EV`，且必须按设备 `CONTROL_AE_COMPENSATION_STEP/RANGE` 换算和裁剪。

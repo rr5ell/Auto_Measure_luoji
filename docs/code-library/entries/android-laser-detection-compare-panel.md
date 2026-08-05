@@ -7,9 +7,9 @@
 - canonical_code_paths:
   - E:\StudioProjects\Auto_Measure_luoji\app\build.gradle.kts
   - E:\StudioProjects\Auto_Measure_luoji\app\src\laserCompare\res\values\strings.xml
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\camera\ui\CameraScreen.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\calibration\util\ImageUtils.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\calibration\detector\LaserDetector.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\calibration\util\ImageUtils.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\calibration\detector\LaserDetector.kt
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md

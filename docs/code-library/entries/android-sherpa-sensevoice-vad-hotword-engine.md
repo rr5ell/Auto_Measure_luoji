@@ -5,9 +5,9 @@
 - tech: Android | Kotlin | C++
 - tags: offline-asr, speech-recognition, vad, sensevoice, sherpa-onnx, jni, hotword-matching
 - canonical_code_paths:
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\voice\domain\ChineseVoiceHotwordRecognizer.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\voice\domain\SherpaOnnxHotwordRecognizer.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\voice\domain\SherpaOnnxHotwordNative.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\voice\domain\ChineseVoiceHotwordRecognizer.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\voice\domain\SherpaOnnxHotwordRecognizer.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\voice\domain\SherpaOnnxHotwordNative.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\cpp\sherpa_hotword_jni.cpp
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\cpp\CMakeLists.txt
 - related_docs:

@@ -5,7 +5,7 @@
 - tech: Android | Kotlin
 - tags: compose, camera-ui, toolbar-layout, responsive-ui
 - canonical_code_paths:
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure\feature\camera\ui\CameraScreen.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md

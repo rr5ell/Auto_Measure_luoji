@@ -38,6 +38,7 @@ class Camera2Controller(private val context: Context) {
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
     private var currentLens: LensCandidate? = null
+    private var currentStrictPhysical: Boolean = false
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var pendingZoomRatio: Float = 1f
     private var oisRequested: Boolean = false
@@ -85,6 +86,9 @@ class Camera2Controller(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun openCamera(lens: LensCandidate, surface: Surface, strictPhysical: Boolean = false) {
         currentLens = lens
+        currentStrictPhysical = strictPhysical &&
+            lens.physicalId != null &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
 
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val chars = manager.getCameraCharacteristics(lens.cameraId)
@@ -101,7 +105,8 @@ class Camera2Controller(private val context: Context) {
             surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
         } catch (_: Exception) {}
 
-        Log.d("Camera2Ctrl", ">>> openCamera: id=${lens.cameraId}, phys=${lens.physicalId}, previewSize=${previewSize}, sensorOrient=$sensorOrientation")
+        val mode = if (currentStrictPhysical) "strict-physical" else "logical"
+        Log.d("Camera2Ctrl", ">>> openCamera: id=${lens.cameraId}, phys=${lens.physicalId}, mode=$mode, previewSize=${previewSize}, sensorOrient=$sensorOrientation")
 
         manager.openCamera(lens.cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
@@ -186,7 +191,7 @@ class Camera2Controller(private val context: Context) {
             analysisImageReader?.surface?.let { addTarget(it) }
         }
 
-        val usePhysical = lens.physicalId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        val usePhysical = strictPhysical && lens.physicalId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         if (usePhysical) createPhysicalSession(camera, lens, surface, strictPhysical)
         else createLogicalSession(camera, surface)
     }
@@ -241,7 +246,7 @@ class Camera2Controller(private val context: Context) {
         applyStabilization(builder, lens, notifyUnsupported = true)
         applyExposureCompensation(builder)
 
-        // 初始 zoom。pendingZoomRatio 会跨 session 缓存，保证切回广角 5x 时不丢 zoom。
+        // 初始 zoom。普通预览走父逻辑相机 zoom 范围；双摄 strictPhysical 保持物理会话范围。
         val usedControlZoom = applyPreferredZoom(builder, lens, pendingZoomRatio)
 
         try {
@@ -319,7 +324,7 @@ class Camera2Controller(private val context: Context) {
 
         val lens = currentLens
             ?: return Result.failure(IllegalStateException("相机未就绪，无法开启 OIS"))
-        if (!lens.oisSupported) {
+        if (!isOisSupported(lens)) {
             oisRequested = false
             onOisStateChanged?.invoke(false)
             return Result.failure(IllegalStateException("当前镜头不支持 OIS"))
@@ -342,15 +347,16 @@ class Camera2Controller(private val context: Context) {
         val session = captureSession
             ?: return Result.failure(IllegalStateException("相机会话未就绪，无法切换 OIS"))
 
-        if (enabled && !lens.oisSupported) {
+        if (enabled && !isOisSupported(lens)) {
             return Result.failure(IllegalStateException("当前镜头不支持 OIS"))
         }
 
         applyStabilization(builder, lens, notifyUnsupported = false)
         return try {
             session.setRepeatingRequest(builder.build(), null, cameraHandler)
-            onOisStateChanged?.invoke(enabled && lens.oisSupported)
-            Log.d("Camera2Ctrl", ">>> OIS ${if (enabled && lens.oisSupported) "ON" else "OFF"}")
+            val enabledNow = enabled && isOisSupported(lens)
+            onOisStateChanged?.invoke(enabledNow)
+            Log.d("Camera2Ctrl", ">>> OIS ${if (enabledNow) "ON" else "OFF"}")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.w("Camera2Ctrl", "OIS request failed", e)
@@ -369,8 +375,9 @@ class Camera2Controller(private val context: Context) {
             CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
         )
 
-        val shouldEnableOis = oisRequested && lens.oisSupported
-        if (oisRequested && !lens.oisSupported) {
+        val oisSupported = isOisSupported(lens)
+        val shouldEnableOis = oisRequested && oisSupported
+        if (oisRequested && !oisSupported) {
             oisRequested = false
             if (notifyUnsupported) onOisEnableFailed?.invoke("当前镜头不支持 OIS，已关闭")
         }
@@ -436,8 +443,8 @@ class Camera2Controller(private val context: Context) {
             try {
                 builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, requested)
                 // CONTROL_ZOOM_RATIO 已负责数码变焦；crop 置为 full active array，避免叠加二次裁切。
-                builder.set(CaptureRequest.SCALER_CROP_REGION, lens.activeArray)
-                publishZoomState("CONTROL_ZOOM_RATIO", requested, "range=${lens.zoomRatioRange}")
+                builder.set(CaptureRequest.SCALER_CROP_REGION, activeArrayForCurrentMode(lens))
+                publishZoomState("CONTROL_ZOOM_RATIO", requested, "range=${zoomRatioRangeForCurrentMode(lens)}")
                 return true
             } catch (e: Exception) {
                 Log.w("Camera2Ctrl", "CONTROL_ZOOM_RATIO is not accepted by request builder, fallback to SCALER_CROP_REGION", e)
@@ -458,7 +465,7 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
         builder.set(CaptureRequest.SCALER_CROP_REGION, calculateCenteredCrop(lens, zoomRatio))
-        publishZoomState("SCALER_CROP_REGION", zoomRatio.coerceAtLeast(1f), "max=${lens.maxDigitalZoom}")
+        publishZoomState("SCALER_CROP_REGION", zoomRatio.coerceAtLeast(1f), "max=${maxDigitalZoomForCurrentMode(lens)}")
     }
 
     private fun publishZoomState(backend: String, ratio: Float, detail: String) {
@@ -469,13 +476,13 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun isControlZoomAvailable(lens: LensCandidate, zoomRatio: Float): Boolean {
-        val range = lens.zoomRatioRange
+        val range = zoomRatioRangeForCurrentMode(lens)
         return zoomRatio >= range.lower && zoomRatio <= range.upper
     }
 
     private fun calculateCenteredCrop(lens: LensCandidate, zoomRatio: Float): android.graphics.Rect {
-        val array = lens.activeArray
-        val zoom = zoomRatio.coerceIn(1f, lens.maxDigitalZoom.coerceAtLeast(1f))
+        val array = activeArrayForCurrentMode(lens)
+        val zoom = zoomRatio.coerceIn(1f, maxDigitalZoomForCurrentMode(lens).coerceAtLeast(1f))
         val cropW = ((array.width() / zoom).toInt() and 0xFFFFFFFE.toInt()).coerceAtLeast(2)
         val cropH = ((array.height() / zoom).toInt() and 0xFFFFFFFE.toInt()).coerceAtLeast(2)
         val left = (array.centerX() - cropW / 2).coerceIn(array.left, array.right - cropW)
@@ -489,9 +496,26 @@ class Camera2Controller(private val context: Context) {
         captureSession = null
         try { cameraDevice?.close() } catch (_: Exception) {}
         cameraDevice = null
+        currentStrictPhysical = false
         previewRequestBuilder = null
         try { analysisImageReader?.close() } catch (_: Exception) {}
         analysisImageReader = null
         if (wasActive) onCameraClosed?.invoke()
+    }
+
+    private fun activeArrayForCurrentMode(lens: LensCandidate): android.graphics.Rect {
+        return if (currentStrictPhysical) lens.activeArray else lens.logicalActiveArray
+    }
+
+    private fun maxDigitalZoomForCurrentMode(lens: LensCandidate): Float {
+        return if (currentStrictPhysical) lens.maxDigitalZoom else lens.logicalMaxDigitalZoom
+    }
+
+    private fun zoomRatioRangeForCurrentMode(lens: LensCandidate): Range<Float> {
+        return if (currentStrictPhysical) lens.zoomRatioRange else lens.logicalZoomRatioRange
+    }
+
+    private fun isOisSupported(lens: LensCandidate): Boolean {
+        return if (currentStrictPhysical) lens.oisSupported else lens.logicalOisSupported
     }
 }

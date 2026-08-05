@@ -456,15 +456,49 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             .sortedBy { it.eq35mm }
     }
 
+    fun findWideLensInSameLogicalCamera(lens: LensCandidate?, candidates: List<LensCandidate>): LensCandidate? {
+        if (lens == null) return findWideLens(candidates)
+        val sameLogical = candidates.filter { it.cameraId == lens.cameraId }
+        return findWideLens(sameLogical.ifEmpty { candidates })
+    }
+
+    fun maxSupportedZoom(lens: LensCandidate): Float {
+        return maxOf(lens.logicalMaxDigitalZoom, lens.logicalZoomRatioRange.upper).coerceAtLeast(1f)
+    }
+
+    fun normalMinZoomFor(lens: LensCandidate?): Float {
+        if (lens == null) return 1f
+        val wide = findWideLensInSameLogicalCamera(lens, lensCandidates)
+        val rawOpticalBase = if (wide != null && wide != lens && wide.eq35mm > 0f) {
+            (lens.eq35mm / wide.eq35mm).roundToInt().coerceAtLeast(1).toFloat()
+        } else {
+            1f
+        }
+        return rawOpticalBase.coerceIn(1f, maxSupportedZoom(lens))
+    }
+
+    fun normalMaxZoomFor(lens: LensCandidate?): Float {
+        if (lens == null) return 1f
+        return maxSupportedZoom(lens).coerceAtLeast(normalMinZoomFor(lens))
+    }
+
+    fun clampNormalZoom(zoom: Float, lens: LensCandidate?): Float {
+        return zoom.coerceIn(normalMinZoomFor(lens), normalMaxZoomFor(lens))
+    }
+
+    fun postCalibrationZoomFor(lens: LensCandidate?): Float {
+        return max(2f, normalMinZoomFor(lens)).coerceAtMost(normalMaxZoomFor(lens))
+    }
+
     fun applyLensSwitch(target: LensCandidate, message: String) {
         selectedLens = target
-        currentEquivRatio = 1f
+        currentEquivRatio = normalMinZoomFor(target)
         anchorCenter1x = null
         anchorActive = false
-        anchorZoom = 1f
+        anchorZoom = currentEquivRatio
         currentCenterPx = null
         detectionBoxes = emptyList()
-        statusText = "$message：${describeLens(target)}"
+        statusText = "$message：${describeLens(target)}，起始 ${"%.1f".format(currentEquivRatio)}x"
     }
 
     fun toggleWideLens() {
@@ -523,16 +557,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         return max(1f, max(width / (2f * minLR), height / (2f * minTB)))
     }
 
-    fun maxSupportedZoom(lens: LensCandidate): Float {
-        return maxOf(lens.maxDigitalZoom, lens.zoomRatioRange.upper).coerceAtLeast(1f)
-    }
-
     fun prepareSingleCalibrationZoom(): Float {
         val lens = selectedLens
         val targetZoom = if (lens?.category == LensCategory.WIDE) {
             min(WIDE_CALIBRATION_ZOOM, maxSupportedZoom(lens))
         } else {
-            currentEquivRatio.coerceAtLeast(1f)
+            clampNormalZoom(currentEquivRatio, lens)
         }
         currentEquivRatio = targetZoom
         anchorActive = false
@@ -702,13 +732,17 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         pendingDualTeleLens = null
         dualCalManager.reset()
         anchorActive = false
-        anchorZoom = 1f
         currentCenterPx = null
-        currentEquivRatio = 1f
-        cameraController.setZoomRatio(1f)
         val fallback = defaultLens ?: selectLensUseCase(lensCandidates)
         if (fallback != null) {
             selectedLens = fallback
+            currentEquivRatio = normalMinZoomFor(fallback)
+            anchorZoom = currentEquivRatio
+            cameraController.setZoomRatio(currentEquivRatio)
+        } else {
+            currentEquivRatio = 1f
+            anchorZoom = 1f
+            cameraController.setZoomRatio(1f)
         }
         statusText = "已退出双镜头校准"
     }
@@ -787,6 +821,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             // 重新设置 buffer 尺寸，避免拉伸
                             val st = tv.surfaceTexture!!
                             cameraController.setSurfaceTexture(st)
+                            val resumeZoom = if (isDualCalibMode && isUsingDualTele) {
+                                1f
+                            } else if (isDualCalibMode) {
+                                currentEquivRatio.coerceAtLeast(1f)
+                            } else {
+                                clampNormalZoom(currentEquivRatio, lens)
+                            }
+                            cameraController.setZoomRatio(resumeZoom)
                             cameraController.openCamera(
                                 lens,
                                 android.view.Surface(st),
@@ -811,15 +853,26 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (lens == null) { statusText = "无可用镜头"; return@LaunchedEffect }
         defaultLens = lens
         selectedLens = lens
-        statusText = "选中: ${lens.category} (${lens.eq35mm}mm, ${lens.physicalId ?: "逻辑"})"
+        currentEquivRatio = normalMinZoomFor(lens)
+        anchorZoom = currentEquivRatio
+        cameraController.setZoomRatio(currentEquivRatio)
+        statusText = "选中: ${describeLens(lens)}，逻辑相机起始 ${"%.1f".format(currentEquivRatio)}x"
     }
 
     // 统一相机打开
-    LaunchedEffect(selectedLens, surfaceAvailable, isDualCalibMode) {
+    LaunchedEffect(selectedLens, surfaceAvailable, isDualCalibMode, isUsingDualTele) {
         val lens = selectedLens ?: return@LaunchedEffect
         if (!surfaceAvailable) return@LaunchedEffect
         val tv = textureViewRef ?: return@LaunchedEffect
         if (!tv.isAvailable) return@LaunchedEffect
+        val initialZoom = if (isDualCalibMode && isUsingDualTele) {
+            1f
+        } else if (isDualCalibMode) {
+            currentEquivRatio.coerceAtLeast(1f)
+        } else {
+            clampNormalZoom(currentEquivRatio, lens)
+        }
+        cameraController.setZoomRatio(initialZoom)
         cameraController.closeCamera()
         cameraController.openCamera(
             lens,
@@ -832,8 +885,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (!isCameraReady) return@LaunchedEffect
         val cameraZoom = if (isDualCalibMode && isUsingDualTele) {
             1f
-        } else {
+        } else if (isDualCalibMode) {
             currentEquivRatio.coerceAtLeast(1f)
+        } else {
+            clampNormalZoom(currentEquivRatio, selectedLens)
         }
         Log.i(
             "CameraScreen",
@@ -1481,10 +1536,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     }
                     anchorCenter1x = predicted
                     lastResultText = "已锁定: (${predicted.x.toInt()}, ${predicted.y.toInt()})"
-                    currentEquivRatio = 2f
-                    anchorZoom = 2f
+                    val targetZoom = postCalibrationZoomFor(selectedLens)
+                    currentEquivRatio = targetZoom
+                    anchorZoom = targetZoom
                     anchorActive = true
-                    updateCenterFromAnchorForZoom(2f)
+                    updateCenterFromAnchorForZoom(targetZoom)
                     showCalPanel = false
                 },
                 onClose = {
@@ -1633,8 +1689,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (isCameraReady && !showCalPanel && !showDualCalPanel) {
             ZoomSlider(
                 currentRatio = currentEquivRatio,
-                minRatio = 1f,
-                maxRatio = if (isDualCalibMode) dualTelephotoMag.toFloat() else 8f,
+                minRatio = if (isDualCalibMode) 1f else normalMinZoomFor(selectedLens),
+                maxRatio = if (isDualCalibMode) {
+                    dualTelephotoMag.toFloat()
+                } else {
+                    normalMaxZoomFor(selectedLens)
+                },
                 labelSuffix = if (isDualCalibMode) {
                     if (isUsingDualTele) " (T)" else " (W)"
                 } else {
@@ -1898,12 +1958,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         val y = coordInputY.toDoubleOrNull()
                         if (x != null && y != null) {
                             val point = LaserPoint(x.coerceIn(0.0, 1079.0), y.coerceIn(0.0, 1919.0))
+                            val targetZoom = postCalibrationZoomFor(selectedLens)
                             anchorCenter1x = point
                             lastResultText = "已锁定: (${point.x.toInt()}, ${point.y.toInt()})"
-                            currentEquivRatio = 2f
-                            anchorZoom = 2f
+                            currentEquivRatio = targetZoom
+                            anchorZoom = targetZoom
                             anchorActive = true
-                            updateCenterFromAnchorForZoom(2f)
+                            updateCenterFromAnchorForZoom(targetZoom)
                             showCoordInputDialog = false
                         }
                     }) { Text("确认") }

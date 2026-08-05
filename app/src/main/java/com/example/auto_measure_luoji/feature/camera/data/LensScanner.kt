@@ -61,7 +61,8 @@ class LensScanner(private val context: Context) {
                     val candidate = buildCandidate(
                         logicalCameraId = cameraId,
                         physicalId = physicalId,
-                        chars = physicalChars
+                        chars = physicalChars,
+                        logicalChars = chars,
                     )
                     if (candidate != null) candidates.add(candidate)
                 }
@@ -70,7 +71,8 @@ class LensScanner(private val context: Context) {
                 val candidate = buildCandidate(
                     logicalCameraId = cameraId,
                     physicalId = null,
-                    chars = chars
+                    chars = chars,
+                    logicalChars = chars,
                 )
                 if (candidate != null) candidates.add(candidate)
             }
@@ -85,7 +87,8 @@ class LensScanner(private val context: Context) {
     private fun buildCandidate(
         logicalCameraId: String,
         physicalId: String?,
-        chars: CameraCharacteristics
+        chars: CameraCharacteristics,
+        logicalChars: CameraCharacteristics,
     ): LensCandidate? {
         // 焦距数组
         val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
@@ -99,9 +102,13 @@ class LensScanner(private val context: Context) {
 
         // 活跃像素区域
         val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return null
+        val logicalActiveArray = logicalChars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            ?: activeArray
 
         // 最大数码变焦
         val maxDigitalZoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+        val logicalMaxDigitalZoom = logicalChars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
+            ?: maxDigitalZoom
 
         // 逻辑 zoom 范围
         val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -110,8 +117,17 @@ class LensScanner(private val context: Context) {
         } else {
             android.util.Range(1f, 1f)
         }
+        val logicalZoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            logicalChars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                ?: zoomRange
+        } else {
+            zoomRange
+        }
 
         val oisSupported = chars
+            .get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+            ?.contains(CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON) == true
+        val logicalOisSupported = logicalChars
             .get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
             ?.contains(CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON) == true
 
@@ -137,6 +153,10 @@ class LensScanner(private val context: Context) {
             maxDigitalZoom = maxDigitalZoom,
             zoomRatioRange = zoomRange,
             oisSupported = oisSupported,
+            logicalActiveArray = logicalActiveArray,
+            logicalMaxDigitalZoom = logicalMaxDigitalZoom,
+            logicalZoomRatioRange = logicalZoomRange,
+            logicalOisSupported = logicalOisSupported,
             eq35mm = eq35mm,
             category = category
         )
