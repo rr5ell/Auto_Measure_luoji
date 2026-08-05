@@ -1,4 +1,4 @@
-# Auto_measure
+# Auto_Measure_luoji
 
 Android 自动测量工具应用。
 
@@ -20,7 +20,7 @@ Android 自动测量工具应用。
 ## 项目结构
 
 ```
-app/src/main/java/com/example/auto_measure/
+app/src/main/java/com/example/auto_measure_luoji/
 ├── feature/                # 功能模块（每个功能独立文件夹）
 │   ├── camera/            # 相机预览与镜头控制
 │   │   ├── ui/           #   CameraScreen, ZoomSlider, CrosshairOverlay
@@ -77,9 +77,9 @@ app/src/main/java/com/example/auto_measure/
 - 校准面板：距离输入、采集、应用目标距离；距离输入为空且 BLE 已连接时会自动测距、回填距离并采集；绿光识别失败会提示并允许重试
 
 ### 绿光算法对比 App
-- 普通 Debug 包：`.\gradlew.bat :app:assembleDebug`，包名 `com.example.auto_measure`
-- 绿光对比包：`.\gradlew.bat :app:assembleLaserCompare`，包名 `com.example.auto_measure.lasercompare`
-- 对比包应用名为 `Auto_measure 绿光对比`，可与主 App 同时安装，用于真机验证新旧绿光算法坐标差
+- 普通 Debug 包：`.\gradlew.bat :app:assembleDebug`，包名 `com.example.auto_measure_luoji`
+- 绿光对比包：`.\gradlew.bat :app:assembleLaserCompare`，包名 `com.example.auto_measure_luoji.lasercompare`
+- 对比包应用名为 `Auto_Measure_luoji 绿光对比`，可与主 App 同时安装，用于真机验证新旧绿光算法坐标差
 - 对比包顶部固定显示 `绿光对比` 按钮；主包通过 `更多 -> 绿光识别` 打开普通绿光对比入口
 
 ### 双镜头校准 (v0.7.0)

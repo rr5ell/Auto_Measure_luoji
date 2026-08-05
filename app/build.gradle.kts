@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.auto_measure"
+    namespace = "com.example.auto_measure_luoji"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.auto_measure"
+        applicationId = "com.example.auto_measure_luoji"
         minSdk = 24
         targetSdk = 36
         versionCode = 825

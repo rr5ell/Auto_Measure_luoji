@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [copy-rename-2026-08-05] - 2026-08-05
+
+### Changed
+- 将副本项目名、应用显示名、`namespace`、`applicationId` 和 Kotlin 包路径改为 `Auto_Measure_luoji / com.example.auto_measure_luoji`。
+- `laserCompare` 构建变体包名同步为 `com.example.auto_measure_luoji.lasercompare`，应用名同步为 `Auto_Measure_luoji 绿光对比`。
+
 ## [copy-2026-08-05] - 2026-08-05
 
 ### Added
@@ -171,7 +177,7 @@
 - `LaserDetector` internal `MAX_DIM` resize now uses Pillow `Image.BILINEAR` style separable weighted resampling so Android laser coordinates align with Python `1218.py` offline calibration output.
 - Kept laser thresholds, bright-core refine thresholds, and Camera2 stabilization behavior unchanged; this change only adjusts detector pixel preprocessing.
 - Added legacy laser detector entry points that preserve the previous Android resize path, allowing new-vs-old coordinate comparison on the same frame.
-- Added `laserCompare` build type with package `com.example.auto_measure.lasercompare` and app name `Auto_measure 绿光对比` so the comparison build can be installed beside the main app.
+- Added `laserCompare` build type with package `com.example.auto_measure_luoji.lasercompare` and app name `Auto_measure 绿光对比` so the comparison build can be installed beside the main app.
 - Updated the top `绿光` panel to compare new algorithm vs old resize algorithm, saving `laser_new_marked_*` and `laser_old_marked_*` images plus coordinate delta text.
 - Android build version synchronized to `versionName=0.8.9`, `versionCode=809`.
 

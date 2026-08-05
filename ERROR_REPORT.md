@@ -1,10 +1,26 @@
 # Error Report
 
+## [2026-08-05] 副本 App 标识重复报告
+
+### 发现的问题
+- 复制后仍沿用源项目 `rootProject.name=Auto_measure`、`app_name=Auto_measure`、`applicationId=com.example.auto_measure` 和 `namespace=com.example.auto_measure`。
+- Android Studio 加载项目和手机安装 App 时都会显示为 `Auto_measure`，并且主包会与原 App 包名冲突。
+- 严重程度：高。副本无法和原 App 明确区分，也无法同时安装同名包。
+
+### 解决方案
+- 将项目名和桌面显示名改为 `Auto_Measure_luoji`。
+- 将 `namespace`、`applicationId`、Kotlin 包声明和源码目录迁移到 `com.example.auto_measure_luoji`。
+- 将 `laserCompare` 变体的显示名和包名同步到 `Auto_Measure_luoji 绿光对比` / `com.example.auto_measure_luoji.lasercompare`。
+
+### 预防措施
+- 后续复制 Android 项目后，必须立即区分 `rootProject.name`、`app_name`、`applicationId`、`namespace`、测试断言和源码包路径。
+- 如果只想保留源码包路径不变，也至少必须更换 `applicationId` 和应用显示名，避免安装冲突。
+
 ## [2026-08-05] 项目复制风险报告
 
 ### 发现的问题
 - 目标目录 `E:\StudioProjects\Auto_Measure_luoji` 原本是未纳入 Git 的 Android 模板项目，直接覆盖会难以恢复旧状态。
-- 目标模板包名 `com.example.auto_measure_luoji` 与源项目包名 `com.example.auto_measure` 并存时可能造成编译噪声或入口混乱。
+- 目标模板包名 `com.example.auto_measure_luoji` 与源项目原包名 `com.example.auto_measure` 并存时可能造成编译噪声或入口混乱。
 - 源项目代码资产库中记录了 `E:\StudioProjects\Auto_measure` 的绝对路径，复制后如果不修正会误导后续复用定位。
 - 严重程度：中。主要影响复制可回滚性、项目路径索引准确性和后续维护。
 
@@ -369,7 +385,7 @@
 - 严重程度：中。功能存在但发现成本高，影响新旧算法对比验证。
 
 ### 解决方案
-- 通过包名判断当前是否为 `com.example.auto_measure.lasercompare`。
+- 通过包名判断当前是否为 `com.example.auto_measure_luoji.lasercompare`。
 - 对比包在顶部第二行最左侧固定显示 `绿光对比/对比中` 按钮。
 - 对比包隐藏第一行普通 `绿光` 按钮；主 App 保持原入口不变。
 

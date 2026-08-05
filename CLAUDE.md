@@ -1,8 +1,8 @@
-# Auto_measure 项目开发行为规范
+# Auto_Measure_luoji 项目开发行为规范
 
 ## 项目概述
 
-Auto_measure 是一款 Android 自动测量工具应用，基于 Kotlin + Jetpack Compose 构建。
+Auto_Measure_luoji 是一款 Android 自动测量工具应用，基于 Kotlin + Jetpack Compose 构建。
 
 ---
 
@@ -11,7 +11,7 @@ Auto_measure 是一款 Android 自动测量工具应用，基于 Kotlin + Jetpac
 每个功能必须有独立的文件夹，采用 feature-based 分层架构：
 
 ```
-app/src/main/java/com/example/auto_measure/
+app/src/main/java/com/example/auto_measure_luoji/
 ├── feature/                         # 功能模块根目录
 │   ├── camera/                     # 相机拍摄功能
 │   │   ├── ui/                     #   界面层（Composable）

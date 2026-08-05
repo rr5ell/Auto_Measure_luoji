@@ -33,7 +33,7 @@
 | `laserCompareEnabled` | `Boolean` | `false` | 识别开关状态 | 触发单次识别，完成后自动恢复 false |
 | `uint8Bytes` | `ByteArray` | 无 | `1080x1920` PNG 图片 bytes | 必须可由 `BitmapFactory` 解码 |
 | `normalizedFrame` | `Bitmap` | 无 | 同一帧归一化 Bitmap | 新旧算法 marked 图必须来自同一帧 |
-| `laserCompare` | Android build type | 无 | 独立安装包 | 包名为 `com.example.auto_measure.lasercompare` |
+| `laserCompare` | Android build type | 无 | 独立安装包 | 包名为 `com.example.auto_measure_luoji.lasercompare` |
 | `isLaserCompareApp` | `Boolean` | 包名判断 | 控制对比包专用按钮 | 对比包固定显示 `绿光对比` |
 
 ## 复用方式
