@@ -465,7 +465,7 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
         builder.set(CaptureRequest.SCALER_CROP_REGION, calculateCenteredCrop(lens, zoomRatio))
-        publishZoomState("SCALER_CROP_REGION", zoomRatio.coerceAtLeast(1f), "max=${maxDigitalZoomForCurrentMode(lens)}")
+        publishZoomState("SCALER_CROP_REGION", zoomRatio.coerceAtLeast(1f), "unbounded crop")
     }
 
     private fun publishZoomState(backend: String, ratio: Float, detail: String) {
@@ -482,7 +482,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun calculateCenteredCrop(lens: LensCandidate, zoomRatio: Float): android.graphics.Rect {
         val array = activeArrayForCurrentMode(lens)
-        val zoom = zoomRatio.coerceIn(1f, maxDigitalZoomForCurrentMode(lens).coerceAtLeast(1f))
+        val zoom = zoomRatio.coerceAtLeast(1f)
         val cropW = ((array.width() / zoom).toInt() and 0xFFFFFFFE.toInt()).coerceAtLeast(2)
         val cropH = ((array.height() / zoom).toInt() and 0xFFFFFFFE.toInt()).coerceAtLeast(2)
         val left = (array.centerX() - cropW / 2).coerceIn(array.left, array.right - cropW)
@@ -505,10 +505,6 @@ class Camera2Controller(private val context: Context) {
 
     private fun activeArrayForCurrentMode(lens: LensCandidate): android.graphics.Rect {
         return if (currentStrictPhysical) lens.activeArray else lens.logicalActiveArray
-    }
-
-    private fun maxDigitalZoomForCurrentMode(lens: LensCandidate): Float {
-        return if (currentStrictPhysical) lens.maxDigitalZoom else lens.logicalMaxDigitalZoom
     }
 
     private fun zoomRatioRangeForCurrentMode(lens: LensCandidate): Range<Float> {

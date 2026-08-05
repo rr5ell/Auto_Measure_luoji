@@ -19,6 +19,7 @@
 - 倍率放大优先使用 Camera2 `CONTROL_ZOOM_RATIO`；UI wrapper 只用于校准点居中和平移覆盖，不得重新承担普通倍率放大。
 - 普通预览即使选中物理长焦候选，也必须打开父逻辑相机；只有双摄校准 `strictPhysical=true` 时才允许绑定物理子镜头。
 - 普通模式倍率滑块最小值必须是最大焦距候选相对同一逻辑相机广角的光学基准倍率，禁止固定回 `1x`。
+- 普通模式倍率滑块最大值不得按 `maxDigitalZoom` 或 `CONTROL_ZOOM_RATIO_RANGE` 做应用层固定上限；超出 `CONTROL_ZOOM_RATIO_RANGE` 时允许 `Camera2Controller` 回退中心 crop。
 - Camera2 zoom 后端选择必须通过 `zoom: backend=...` 摘要暴露到 `Camera2Ctrl`、`CameraScreen` 和主界面状态区，方便真机验证。
 - `ZoomController.applyZoom()` 只能委托 `Camera2Controller.setZoomRatio()`；锚点 crop 方法属于历史实验路径，不能作为普通倍率默认实现。
 - 普通校准开始时，若当前镜头为 `LensCategory.WIDE`，必须先将 Camera2 倍率切到 `5x` 再采集；可用倍率不足时记录实际请求倍率。

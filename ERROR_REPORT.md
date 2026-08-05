@@ -1,5 +1,23 @@
 # Error Report
 
+## [2026-08-05] 普通预览最大倍率固定上限报告
+
+### 发现的问题
+- 普通模式倍率最大值仍按父逻辑相机 `maxDigitalZoom` / `CONTROL_ZOOM_RATIO_RANGE` 做应用层限制，不能满足普通预览最大倍数“不限制”的要求。
+- 普通广角校准 5x 也会被应用层最大可用倍率提前截断，状态文案仍提示“当前广角最大仅 x”。
+- 严重程度：中。普通预览可用倍率被应用层提前卡住，真机上无法继续验证更高倍率 crop 效果。
+
+### 解决方案
+- `ZoomSlider.maxRatio` 改为可空；普通模式传入 `null`，右侧显示 `不限`，滑块上界随当前倍率动态扩展。
+- `normalMinZoomFor()` / `clampNormalZoom()` 只保留最大焦距对应光学基准倍率下限，不再计算或裁剪普通最大倍率。
+- `Camera2Controller` 的中心 crop fallback 不再按 `maxDigitalZoom` 截断请求倍率；`CONTROL_ZOOM_RATIO` 范围外请求直接走 crop 回退。
+- 双摄像头校准 `applyDualZoom()`、`strictPhysical` 物理镜头路径和 `1x..长焦倍率` 范围保持不变。
+
+### 预防措施
+- 后续普通模式倍率逻辑禁止重新引入 `coerceAtMost(maxDigitalZoom)` 或 `normalMaxZoomFor()` 之类固定上限。
+- 普通模式最大“不限制”指不做应用层固定最大裁剪；实际画面效果仍需通过真机 HAL 行为和 `zoom: backend=...` 日志确认。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-05] 普通相机物理镜头与倍率下限报告
 
 ### 发现的问题

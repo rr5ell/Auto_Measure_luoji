@@ -462,10 +462,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         return findWideLens(sameLogical.ifEmpty { candidates })
     }
 
-    fun maxSupportedZoom(lens: LensCandidate): Float {
-        return maxOf(lens.logicalMaxDigitalZoom, lens.logicalZoomRatioRange.upper).coerceAtLeast(1f)
-    }
-
     fun normalMinZoomFor(lens: LensCandidate?): Float {
         if (lens == null) return 1f
         val wide = findWideLensInSameLogicalCamera(lens, lensCandidates)
@@ -474,20 +470,15 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         } else {
             1f
         }
-        return rawOpticalBase.coerceIn(1f, maxSupportedZoom(lens))
-    }
-
-    fun normalMaxZoomFor(lens: LensCandidate?): Float {
-        if (lens == null) return 1f
-        return maxSupportedZoom(lens).coerceAtLeast(normalMinZoomFor(lens))
+        return rawOpticalBase.coerceAtLeast(1f)
     }
 
     fun clampNormalZoom(zoom: Float, lens: LensCandidate?): Float {
-        return zoom.coerceIn(normalMinZoomFor(lens), normalMaxZoomFor(lens))
+        return zoom.coerceAtLeast(normalMinZoomFor(lens))
     }
 
     fun postCalibrationZoomFor(lens: LensCandidate?): Float {
-        return max(2f, normalMinZoomFor(lens)).coerceAtMost(normalMaxZoomFor(lens))
+        return max(2f, normalMinZoomFor(lens))
     }
 
     fun applyLensSwitch(target: LensCandidate, message: String) {
@@ -560,7 +551,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     fun prepareSingleCalibrationZoom(): Float {
         val lens = selectedLens
         val targetZoom = if (lens?.category == LensCategory.WIDE) {
-            min(WIDE_CALIBRATION_ZOOM, maxSupportedZoom(lens))
+            WIDE_CALIBRATION_ZOOM
         } else {
             clampNormalZoom(currentEquivRatio, lens)
         }
@@ -570,11 +561,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         currentCenterPx = null
         cameraController.setZoomRatio(targetZoom)
         statusText = if (lens?.category == LensCategory.WIDE) {
-            if (targetZoom == WIDE_CALIBRATION_ZOOM) {
-                "普通校准：广角镜头已切到 5x"
-            } else {
-                "普通校准：当前广角最大仅 ${"%.1f".format(targetZoom)}x"
-            }
+            "普通校准：广角镜头已请求 5x"
         } else {
             "普通校准：保持当前 ${"%.1f".format(targetZoom)}x"
         }
@@ -1693,7 +1680,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 maxRatio = if (isDualCalibMode) {
                     dualTelephotoMag.toFloat()
                 } else {
-                    normalMaxZoomFor(selectedLens)
+                    null
                 },
                 labelSuffix = if (isDualCalibMode) {
                     if (isUsingDualTele) " (T)" else " (W)"
