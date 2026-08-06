@@ -42,6 +42,8 @@ class Camera2Controller(private val context: Context) {
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var pendingZoomRatio: Float = 1f
     private var oisRequested: Boolean = false
+    private var lastActivePhysicalCameraId: String? = null
+    private var hasPublishedActivePhysicalCameraId: Boolean = false
     private var pendingExposureCompensationEv: Float = 0f
     private var exposureCompensationRange: Range<Int> = Range(0, 0)
     private var exposureCompensationStep: Rational = Rational(1, 1)
@@ -58,6 +60,7 @@ class Camera2Controller(private val context: Context) {
     var onOisEnableFailed: ((String) -> Unit)? = null
     var onZoomStateChanged: ((String) -> Unit)? = null
     var onExposureStateChanged: ((String) -> Unit)? = null
+    var onActivePhysicalCameraChanged: ((String?) -> Unit)? = null
 
     val isActive: Boolean get() = cameraDevice != null
     private var surfaceTexture: SurfaceTexture? = null
@@ -89,6 +92,8 @@ class Camera2Controller(private val context: Context) {
         currentStrictPhysical = strictPhysical &&
             lens.physicalId != null &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        lastActivePhysicalCameraId = null
+        hasPublishedActivePhysicalCameraId = false
 
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val chars = manager.getCameraCharacteristics(lens.cameraId)
@@ -250,14 +255,14 @@ class Camera2Controller(private val context: Context) {
         val usedControlZoom = applyPreferredZoom(builder, lens, pendingZoomRatio)
 
         try {
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
             onCameraOpened?.invoke()
         } catch (e: Exception) {
             if (usedControlZoom) {
                 Log.w("Camera2Ctrl", "CONTROL_ZOOM_RATIO failed on startPreview, fallback to SCALER_CROP_REGION", e)
                 applyCropZoom(builder, lens, pendingZoomRatio)
                 try {
-                    session.setRepeatingRequest(builder.build(), null, cameraHandler)
+                    session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
                     onCameraOpened?.invoke()
                 } catch (fallback: Exception) {
                     onError?.invoke(fallback.message ?: "Preview request failed")
@@ -276,7 +281,7 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
         builder.set(CaptureRequest.SCALER_CROP_REGION, crop)
-        try { session.setRepeatingRequest(builder.build(), null, cameraHandler) } catch (_: Exception) {}
+        try { session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler) } catch (_: Exception) {}
     }
 
     fun setZoomRatio(zoomRatio: Float) {
@@ -287,12 +292,12 @@ class Camera2Controller(private val context: Context) {
         val session = captureSession ?: return
         val usedControlZoom = applyPreferredZoom(builder, lens, pendingZoomRatio)
         try {
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
         } catch (e: Exception) {
             if (usedControlZoom) {
                 Log.w("Camera2Ctrl", "CONTROL_ZOOM_RATIO failed, fallback to SCALER_CROP_REGION", e)
                 applyCropZoom(builder, lens, pendingZoomRatio)
-                try { session.setRepeatingRequest(builder.build(), null, cameraHandler) } catch (_: Exception) {}
+                try { session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler) } catch (_: Exception) {}
             }
         }
     }
@@ -303,7 +308,7 @@ class Camera2Controller(private val context: Context) {
         val session = captureSession ?: return Result.success(0)
         val compensationSteps = applyExposureCompensation(builder)
         return try {
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
             Result.success(compensationSteps)
         } catch (e: Exception) {
             Log.w("Camera2Ctrl", "Exposure compensation request failed", e)
@@ -353,7 +358,7 @@ class Camera2Controller(private val context: Context) {
 
         applyStabilization(builder, lens, notifyUnsupported = false)
         return try {
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
             val enabledNow = enabled && isOisSupported(lens)
             onOisStateChanged?.invoke(enabledNow)
             Log.d("Camera2Ctrl", ">>> OIS ${if (enabledNow) "ON" else "OFF"}")
@@ -501,6 +506,34 @@ class Camera2Controller(private val context: Context) {
         try { analysisImageReader?.close() } catch (_: Exception) {}
         analysisImageReader = null
         if (wasActive) onCameraClosed?.invoke()
+    }
+
+    private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult,
+        ) {
+            publishActivePhysicalCameraId(result)
+        }
+    }
+
+    @SuppressLint("NewApi")
+    private fun publishActivePhysicalCameraId(result: TotalCaptureResult) {
+        val activeId = if (currentStrictPhysical) {
+            currentLens?.physicalId ?: currentLens?.cameraId
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+        } else {
+            null
+        }
+
+        if (!hasPublishedActivePhysicalCameraId || activeId != lastActivePhysicalCameraId) {
+            hasPublishedActivePhysicalCameraId = true
+            lastActivePhysicalCameraId = activeId
+            Log.i("Camera2Ctrl", "active-physical-camera: ${activeId ?: "not reported"}")
+            onActivePhysicalCameraChanged?.invoke(activeId)
+        }
     }
 
     private fun activeArrayForCurrentMode(lens: LensCandidate): android.graphics.Rect {

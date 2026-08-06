@@ -28,6 +28,7 @@
 | android-camera-top-action-two-row-layout | 相机页顶部按钮两行布局 | android, kotlin, compose, camera-ui, toolbar-layout | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | superseded |
 | android-camera-top-action-collapsible-menu | 相机页顶部按钮折叠菜单与广角切换 | android, kotlin, compose, camera-ui, toolbar-layout, lens-switch | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-camera2-control-zoom-ratio-preview-zoom | Camera2 CONTROL_ZOOM_RATIO 倍率放大 | android, kotlin, camera2, zoom, control-zoom-ratio, coordinate-map | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/util/ZoomController.kt` | active |
+| android-camera2-active-physical-lens-display | 当前画面活跃物理镜头焦距显示 | android, kotlin, camera2, logical-multi-camera, active-physical-id, lens-display | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/data/LensScanner.kt` | active |
 
 ## 参考资产
 
@@ -37,4 +38,4 @@
 
 ## 最后更新
 
-2026-08-05，Codex Agent。普通预览已改为父逻辑相机 + 光学基准倍率下限上浮 0.1x + 最大倍率固定 24x；双摄校准物理绑定路径不变。
+2026-08-06，Codex Agent。新增当前画面 active physical id 监听和物理镜头焦距显示；普通预览保持父逻辑相机 + 光学基准倍率下限上浮 0.1x + 最大倍率固定 24x，双摄校准物理绑定路径不变。

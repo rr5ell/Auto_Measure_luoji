@@ -1,5 +1,22 @@
 # Error Report
 
+## [2026-08-06] 当前画面物理镜头焦距不可见报告
+
+### 发现的问题
+- 普通预览使用逻辑摄像头后，界面只能看到选中的候选镜头和 zoom 后端，无法确认当前画面实际来自哪个物理焦距镜头。
+- 只按 `selectedLens` 推断会误导真机验证，因为逻辑多摄可能由厂商 HAL 在不同倍率下切换或融合物理镜头。
+- 严重程度：中。无法判断当前画面是否真的切到长焦，也不利于排查逻辑摄像头融合行为。
+
+### 解决方案
+- `Camera2Controller` 为 repeating request 增加 `CaptureCallback`，从 `TotalCaptureResult` 读取 `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`。
+- `CameraScreen` 将 active physical id 映射到 `LensScanner` 扫描出的 `LensCandidate`，在状态区显示实际焦距、等效 35mm 焦距和镜头 ID。
+- strict physical 模式直接回报绑定的物理镜头 ID；逻辑相机未上报时明确显示“未上报 activePhysicalId”，不伪装成已确认焦距。
+
+### 预防措施
+- 后续判断“当前画面用哪个焦距镜头”必须优先使用 capture result 的 active physical id，不得只看 `selectedLens`。
+- 该显示只反映厂商 HAL 回报的 active physical id；如果设备仍做融合或不回传，需要结合真机画面和日志验证。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-05] 普通预览 24x 上限与 0.1x 下限偏移报告
 
 ### 发现的问题

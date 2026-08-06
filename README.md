@@ -56,6 +56,7 @@ app/src/main/java/com/example/auto_measure_luoji/
 - `广角/广角中` 收纳在 `更多` 菜单中，可在主界面切换到广角镜头；已在广角时再次点击会切回默认镜头，校准流程中禁用
 - 进入普通预览后直接放大到最大焦距对应的光学基准倍率 + `0.1x`，倍率滑块最低只能回到该上浮后的基准倍率，最高固定为 `24x`
 - 倍率滑块使用父逻辑相机 Camera2 `CONTROL_ZOOM_RATIO` 优先链路执行数码放大；请求超出设备 `CONTROL_ZOOM_RATIO_RANGE` 时回退 `SCALER_CROP_REGION`
+- 主界面状态区会显示当前画面实际活跃物理镜头的焦距和等效 35mm 焦距；如果厂商 HAL 未回传 `activePhysicalId`，会显示未上报
 - 主界面状态区会显示最近一次 `zoom: backend=...`，应用内 Log 面板也会显示 `Camera2Ctrl` / `CameraScreen` 的 zoom 日志
 - 历史 `ZoomController.applyZoom()` 已委托到同一 Camera2 zoom 链路，避免普通倍率重新变成纯 crop 或 UI 放大
 - 当前镜头为广角镜头时，普通校准开始会请求 5x 采集；请求超出 `CONTROL_ZOOM_RATIO_RANGE` 时由中心 crop 回退处理

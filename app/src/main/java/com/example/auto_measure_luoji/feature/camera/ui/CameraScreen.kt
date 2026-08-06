@@ -184,6 +184,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var wrapperTy by remember { mutableFloatStateOf(0f) }
     var wrapperScale by remember { mutableFloatStateOf(1f) }
     var zoomBackendText by remember { mutableStateOf("") }
+    var activePhysicalCameraId by remember { mutableStateOf<String?>(null) }
+    var activePhysicalLensReported by remember { mutableStateOf(false) }
 
     // 检测状态
     var modelLoadStatus by remember { mutableStateOf("未加载") }
@@ -439,6 +441,28 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         val magText = mag?.let { " ${it}x" } ?: ""
         val physicalText = lens.physicalId?.let { "物理#$it" } ?: "逻辑#${lens.cameraId}"
         return "${lens.category}$magText · ${"%.1f".format(lens.eq35mm)}mm · $physicalText"
+    }
+
+    fun lensByCameraId(cameraId: String?): LensCandidate? {
+        if (cameraId == null) return null
+        return lensCandidates.firstOrNull { it.physicalId == cameraId }
+            ?: lensCandidates.firstOrNull { it.physicalId == null && it.cameraId == cameraId }
+    }
+
+    fun activeFrameLensText(): String {
+        if (!isCameraReady) return ""
+        if (!activePhysicalLensReported) return "画面镜头: 等待回传"
+        val activeId = activePhysicalCameraId
+            ?: return "画面镜头: 未上报 activePhysicalId"
+        val lens = lensByCameraId(activeId)
+            ?: return "画面镜头: id=$activeId (未匹配焦距)"
+        return String.format(
+            Locale.US,
+            "画面镜头: %.1fmm / eq%.0fmm (id=%s)",
+            lens.focalLength,
+            lens.eq35mm,
+            activeId,
+        )
     }
 
     fun findWideLens(candidates: List<LensCandidate>): LensCandidate? {
@@ -753,7 +777,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(Unit) {
         cameraController.onCameraOpened = { isCameraReady = true; statusText = "相机已打开" }
-        cameraController.onCameraClosed = { isCameraReady = false }
+        cameraController.onCameraClosed = {
+            isCameraReady = false
+            activePhysicalCameraId = null
+            activePhysicalLensReported = false
+        }
         cameraController.onError = { msg -> isCameraReady = false; statusText = "错误: $msg" }
         cameraController.onOisStateChanged = { enabled -> oisEnabled = enabled }
         cameraController.onOisEnableFailed = { msg ->
@@ -769,6 +797,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         cameraController.onExposureStateChanged = { msg ->
             mainHandler.post {
                 Log.i("CameraScreen", msg)
+            }
+        }
+        cameraController.onActivePhysicalCameraChanged = { cameraId ->
+            mainHandler.post {
+                activePhysicalCameraId = cameraId
+                activePhysicalLensReported = true
+                Log.i("CameraScreen", "active-physical-camera: ${cameraId ?: "not reported"}")
             }
         }
     }
@@ -1341,6 +1376,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         statResultText.isNotEmpty() -> statResultText
                         else -> ""
                     },
+                    lensText = activeFrameLensText(),
                     zoomText = zoomBackendText,
                     anchorText = if (anchorActive && anchorCenter1x != null) {
                         val a = anchorCenter1x!!
@@ -2307,11 +2343,12 @@ private fun StatusHud(
     statusText: String,
     modelText: String,
     statText: String,
+    lensText: String,
     zoomText: String,
     anchorText: String,
     modifier: Modifier = Modifier,
 ) {
-    val lines = listOf(statusText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
+    val lines = listOf(statusText, lensText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
     if (lines.isEmpty()) return
 
     Column(
@@ -2321,11 +2358,12 @@ private fun StatusHud(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        lines.take(4).forEachIndexed { index, text ->
+        lines.take(5).forEachIndexed { index, text ->
             Text(
                 text = text,
                 color = when {
                     index == 0 -> Color.White.copy(alpha = 0.9f)
+                    text.startsWith("画面镜头") -> Color(0xFFA5D6A7)
                     text.startsWith("模型") -> Color(0xFFFF7043)
                     text.startsWith("统计") -> Color(0xFF64B5F6)
                     text.startsWith("zoom") -> Color(0xFF90CAF9)

@@ -21,6 +21,7 @@
 - 普通模式倍率滑块最小值必须是最大焦距候选相对同一逻辑相机广角的光学基准倍率 + `0.1x`，禁止固定回 `1x` 或原始光学基准倍率。
 - 普通模式倍率滑块最大值固定为 `24x`；不得按 `maxDigitalZoom` 或 `CONTROL_ZOOM_RATIO_RANGE` 改写该上限。
 - Camera2 zoom 后端选择必须通过 `zoom: backend=...` 摘要暴露到 `Camera2Ctrl`、`CameraScreen` 和主界面状态区，方便真机验证。
+- 当前画面物理焦距必须优先读取 `CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID` 并映射到 `LensCandidate`；禁止只用 `selectedLens` 推断逻辑相机实际画面来源。
 - `ZoomController.applyZoom()` 只能委托 `Camera2Controller.setZoomRatio()`；锚点 crop 方法属于历史实验路径，不能作为普通倍率默认实现。
 - 普通校准开始时，若当前镜头为 `LensCategory.WIDE`，必须先将 Camera2 倍率请求到 `5x` 再采集；请求超出设备 `CONTROL_ZOOM_RATIO_RANGE` 时允许中心 crop 回退。
 - 普通校准在长焦/非广角镜头下保持当前逻辑相机倍率采集，不得低于普通模式光学基准倍率 + `0.1x`。
