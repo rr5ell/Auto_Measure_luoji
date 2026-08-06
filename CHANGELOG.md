@@ -5,11 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-active-lens-eq35-display-2026-08-06] - 2026-08-06
+
+### Changed
+- 当前画面镜头状态行改为只用 `35mm等效 xxmm` 显示焦距，并保留 active physical id。
+
 ## [camera-active-physical-lens-2026-08-06] - 2026-08-06
 
 ### Added
 - `Camera2Controller` repeating request 改为带 `CaptureCallback`，监听 `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`。
-- 主界面 `StatusHud` 新增当前画面镜头行，显示实际焦距、等效 35mm 焦距和 active physical id。
+- 主界面 `StatusHud` 新增当前画面镜头行，用 35mm 等效焦距显示 active physical id 对应的物理镜头。
 - strict physical 物理镜头模式下直接回报绑定的物理镜头 ID；逻辑相机未回传时显示“未上报 activePhysicalId”。
 
 ## [camera-normal-zoom-24-2026-08-05] - 2026-08-05

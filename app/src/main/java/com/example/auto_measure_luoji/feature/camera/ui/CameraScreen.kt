@@ -458,8 +458,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             ?: return "画面镜头: id=$activeId (未匹配焦距)"
         return String.format(
             Locale.US,
-            "画面镜头: %.1fmm / eq%.0fmm (id=%s)",
-            lens.focalLength,
+            "画面镜头: 35mm等效 %.0fmm (id=%s)",
             lens.eq35mm,
             activeId,
         )

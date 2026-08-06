@@ -1,5 +1,19 @@
 # Error Report
 
+## [2026-08-06] 当前画面镜头焦距显示格式报告
+
+### 发现的问题
+- 当前画面镜头状态行同时显示实际焦距和等效 35mm 焦距，不符合只用 35mm 等效焦距展示的需求。
+- 严重程度：低。功能可用，但真机观察时读数不够直接。
+
+### 解决方案
+- 将状态行格式改为 `画面镜头: 35mm等效 xxmm (id=...)`。
+- 保留 active physical id 映射逻辑和未上报提示，不改变相机打开方式、倍率逻辑或双摄校准逻辑。
+
+### 预防措施
+- 后续 UI 显示当前画面焦距时，优先展示 `LensCandidate.eq35mm`，不要把物理实际焦距放在主读数位置。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-06] 当前画面物理镜头焦距不可见报告
 
 ### 发现的问题
@@ -9,7 +23,7 @@
 
 ### 解决方案
 - `Camera2Controller` 为 repeating request 增加 `CaptureCallback`，从 `TotalCaptureResult` 读取 `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`。
-- `CameraScreen` 将 active physical id 映射到 `LensScanner` 扫描出的 `LensCandidate`，在状态区显示实际焦距、等效 35mm 焦距和镜头 ID。
+- `CameraScreen` 将 active physical id 映射到 `LensScanner` 扫描出的 `LensCandidate`，在状态区用 35mm 等效焦距显示镜头 ID。
 - strict physical 模式直接回报绑定的物理镜头 ID；逻辑相机未上报时明确显示“未上报 activePhysicalId”，不伪装成已确认焦距。
 
 ### 预防措施

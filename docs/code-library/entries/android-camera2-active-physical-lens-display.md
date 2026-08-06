@@ -17,7 +17,7 @@
 
 ## 适用场景
 - 需要在逻辑多摄预览中确认当前画面实际活跃的物理镜头 ID。
-- 需要把 active physical id 映射成真实焦距和等效 35mm 焦距，辅助判断是否切到长焦或仍在融合/广角路径。
+- 需要把 active physical id 映射成 35mm 等效焦距，辅助判断是否切到长焦或仍在融合/广角路径。
 
 ## 禁止场景
 - 禁止只用 `selectedLens` 判断当前画面物理来源；逻辑相机实际活跃镜头由厂商 HAL 决定。
@@ -35,7 +35,7 @@
 ## 复用方式
 - `Camera2Controller` 的 repeating request 必须传入统一 `CaptureCallback`，在 `onCaptureCompleted()` 中读取 active physical id。
 - strict physical 模式可直接回报当前绑定的 `physicalId`；逻辑模式优先读取 `CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`。
-- `CameraScreen` 通过 `LensScanner` 扫描得到的 `LensCandidate` 映射焦距，显示格式为实际焦距、等效 35mm 焦距和 id。
+- `CameraScreen` 通过 `LensScanner` 扫描得到的 `LensCandidate.eq35mm` 映射焦距，显示格式为 35mm 等效焦距和 id。
 
 ## 注意事项
 - active physical id 是厂商 HAL 回报的当前主活跃物理镜头，不一定能完整描述多帧融合或厂商私有处理。
