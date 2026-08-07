@@ -1,5 +1,23 @@
 # Error Report
 
+## [2026-08-07] 普通预览物理输出绑定报告
+
+### 发现的问题
+- 普通预览虽然打开父逻辑相机，但预览输出仍可能由厂商 HAL 做逻辑多摄融合或自动切换，不能明确保证画面来自最大焦距物理镜头。
+- `OutputConfiguration.setPhysicalCameraId()` 已在双摄校准物理路径使用，但普通预览尚未复用该能力绑定预览 Surface。
+- 严重程度：中。普通模式难以绕开逻辑多摄融合，也不利于验证最大焦距镜头真实画面。
+
+### 解决方案
+- `Camera2Controller.openCamera()` 新增 `bindPhysicalPreview` 参数；普通预览传入 `true` 时，仍打开父逻辑相机 ID，但用 `setPhysicalCameraId()` 绑定预览 Surface 到当前选中物理候选。
+- 默认普通候选仍是最大焦距镜头，因此普通预览默认绑定最大焦距物理输出；手动切换广角时绑定当前选中的广角物理输出。
+- 物理预览输出绑定模式关闭非必要 YUV `ImageReader`，避免部分机型不支持物理预览流 + 逻辑 YUV 流组合。
+- 普通物理预览输出配置失败时回退逻辑 Session；双摄校准 `strictPhysical=true` 仍保持原逻辑，物理 Session 失败直接报错。
+
+### 预防措施
+- 后续普通预览需要绕开融合时，应优先使用 `bindPhysicalPreview=true`，不得改成直接打开物理 camera id。
+- 双摄校准路径继续由 `strictPhysical=true` 控制，不能被普通预览 fallback 策略影响。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-06] 当前画面镜头焦距显示格式报告
 
 ### 发现的问题

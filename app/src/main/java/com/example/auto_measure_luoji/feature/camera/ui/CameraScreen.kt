@@ -861,6 +861,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 lens,
                                 android.view.Surface(st),
                                 strictPhysical = isDualCalibMode && lens.physicalId != null,
+                                bindPhysicalPreview = !isDualCalibMode && lens.physicalId != null,
                             )
                         }
                     }
@@ -906,6 +907,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             lens,
             android.view.Surface(tv.surfaceTexture!!),
             strictPhysical = isDualCalibMode && lens.physicalId != null,
+            bindPhysicalPreview = !isDualCalibMode && lens.physicalId != null,
         )
     }
 

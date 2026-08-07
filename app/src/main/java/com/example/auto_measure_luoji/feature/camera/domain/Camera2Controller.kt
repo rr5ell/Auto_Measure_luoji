@@ -39,6 +39,8 @@ class Camera2Controller(private val context: Context) {
     private var cameraHandler: Handler? = null
     private var currentLens: LensCandidate? = null
     private var currentStrictPhysical: Boolean = false
+    private var currentPhysicalPreviewBound: Boolean = false
+    private var currentPhysicalOutputId: String? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var pendingZoomRatio: Float = 1f
     private var oisRequested: Boolean = false
@@ -87,11 +89,19 @@ class Camera2Controller(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun openCamera(lens: LensCandidate, surface: Surface, strictPhysical: Boolean = false) {
+    fun openCamera(
+        lens: LensCandidate,
+        surface: Surface,
+        strictPhysical: Boolean = false,
+        bindPhysicalPreview: Boolean = false,
+    ) {
         currentLens = lens
+        val canBindPhysicalOutput = lens.physicalId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         currentStrictPhysical = strictPhysical &&
-            lens.physicalId != null &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            canBindPhysicalOutput
+        currentPhysicalPreviewBound = (currentStrictPhysical || bindPhysicalPreview) &&
+            canBindPhysicalOutput
+        currentPhysicalOutputId = if (currentPhysicalPreviewBound) lens.physicalId else null
         lastActivePhysicalCameraId = null
         hasPublishedActivePhysicalCameraId = false
 
@@ -110,14 +120,18 @@ class Camera2Controller(private val context: Context) {
             surfaceTexture?.setDefaultBufferSize(previewSize.width, previewSize.height)
         } catch (_: Exception) {}
 
-        val mode = if (currentStrictPhysical) "strict-physical" else "logical"
+        val mode = when {
+            currentStrictPhysical -> "strict-physical"
+            currentPhysicalPreviewBound -> "logical-physical-preview"
+            else -> "logical"
+        }
         Log.d("Camera2Ctrl", ">>> openCamera: id=${lens.cameraId}, phys=${lens.physicalId}, mode=$mode, previewSize=${previewSize}, sensorOrient=$sensorOrientation")
 
         manager.openCamera(lens.cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
                 Log.d("Camera2Ctrl", ">>> onOpened: ${camera.id}")
                 cameraDevice = camera
-                createSession(camera, lens, surface, strictPhysical)
+                createSession(camera, lens, surface, strictPhysical, bindPhysicalPreview)
             }
             override fun onDisconnected(camera: CameraDevice) {
                 camera.close()
@@ -173,11 +187,15 @@ class Camera2Controller(private val context: Context) {
         lens: LensCandidate,
         surface: Surface,
         strictPhysical: Boolean,
+        bindPhysicalPreview: Boolean,
     ) {
         // 创建检测用 ImageReader (YUV_420_888, maxImages=3)。
-        // 严格物理镜头模式只绑定预览 Surface，避免混入逻辑输出导致物理 session 回退。
+        // 物理输出绑定模式只保留预览 Surface，避免物理流 + 逻辑 YUV 组合在部分机型上配置失败。
+        val usePhysicalOutput = (strictPhysical || bindPhysicalPreview) &&
+            lens.physicalId != null &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         analysisImageReader?.close()
-        analysisImageReader = if (strictPhysical) {
+        analysisImageReader = if (usePhysicalOutput) {
             null
         } else {
             ImageReader.newInstance(
@@ -196,8 +214,7 @@ class Camera2Controller(private val context: Context) {
             analysisImageReader?.surface?.let { addTarget(it) }
         }
 
-        val usePhysical = strictPhysical && lens.physicalId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-        if (usePhysical) createPhysicalSession(camera, lens, surface, strictPhysical)
+        if (usePhysicalOutput) createPhysicalSession(camera, lens, surface, requirePhysical = strictPhysical)
         else createLogicalSession(camera, surface)
     }
 
@@ -206,7 +223,7 @@ class Camera2Controller(private val context: Context) {
         camera: CameraDevice,
         lens: LensCandidate,
         surface: Surface,
-        strictPhysical: Boolean,
+        requirePhysical: Boolean,
     ) {
         try {
             val outputConfig = OutputConfiguration(surface).apply { setPhysicalCameraId(lens.physicalId!!) }
@@ -220,14 +237,20 @@ class Camera2Controller(private val context: Context) {
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) { captureSession = session; startPreview(session) }
                     override fun onConfigureFailed(session: CameraCaptureSession) {
-                        if (strictPhysical) onError?.invoke("Physical session configuration failed")
-                        else createLogicalSession(camera, surface)
+                        if (requirePhysical) {
+                            onError?.invoke("Physical session configuration failed")
+                        } else {
+                            fallbackToLogicalSession(camera, surface, "Physical preview output configuration failed")
+                        }
                     }
                 }
             ))
         } catch (e: Exception) {
-            if (strictPhysical) onError?.invoke(e.message ?: "Physical session failed")
-            else createLogicalSession(camera, surface)
+            if (requirePhysical) {
+                onError?.invoke(e.message ?: "Physical session failed")
+            } else {
+                fallbackToLogicalSession(camera, surface, e.message ?: "Physical preview output failed")
+            }
         }
     }
 
@@ -239,6 +262,15 @@ class Camera2Controller(private val context: Context) {
                 override fun onConfigured(session: CameraCaptureSession) { captureSession = session; startPreview(session) }
                 override fun onConfigureFailed(session: CameraCaptureSession) { onError?.invoke("Session configuration failed") }
             }, cameraHandler)
+    }
+
+    private fun fallbackToLogicalSession(camera: CameraDevice, surface: Surface, reason: String) {
+        Log.w("Camera2Ctrl", "$reason, fallback to logical preview session")
+        currentPhysicalPreviewBound = false
+        currentPhysicalOutputId = null
+        lastActivePhysicalCameraId = null
+        hasPublishedActivePhysicalCameraId = false
+        createLogicalSession(camera, surface)
     }
 
     private fun startPreview(session: CameraCaptureSession) {
@@ -502,6 +534,8 @@ class Camera2Controller(private val context: Context) {
         try { cameraDevice?.close() } catch (_: Exception) {}
         cameraDevice = null
         currentStrictPhysical = false
+        currentPhysicalPreviewBound = false
+        currentPhysicalOutputId = null
         previewRequestBuilder = null
         try { analysisImageReader?.close() } catch (_: Exception) {}
         analysisImageReader = null
@@ -520,8 +554,8 @@ class Camera2Controller(private val context: Context) {
 
     @SuppressLint("NewApi")
     private fun publishActivePhysicalCameraId(result: TotalCaptureResult) {
-        val activeId = if (currentStrictPhysical) {
-            currentLens?.physicalId ?: currentLens?.cameraId
+        val activeId = if (currentPhysicalPreviewBound) {
+            currentPhysicalOutputId ?: currentLens?.physicalId ?: currentLens?.cameraId
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
         } else {
@@ -537,14 +571,14 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun activeArrayForCurrentMode(lens: LensCandidate): android.graphics.Rect {
-        return if (currentStrictPhysical) lens.activeArray else lens.logicalActiveArray
+        return if (currentPhysicalPreviewBound) lens.activeArray else lens.logicalActiveArray
     }
 
     private fun zoomRatioRangeForCurrentMode(lens: LensCandidate): Range<Float> {
-        return if (currentStrictPhysical) lens.zoomRatioRange else lens.logicalZoomRatioRange
+        return if (currentPhysicalPreviewBound) lens.zoomRatioRange else lens.logicalZoomRatioRange
     }
 
     private fun isOisSupported(lens: LensCandidate): Boolean {
-        return if (currentStrictPhysical) lens.oisSupported else lens.logicalOisSupported
+        return if (currentPhysicalPreviewBound) lens.oisSupported else lens.logicalOisSupported
     }
 }

@@ -12,7 +12,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- last_updated: 2026-08-06
+- last_updated: 2026-08-07
 - author: Codex Agent
 
 ## 适用场景
@@ -34,18 +34,18 @@
 
 ## 复用方式
 - `Camera2Controller` 的 repeating request 必须传入统一 `CaptureCallback`，在 `onCaptureCompleted()` 中读取 active physical id。
-- strict physical 模式可直接回报当前绑定的 `physicalId`；逻辑模式优先读取 `CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`。
+- strict physical 和普通物理预览输出绑定模式可直接回报当前绑定的 `physicalId`；纯逻辑模式优先读取 `CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`。
 - `CameraScreen` 通过 `LensScanner` 扫描得到的 `LensCandidate.eq35mm` 映射焦距，显示格式为 35mm 等效焦距和 id。
 
 ## 注意事项
-- active physical id 是厂商 HAL 回报的当前主活跃物理镜头，不一定能完整描述多帧融合或厂商私有处理。
+- active physical id 在普通物理预览输出绑定模式下来自绑定的 `physicalId`；纯逻辑模式下来自厂商 HAL 回报，不一定能完整描述多帧融合或厂商私有处理。
 - 如果设备不回传该字段，UI 必须显示“未上报 activePhysicalId”，再结合画面和 zoom 日志实机判断。
 - 所有 `setRepeatingRequest()` 调用点都要保留同一个 capture callback，否则切 zoom、OIS、曝光补偿后会丢失 active id 监听。
 
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin`
 - 测试命令：`.\gradlew.bat :app:assembleDebug :app:assembleLaserCompare`
-- 已覆盖边界：逻辑相机 active id 回调、strict physical 回报绑定物理 ID、设备未上报时 UI 提示、zoom/OIS/EV repeating request 保持 callback。
+- 已覆盖边界：逻辑相机 active id 回调、strict physical 回报绑定物理 ID、普通物理预览输出回报绑定物理 ID、设备未上报时 UI 提示、zoom/OIS/EV repeating request 保持 callback。
 - 未覆盖风险：不同厂商对 active physical id 的回报频率和融合语义差异。
 
 ## 给 AI 的指令

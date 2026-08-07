@@ -17,7 +17,7 @@
 - `laserCompare` 对比包必须保留固定可见的 `绿光对比` 按钮，不能只藏在 `更多` 菜单里。
 - 镜头切换按钮必须在普通/双镜头校准流程中禁用，切换镜头时需要清理旧锚点和检测框。
 - 倍率放大优先使用 Camera2 `CONTROL_ZOOM_RATIO`；UI wrapper 只用于校准点居中和平移覆盖，不得重新承担普通倍率放大。
-- 普通预览即使选中物理长焦候选，也必须打开父逻辑相机；只有双摄校准 `strictPhysical=true` 时才允许绑定物理子镜头。
+- 普通预览必须打开父逻辑相机 ID，并通过 `bindPhysicalPreview=true` / `OutputConfiguration.setPhysicalCameraId()` 将预览 Surface 绑定到当前选中物理候选；默认候选为最大焦距镜头。只有双摄校准 `strictPhysical=true` 时才允许把物理绑定失败视为致命错误。
 - 普通模式倍率滑块最小值必须是最大焦距候选相对同一逻辑相机广角的光学基准倍率 + `0.1x`，禁止固定回 `1x` 或原始光学基准倍率。
 - 普通模式倍率滑块最大值固定为 `24x`；不得按 `maxDigitalZoom` 或 `CONTROL_ZOOM_RATIO_RANGE` 改写该上限。
 - Camera2 zoom 后端选择必须通过 `zoom: backend=...` 摘要暴露到 `Camera2Ctrl`、`CameraScreen` 和主界面状态区，方便真机验证。

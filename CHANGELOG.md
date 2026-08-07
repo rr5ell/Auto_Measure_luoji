@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-physical-preview-output-2026-08-07] - 2026-08-07
+
+### Changed
+- 普通预览仍打开父逻辑相机 ID，但预览 `Surface` 通过 `OutputConfiguration.setPhysicalCameraId()` 绑定到当前选中物理候选；默认选中候选为最大焦距镜头。
+- 物理预览输出绑定模式关闭非必要 YUV `ImageReader`，降低物理流 + 逻辑流组合导致 Session 配置失败的概率。
+- 普通物理预览输出配置失败时自动回退普通逻辑 Session；双摄校准 `strictPhysical=true` 路径仍保持失败即报错，不做静默回退。
+- 当前画面镜头状态行在物理输出绑定模式下直接显示绑定的 physical id 对应 35mm 等效焦距。
+
 ## [camera-active-lens-eq35-display-2026-08-06] - 2026-08-06
 
 ### Changed
