@@ -5,7 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-logical-preview-restore-2026-08-24] - 2026-08-24
+
+### Changed
+- 普通预览移除 `bindPhysicalPreview` 与 `OutputConfiguration.setPhysicalCameraId()` 物理输出绑定，恢复为父逻辑相机 Session。
+- 普通预览继续保留最大长焦候选、光学基准倍率 + `0.1x` 下限和 `24x` 上限；当前画面镜头显示改由逻辑相机 capture result 的 active physical id 回传决定。
+- 双摄校准 `strictPhysical=true` 路径保持原物理 Session 绑定和失败即报错策略，不改变双摄校准逻辑。
+
 ## [camera-physical-preview-output-2026-08-07] - 2026-08-07
+
+> 已被 `camera-logical-preview-restore-2026-08-24` 覆盖；当前普通预览保持父逻辑相机 Session，不再使用普通物理输出绑定。
 
 ### Changed
 - 普通预览仍打开父逻辑相机 ID，但预览 `Surface` 通过 `OutputConfiguration.setPhysicalCameraId()` 绑定到当前选中物理候选；默认选中候选为最大焦距镜头。

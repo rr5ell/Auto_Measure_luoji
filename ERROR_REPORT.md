@@ -1,6 +1,26 @@
 # Error Report
 
+## [2026-08-24] 普通预览逻辑相机恢复报告
+
+### 发现的问题
+- 普通预览新增 `bindPhysicalPreview` 后，虽然仍打开父逻辑 camera id，但预览 `Surface` 会通过 `OutputConfiguration.setPhysicalCameraId()` 绑定到物理镜头输出。
+- 该路径会让普通预览画面接近“指定物理镜头流”，和当前要恢复的逻辑相机/HAL 自动镜头选择与融合验证目标不一致。
+- 严重程度：中。普通预览容易和物理镜头调用方式混淆，也会影响 active physical id 对逻辑多摄行为的观察。
+
+### 解决方案
+- 删除 `Camera2Controller.openCamera()` 的 `bindPhysicalPreview` 参数和普通物理输出绑定状态。
+- `Camera2Controller.createSession()` 只有在双摄校准 `strictPhysical=true` 且设备支持物理输出时才调用 `OutputConfiguration.setPhysicalCameraId()`。
+- `CameraScreen` 普通打开相机只传 `strictPhysical = isDualCalibMode && lens.physicalId != null`，普通模式恢复纯逻辑 Session。
+- 普通预览的 active array、zoom range、OIS 能力选择恢复使用父逻辑相机特征；双摄校准仍使用物理候选特征。
+
+### 预防措施
+- 后续普通预览禁止再新增 `bindPhysicalPreview` 或在普通入口用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface。
+- `setPhysicalCameraId()` 仅允许保留在双摄校准 `strictPhysical=true` 的物理 Session 路径中，不能影响普通预览。
+- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+
 ## [2026-08-07] 普通预览物理输出绑定报告
+
+状态：已被 2026-08-24 “普通预览逻辑相机恢复报告”覆盖；本节仅保留历史实验记录。
 
 ### 发现的问题
 - 普通预览虽然打开父逻辑相机，但预览输出仍可能由厂商 HAL 做逻辑多摄融合或自动切换，不能明确保证画面来自最大焦距物理镜头。
@@ -14,7 +34,7 @@
 - 普通物理预览输出配置失败时回退逻辑 Session；双摄校准 `strictPhysical=true` 仍保持原逻辑，物理 Session 失败直接报错。
 
 ### 预防措施
-- 后续普通预览需要绕开融合时，应优先使用 `bindPhysicalPreview=true`，不得改成直接打开物理 camera id。
+- 当前策略已废弃；后续普通预览必须保持父逻辑相机 Session，不得重新引入 `bindPhysicalPreview`。
 - 双摄校准路径继续由 `strictPhysical=true` 控制，不能被普通预览 fallback 策略影响。
 - Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
 

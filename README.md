@@ -51,7 +51,7 @@ app/src/main/java/com/example/auto_measure_luoji/
 ### 相机镜头控制 (v0.2.0)
 - 后置镜头扫描与分类（TELE / WIDE / ULTRA_WIDE）
 - 自动锁定最大长焦镜头（eq35mm 最大）
-- 普通预览打开最大长焦候选所属父逻辑相机，并用 `OutputConfiguration.setPhysicalCameraId()` 将预览 Surface 绑定到当前选中物理候选；默认候选为最大焦距镜头，绑定失败时自动回退逻辑输出
+- 普通预览打开最大长焦候选所属父逻辑相机，保持纯逻辑相机 Session，不再用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface；实际活跃物理镜头由厂商 HAL 按逻辑多摄策略回传
 - 顶部固定区保留 `识别`、`校准` 和 `更多`，`识别` 放在首位，避免被其他按钮挤到不可见位置
 - `广角/广角中` 收纳在 `更多` 菜单中，可在主界面切换到广角镜头；已在广角时再次点击会切回默认镜头，校准流程中禁用
 - 进入普通预览后直接放大到最大焦距对应的光学基准倍率 + `0.1x`，倍率滑块最低只能回到该上浮后的基准倍率，最高固定为 `24x`

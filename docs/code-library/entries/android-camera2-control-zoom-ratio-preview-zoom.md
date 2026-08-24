@@ -12,12 +12,16 @@
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- last_updated: 2026-08-07
+- last_updated: 2026-08-24
 - author: Codex Agent
 
+## 2026-08-24 Update
+- 普通预览恢复父逻辑相机 Session，不再通过 `bindPhysicalPreview` 或 `OutputConfiguration.setPhysicalCameraId()` 绑定物理预览输出。
+- 普通预览的 active array、zoom range 和 OIS 能力按父逻辑相机特征处理；双摄校准 `strictPhysical=true` 仍使用物理候选特征。
+
 ## 2026-08-05 Update
-- 普通预览不直接打开物理 camera id；普通模式通过父逻辑相机 Session + `bindPhysicalPreview=true` 绑定当前物理候选的预览输出，双摄校准仍由 `strictPhysical=true` 控制。
-- `LensCandidate` 同时保留当前候选镜头特征和父逻辑相机 zoom/OIS 特征；普通物理预览输出绑定时使用当前候选 active array / zoom range，普通最大倍率固定为 `24x`。
+- 普通预览不直接打开物理 camera id，也不绑定物理预览输出；普通模式通过父逻辑相机 Session 执行 zoom，双摄校准仍由 `strictPhysical=true` 控制。
+- `LensCandidate` 同时保留当前候选镜头特征和父逻辑相机 zoom/OIS 特征；普通预览使用父逻辑相机 active array / zoom range，普通最大倍率固定为 `24x`。
 - 普通模式进入后把 `currentEquivRatio` 设置为最大焦距候选相对同一逻辑相机广角候选的光学基准倍率 + `0.1x`。
 - 普通模式滑条最小值由 `normalMinZoomFor()` 计算，最低只能回到光学基准倍率 + `0.1x`，最大值固定 `24x`；双摄滑条仍从 `1x` 到长焦倍率。
 - 双摄校准的广角 `5x`、长焦物理镜头 `1x` 和 `applyDualZoom()` 逻辑保持不变。
@@ -36,7 +40,7 @@
 ## 禁止场景
 - 禁止开启 EIS；EIS 会裁切画面并破坏坐标稳定性。
 - 禁止在无校准点时使用 wrapper `scaleX/scaleY` 充当倍率放大，避免和 Camera2 zoom 叠加。
-- 普通预览禁止直接打开物理 camera id；如需固定物理输出，必须使用 `bindPhysicalPreview=true` 在父逻辑 Session 中绑定预览 Surface。
+- 普通预览禁止直接打开物理 camera id，也禁止通过 `bindPhysicalPreview` 或 `OutputConfiguration.setPhysicalCameraId()` 在父逻辑 Session 中绑定预览 Surface。
 - 普通模式滑条最小值禁止写死为 `1f` 或原始光学基准倍率，必须保留 `0.1x` 偏移。
 - 普通模式最大倍率必须固定为 `24x`；禁止改成“不限”，也禁止按 `logicalMaxDigitalZoom`、`maxDigitalZoom` 或 `CONTROL_ZOOM_RATIO_RANGE.upper` 改写。
 - 双镜头长焦物理镜头模式下不要再叠加长焦倍率，保持 Camera2 zoom 为 `1x`。
@@ -57,7 +61,7 @@
 
 ## 复用方式
 - `CameraScreen` 中监听 `currentEquivRatio`，普通模式用 `normalMinZoomFor()`/`normalMaxZoomFor()`/`clampNormalZoom()` 限制到“光学基准 + 0.1x .. 24x”，再调用 `Camera2Controller.setZoomRatio()`。
-- `CameraScreen` 普通入口设置 `strictPhysical=false` 且 `bindPhysicalPreview=true`，在父逻辑相机 Session 中绑定当前物理候选预览输出；双摄入口继续传 `strictPhysical=true`。
+- `CameraScreen` 普通入口保持 `strictPhysical=false`，只打开父逻辑相机 Session；双摄入口继续传 `strictPhysical=true`。
 - `CameraScreen.prepareSingleCalibrationZoom()` 在普通校准开始前检查当前镜头；`LensCategory.WIDE` 自动请求 `5x`，并清除旧锚点居中状态。
 - 长焦/非广角镜头普通校准保持当前逻辑相机倍率，且不得低于光学基准倍率 + `0.1x`。
 - `Camera2Controller` 每次应用倍率后发布 `zoom: backend=..., ratio=...` 摘要；`CameraScreen` 将该摘要显示在状态区并转发 `CameraScreen:I`。
@@ -67,7 +71,7 @@
 
 ## 注意事项
 - Camera2 zoom 和 UI 居中变换是两个层次：倍率放大由 Camera2 负责，校准点居中可使用 UI 平移和最小覆盖 scale。
-- 普通物理预览输出绑定模式和双摄 strictPhysical 都使用当前物理候选 zoom 参数；纯逻辑 fallback 使用父逻辑相机参数，新增调用点必须显式判断模式。
+- 普通预览使用父逻辑相机 zoom 参数；只有双摄 strictPhysical 使用当前物理候选 zoom 参数，新增调用点必须显式判断模式。
 - 普通模式最大倍率固定 `24x`；实际后端仍可能因设备 HAL 对 `CONTROL_ZOOM_RATIO` 的范围限制而切到 fallback crop。
 - 应用内 Log 面板需要包含 `Camera2Ctrl:I/D/W` 和 `CameraScreen:I`，否则真机上可能误以为没有 zoom 日志。
 - `ZoomController` 中锚点居中的 crop 方法仅为历史实验逻辑；普通倍率不要调用这些方法替代 `setZoomRatio()`。
