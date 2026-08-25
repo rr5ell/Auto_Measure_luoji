@@ -1,5 +1,22 @@
 # Error Report
 
+## [2026-08-25] EIS 实验防抖同步报告
+
+### 发现的问题
+- `E:\StudioProjects\Auto_measure` 已有 EIS 实验模式，luoji 当前只保留 OIS，且每次请求固定写 `CONTROL_VIDEO_STABILIZATION_MODE_OFF`。
+- 用户要求 luoji 与源项目保持一致，因此需要恢复 EIS OFF/ON/PREVIEW 三档选择能力。
+- 严重程度：中。EIS ON/PREVIEW 可能触发电子裁剪，导致预览坐标与校准坐标发生漂移。
+
+### 解决方案
+- `Camera2Controller` 同步 `videoStabilizationModeChoices()`、`setVideoStabilizationMode()`、设备支持模式扫描和 capture result 日志。
+- `CameraScreen` 在 `更多` 菜单新增 `防抖 EIS:...` 入口，弹窗内可切换 OIS 与 EIS 模式。
+- 保留普通预览父逻辑相机 Session 和 active physical id 监听，不回退到普通物理输出绑定。
+
+### 预防措施
+- EIS 默认必须保持 OFF；只有用户在防抖弹窗中显式选择 ON/PREVIEW 时才写入请求。
+- 校准、绿光识别或坐标对比时必须记录 EIS 当前模式，发现坐标漂移时优先切回 OFF。
+- 后续相机防抖相关修改要同时检查 `Camera2Controller` 状态、UI 菜单入口和 capture result 日志。
+
 ## [2026-08-24] 普通预览逻辑相机恢复报告
 
 ### 发现的问题

@@ -42,7 +42,7 @@
 - 默认镜头使用 `defaultLens ?: selectLensUseCase(lensCandidates)`，避免切到广角后无法返回。
 - 顶部 UI 文案必须短，状态细节放入 `statusText`、HUD 或日志。
 - 顶栏固定按钮数量控制在 3 个左右；后续新增按钮默认放进 `更多`。
-- Camera2 EIS 必须继续关闭；本条目只约束 UI 收纳和镜头选择入口。
+- Camera2 EIS 默认 OFF；`更多` 菜单可包含显式 EIS 实验入口，本条目只约束 UI 收纳和镜头选择入口。
 
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin`

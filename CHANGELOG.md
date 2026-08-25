@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-eis-experimental-toggle-2026-08-25] - 2026-08-25
+
+### Added
+- 按 `E:\StudioProjects\Auto_measure` 同步 Camera2 EIS 实验模式，支持 OFF/ON/PREVIEW 三档 `CONTROL_VIDEO_STABILIZATION_MODE`。
+- `更多` 菜单新增 `防抖 EIS:...` 入口，弹窗内可切换 OIS ON/OFF 和 EIS 模式，并显示设备支持模式与回传状态。
+- `Camera2Controller` 新增 EIS 支持模式扫描、模式切换、capture result 日志，保留 active physical id 监听和普通逻辑相机 Session 逻辑。
+
+### Risk
+- EIS ON/PREVIEW 可能触发电子裁剪，真机校准时需要记录 EIS 模式并验证坐标漂移。
+
 ## [camera-logical-preview-restore-2026-08-24] - 2026-08-24
 
 ### Changed

@@ -29,9 +29,35 @@ import kotlin.math.roundToInt
  * - TextureView Surface：预览显示
  * - ImageReader Surface (YUV_420_888)：检测分析
  *
- * 防抖：EIS 永远关闭；OIS 默认关闭，只能由用户显式开关控制。
+ * 防抖：OIS 默认关闭；EIS 作为实验项由用户显式选择模式。
  */
 class Camera2Controller(private val context: Context) {
+
+    companion object {
+        private const val VIDEO_STABILIZATION_MODE_PREVIEW = 2
+
+        fun videoStabilizationModeChoices(): List<Int> = listOf(
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON,
+            VIDEO_STABILIZATION_MODE_PREVIEW,
+        )
+
+        fun getDefaultVideoStabilizationMode(): Int = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+
+        fun videoStabilizationModeName(mode: Int): String = when (mode) {
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF -> "OFF"
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON -> "ON"
+            VIDEO_STABILIZATION_MODE_PREVIEW -> "PREVIEW"
+            else -> "UNKNOWN($mode)"
+        }
+
+        fun oisStabilizationModeName(mode: Int?): String = when (mode) {
+            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF -> "OFF"
+            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON -> "ON"
+            null -> "UNKNOWN"
+            else -> "UNKNOWN($mode)"
+        }
+    }
 
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
@@ -42,11 +68,17 @@ class Camera2Controller(private val context: Context) {
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var pendingZoomRatio: Float = 1f
     private var oisRequested: Boolean = false
+    private var pendingVideoStabilizationMode: Int = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+    private var availableVideoStabilizationModes: IntArray = intArrayOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
     private var lastActivePhysicalCameraId: String? = null
     private var hasPublishedActivePhysicalCameraId: Boolean = false
     private var pendingExposureCompensationEv: Float = 0f
     private var exposureCompensationRange: Range<Int> = Range(0, 0)
     private var exposureCompensationStep: Rational = Rational(1, 1)
+    private var lastCaptureResultRequestedVideoStabilizationMode: Int? = null
+    private var lastCaptureResultVideoStabilizationMode: Int? = null
+    private var lastCaptureResultRequestedOisMode: Int? = null
+    private var lastCaptureResultOisMode: Int? = null
 
     var previewSize: Size = Size(1080, 1920)
         private set
@@ -61,6 +93,7 @@ class Camera2Controller(private val context: Context) {
     var onZoomStateChanged: ((String) -> Unit)? = null
     var onExposureStateChanged: ((String) -> Unit)? = null
     var onActivePhysicalCameraChanged: ((String?) -> Unit)? = null
+    var onVideoStabilizationStateChanged: ((Int, String) -> Unit)? = null
 
     val isActive: Boolean get() = cameraDevice != null
     private var surfaceTexture: SurfaceTexture? = null
@@ -103,6 +136,7 @@ class Camera2Controller(private val context: Context) {
         val chars = manager.getCameraCharacteristics(lens.cameraId)
         sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         updateExposureCompensationCharacteristics(chars)
+        updateVideoStabilizationCharacteristics(chars)
 
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         if (map != null) {
@@ -253,9 +287,51 @@ class Camera2Controller(private val context: Context) {
             }, cameraHandler)
     }
 
+    private fun resetStabilizationCaptureResultLog() {
+        lastCaptureResultRequestedVideoStabilizationMode = null
+        lastCaptureResultVideoStabilizationMode = null
+        lastCaptureResultRequestedOisMode = null
+        lastCaptureResultOisMode = null
+    }
+
+    private fun videoStabilizationModeNameOrUnknown(mode: Int?): String {
+        return mode?.let { videoStabilizationModeName(it) } ?: "UNKNOWN"
+    }
+
+    private fun publishStabilizationCaptureResult(
+        request: CaptureRequest,
+        result: TotalCaptureResult,
+    ) {
+        val requestedVideoMode = request.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE)
+        val resultVideoMode = result.get(CaptureResult.CONTROL_VIDEO_STABILIZATION_MODE)
+        val requestedOisMode = request.get(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE)
+        val resultOisMode = result.get(CaptureResult.LENS_OPTICAL_STABILIZATION_MODE)
+
+        val changed = requestedVideoMode != lastCaptureResultRequestedVideoStabilizationMode ||
+            resultVideoMode != lastCaptureResultVideoStabilizationMode ||
+            requestedOisMode != lastCaptureResultRequestedOisMode ||
+            resultOisMode != lastCaptureResultOisMode
+        if (!changed) return
+
+        lastCaptureResultRequestedVideoStabilizationMode = requestedVideoMode
+        lastCaptureResultVideoStabilizationMode = resultVideoMode
+        lastCaptureResultRequestedOisMode = requestedOisMode
+        lastCaptureResultOisMode = resultOisMode
+
+        Log.i(
+            "Camera2Ctrl",
+            "videoStab result: request=${videoStabilizationModeNameOrUnknown(requestedVideoMode)}, " +
+                "result=${videoStabilizationModeNameOrUnknown(resultVideoMode)}, " +
+                "oisRequest=${oisStabilizationModeName(requestedOisMode)}, " +
+                "oisResult=${oisStabilizationModeName(resultOisMode)}, " +
+                "frame=${result.frameNumber}",
+        )
+    }
+
     private fun startPreview(session: CameraCaptureSession) {
         val builder = previewRequestBuilder ?: return
         val lens = currentLens ?: return
+        resetStabilizationCaptureResultLog()
 
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -356,6 +432,42 @@ class Camera2Controller(private val context: Context) {
         return result
     }
 
+    fun getAvailableVideoStabilizationModes(): List<Int> {
+        return availableVideoStabilizationModes
+            .toList()
+            .distinct()
+            .sorted()
+    }
+
+    fun getVideoStabilizationMode(): Int = pendingVideoStabilizationMode
+
+    fun setVideoStabilizationMode(mode: Int): Result<Int> {
+        val supportedModes = getAvailableVideoStabilizationModes()
+        if (mode !in supportedModes) {
+            return Result.failure(
+                IllegalStateException("当前镜头不支持 EIS ${videoStabilizationModeName(mode)}")
+            )
+        }
+
+        val builder = previewRequestBuilder
+            ?: return Result.failure(IllegalStateException("预览请求未就绪，无法切换 EIS"))
+        val session = captureSession
+            ?: return Result.failure(IllegalStateException("相机会话未就绪，无法切换 EIS"))
+        val lens = currentLens
+            ?: return Result.failure(IllegalStateException("相机未就绪，无法切换 EIS"))
+
+        pendingVideoStabilizationMode = mode
+        applyStabilization(builder, lens, notifyUnsupported = false)
+        return try {
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+            publishVideoStabilizationState(mode, "set")
+            Result.success(mode)
+        } catch (e: Exception) {
+            Log.w("Camera2Ctrl", "EIS request failed", e)
+            Result.failure(e)
+        }
+    }
+
     private fun submitOisMode(enabled: Boolean): Result<Unit> {
         val lens = currentLens
             ?: return Result.failure(IllegalStateException("相机未就绪，无法切换 OIS"))
@@ -387,9 +499,23 @@ class Camera2Controller(private val context: Context) {
         lens: LensCandidate,
         notifyUnsupported: Boolean,
     ) {
+        val supportedVideoModes = getAvailableVideoStabilizationModes()
+        val requestedVideoMode = pendingVideoStabilizationMode
+        val videoMode = if (requestedVideoMode in supportedVideoModes) {
+            requestedVideoMode
+        } else {
+            pendingVideoStabilizationMode = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+            if (notifyUnsupported) {
+                onVideoStabilizationStateChanged?.invoke(
+                    pendingVideoStabilizationMode,
+                    "当前镜头不支持 EIS ${videoStabilizationModeName(requestedVideoMode)}，已切回 OFF",
+                )
+            }
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        }
         builder.set(
             CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            videoMode,
         )
 
         val oisSupported = isOisSupported(lens)
@@ -408,6 +534,7 @@ class Camera2Controller(private val context: Context) {
             },
         )
         onOisStateChanged?.invoke(shouldEnableOis)
+        publishVideoStabilizationState(videoMode, "apply")
     }
 
     private fun updateExposureCompensationCharacteristics(chars: CameraCharacteristics) {
@@ -415,6 +542,16 @@ class Camera2Controller(private val context: Context) {
             ?: Range(0, 0)
         exposureCompensationStep = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
             ?: Rational(1, 1)
+    }
+
+    private fun updateVideoStabilizationCharacteristics(chars: CameraCharacteristics) {
+        val modes = chars.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
+            ?: intArrayOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+        availableVideoStabilizationModes = modes
+        if (pendingVideoStabilizationMode !in modes) {
+            pendingVideoStabilizationMode = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        }
+        publishVideoStabilizationState(pendingVideoStabilizationMode, "chars")
     }
 
     private fun applyExposureCompensation(builder: CaptureRequest.Builder): Int {
@@ -447,6 +584,14 @@ class Camera2Controller(private val context: Context) {
         )
         Log.i("Camera2Ctrl", message)
         onExposureStateChanged?.invoke(message)
+    }
+
+    private fun publishVideoStabilizationState(mode: Int, reason: String) {
+        val message = "videoStab: mode=${videoStabilizationModeName(mode)}, reason=$reason, supported=${
+            getAvailableVideoStabilizationModes().joinToString { videoStabilizationModeName(it) }
+        }"
+        Log.i("Camera2Ctrl", message)
+        onVideoStabilizationStateChanged?.invoke(mode, message)
     }
 
     @SuppressLint("NewApi")
@@ -527,6 +672,7 @@ class Camera2Controller(private val context: Context) {
             result: TotalCaptureResult,
         ) {
             publishActivePhysicalCameraId(result)
+            publishStabilizationCaptureResult(request, result)
         }
     }
 

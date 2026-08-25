@@ -23,7 +23,7 @@
 - 普通预览禁止传入或重新引入 `bindPhysicalPreview`。
 - 普通预览禁止用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface。
 - 双摄校准 `strictPhysical=true` 路径仍允许使用 `OutputConfiguration.setPhysicalCameraId()` 绑定物理镜头，失败即报错。
-- Camera2 相关修改仍禁止启用 EIS；如需稳定只能使用 OIS 或算法层物理补偿。
+- Camera2 EIS 默认 OFF；只有用户显式选择实验模式 ON/PREVIEW 时才允许启用，并需记录坐标漂移风险。
 
 ## 核心参数状态
 | 参数名 | 当前状态 | 说明 |
@@ -40,7 +40,7 @@
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin`
 - 测试命令：`.\gradlew.bat :app:assembleDebug :app:assembleLaserCompare`
-- 已覆盖边界：普通预览纯逻辑 Session、双摄 strict physical 路径保留、EIS 继续关闭。
+- 已覆盖边界：普通预览纯逻辑 Session、双摄 strict physical 路径保留、EIS 默认 OFF。
 - 未覆盖风险：不同厂商对逻辑多摄 active physical id 的回传频率和融合语义不同，需要真机观察画面和日志。
 
 ## 给 AI 的指令

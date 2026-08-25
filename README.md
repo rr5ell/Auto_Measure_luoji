@@ -63,8 +63,8 @@ app/src/main/java/com/example/auto_measure_luoji/
 - 当前镜头为长焦/非广角镜头时，普通校准保持当前逻辑相机倍率采集，且不得低于最大焦距对应的光学基准倍率 + `0.1x`
 - 普通校准和双镜头校准采集期间会把 Camera2 AE 曝光补偿切到 `-2.0 EV`，退出校准面板后恢复 `0 EV`
 - 双镜头广角 zoom 在 API 30+ 优先使用 CONTROL_ZOOM_RATIO，低版本或失败时回退 SCALER_CROP_REGION
-- `更多` 菜单提供 OIS 开关；开启成功后菜单项高亮，当前镜头不支持或请求失败时显示 3 秒提示
-- 电子防抖 (EIS) 在 Camera2 请求中始终保持关闭，避免校准坐标漂移；OIS 仅在用户显式开启时写入请求
+- `更多` 菜单提供 OIS 开关和 `防抖 EIS:OFF/ON/PREVIEW` 实验入口；当前镜头不支持或请求失败时显示 3 秒提示
+- 电子防抖 (EIS) 默认保持 OFF；用户在防抖弹窗中显式选择 ON/PREVIEW 时，会按设备支持模式写入 `CONTROL_VIDEO_STABILIZATION_MODE`，需要注意电子裁剪可能导致校准坐标漂移
 
 ### 语音识别
 - 第三方语音包就绪后优先使用 Sherpa-ONNX SenseVoice + Silero VAD 本地识别，不再依赖系统语音服务。

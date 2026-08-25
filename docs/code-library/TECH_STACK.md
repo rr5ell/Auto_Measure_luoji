@@ -30,5 +30,5 @@
 ## 注意事项
 
 - 当前项目随包携带 Sherpa-ONNX native 推理库，但不把 SenseVoice / Silero VAD 模型权重打进 APK；模型仍由 `ThirdPartyVoiceModelDownloader` 下载到应用私有目录。
-- Camera2 相关修改必须保持 EIS 关闭，避免校准坐标漂移。
+- Camera2 EIS 默认保持 OFF；用户显式选择实验模式 ON/PREVIEW 时允许写入 `CONTROL_VIDEO_STABILIZATION_MODE`，校准时必须记录模式并验证坐标漂移。
 - Camera2 zoom 后端以 `zoom: backend=...` 形式输出到 Logcat 和主界面状态区。

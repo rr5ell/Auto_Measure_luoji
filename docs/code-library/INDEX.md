@@ -17,6 +17,7 @@
 | reuse_id | 能力 | 标签 | canonical code path | 状态 |
 |---|---|---|---|---|
 | android-camera2-ois-toggle | Camera2 OIS 显式开关 | android, kotlin, camera2, ois, stabilization | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
+| android-camera2-eis-experimental-toggle | Camera2 EIS 实验模式开关 | android, kotlin, camera2, eis, video-stabilization, hardware-control | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-camera2-calibration-ev-compensation | 校准期间 Camera2 AE 曝光补偿 | android, kotlin, camera2, ae, exposure-compensation, calibration | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-system-speech-hotword-loop | 中文语音热词识别循环 | android, kotlin, speech-recognition, restart-loop, hotword-matching | `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ChineseVoiceHotwordRecognizer.kt` | active |
 | android-voice-model-resumable-downloader | 第三方语音模型断点续传下载 | android, kotlin, http-range, model-download, speech-recognition | `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ThirdPartyVoiceModelDownloader.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ChineseVoiceHotwordRecognizer.kt` | active |
@@ -39,4 +40,4 @@
 
 ## 最后更新
 
-2026-08-24，Codex Agent。普通预览移除 `bindPhysicalPreview` / `setPhysicalCameraId()` 物理输出绑定，恢复父逻辑相机 Session；双摄校准 `strictPhysical=true` 物理绑定路径不变。
+2026-08-25，Codex Agent。按 `E:\StudioProjects\Auto_measure` 同步 EIS 实验模式 OFF/ON/PREVIEW 和防抖弹窗；EIS 默认 OFF，用户显式选择时才下发。

@@ -38,7 +38,7 @@
 - 需要保持 YOLO/绿光截图来自已经真实 zoom 后的预览内容。
 
 ## 禁止场景
-- 禁止开启 EIS；EIS 会裁切画面并破坏坐标稳定性。
+- EIS 默认保持 OFF；用户显式选择 ON/PREVIEW 后可能裁切画面并影响坐标稳定性，校准时必须记录当前模式。
 - 禁止在无校准点时使用 wrapper `scaleX/scaleY` 充当倍率放大，避免和 Camera2 zoom 叠加。
 - 普通预览禁止直接打开物理 camera id，也禁止通过 `bindPhysicalPreview` 或 `OutputConfiguration.setPhysicalCameraId()` 在父逻辑 Session 中绑定预览 Surface。
 - 普通模式滑条最小值禁止写死为 `1f` 或原始光学基准倍率，必须保留 `0.1x` 偏移。

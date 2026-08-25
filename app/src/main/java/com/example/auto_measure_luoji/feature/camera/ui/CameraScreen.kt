@@ -135,6 +135,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var isCameraReady by remember { mutableStateOf(false) }
     var oisEnabled by remember { mutableStateOf(false) }
     var oisFailureText by remember { mutableStateOf<String?>(null) }
+    var showStabilizationDialog by remember { mutableStateOf(false) }
+    var eisMode by remember { mutableIntStateOf(Camera2Controller.getDefaultVideoStabilizationMode()) }
+    var videoStabilizationText by remember { mutableStateOf("") }
     var showLaserComparePanel by remember { mutableStateOf(false) }
     var laserCompareEnabled by remember { mutableStateOf(false) }
     var laserCompareText by remember { mutableStateOf("") }
@@ -298,6 +301,18 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             oisEnabled = enable
             statusText = if (enable) "OIS 已开启" else "OIS 已关闭"
         }
+    }
+
+    fun applyEisMode(mode: Int) {
+        val label = Camera2Controller.videoStabilizationModeName(mode)
+        cameraController.setVideoStabilizationMode(mode)
+            .onSuccess {
+                eisMode = it
+                statusText = "EIS 已切换为 $label"
+            }
+            .onFailure { error ->
+                showOisFailure(error.message ?: "EIS $label 切换失败")
+            }
     }
 
     fun formatLaserCompareResult(result: LaserResult?): String {
@@ -798,6 +813,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 Log.i("CameraScreen", msg)
             }
         }
+        cameraController.onVideoStabilizationStateChanged = { mode, msg ->
+            mainHandler.post {
+                eisMode = mode
+                videoStabilizationText = msg
+                Log.i("CameraScreen", msg)
+            }
+        }
         cameraController.onActivePhysicalCameraChanged = { cameraId ->
             mainHandler.post {
                 activePhysicalCameraId = cameraId
@@ -1236,6 +1258,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         active = toolsMenuExpanded ||
                             wideLensActive ||
                             oisEnabled ||
+                            eisMode != Camera2Controller.getDefaultVideoStabilizationMode() ||
                             isVoiceListening ||
                             yoloCaptureMode == YoloCaptureMode.UHD4K ||
                             showLaserComparePanel ||
@@ -1265,6 +1288,15 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             onClick = {
                                 toolsMenuExpanded = false
                                 toggleOis()
+                            },
+                        )
+                        ToolMenuItem(
+                            text = "防抖 EIS:${Camera2Controller.videoStabilizationModeName(eisMode)}",
+                            active = eisMode != Camera2Controller.getDefaultVideoStabilizationMode(),
+                            accent = Color(0xFFFF7043),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                showStabilizationDialog = true
                             },
                         )
                         ToolMenuItem(
@@ -2000,6 +2032,58 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 },
                 dismissButton = {
                     TextButton(onClick = { showCoordInputDialog = false }) { Text("取消") }
+                },
+            )
+        }
+
+        if (showStabilizationDialog) {
+            val supportedEisModes = cameraController.getAvailableVideoStabilizationModes()
+            AlertDialog(
+                onDismissRequest = { showStabilizationDialog = false },
+                title = { Text("防抖") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("OIS：${if (oisEnabled) "ON" else "OFF"}")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { if (!oisEnabled) toggleOis() }) { Text("OIS ON") }
+                            TextButton(onClick = { if (oisEnabled) toggleOis() }) { Text("OIS OFF") }
+                        }
+                        Divider(color = Color.White.copy(alpha = 0.16f))
+                        Text("EIS 实验模式：${Camera2Controller.videoStabilizationModeName(eisMode)}")
+                        Camera2Controller.videoStabilizationModeChoices().forEach { mode ->
+                            val supported = mode in supportedEisModes
+                            val selected = mode == eisMode
+                            TextButton(
+                                enabled = supported,
+                                onClick = { applyEisMode(mode) },
+                            ) {
+                                Text(
+                                    text = buildString {
+                                        append(Camera2Controller.videoStabilizationModeName(mode))
+                                        if (selected) append(" 当前")
+                                        if (!supported) append(" 不支持")
+                                    },
+                                    color = when {
+                                        selected -> Color(0xFFFF7043)
+                                        supported -> Color.White
+                                        else -> Color.White.copy(alpha = 0.38f)
+                                    },
+                                )
+                            }
+                        }
+                        if (videoStabilizationText.isNotBlank()) {
+                            Text(
+                                text = videoStabilizationText,
+                                color = Color.White.copy(alpha = 0.70f),
+                                fontSize = 12.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showStabilizationDialog = false }) { Text("关闭") }
                 },
             )
         }

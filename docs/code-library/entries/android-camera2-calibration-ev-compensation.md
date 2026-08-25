@@ -39,7 +39,7 @@
 ## 注意事项
 - 日志 `exposure: requestedEV=..., actualEV=..., steps=..., step=..., range=...` 是真机确认设备实际 EV 的主要依据。
 - 如果 `actualEV` 不是 `-2.0`，说明设备步进或范围不支持完整目标值，需要按日志判断是否接受裁剪结果。
-- 本逻辑只控制 AE 曝光补偿；OIS/EIS 策略不变，EIS 必须保持关闭。
+- 本逻辑只控制 AE 曝光补偿；OIS/EIS 策略不变，EIS 默认 OFF，只有用户显式选择实验模式时才可开启。
 
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin`

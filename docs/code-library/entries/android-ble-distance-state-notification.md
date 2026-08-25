@@ -37,7 +37,7 @@
 ## 注意事项
 - `lastDistance` 是事件状态，不是纯缓存字段；不要用默认 `mutableStateOf(null)`。
 - 自动测距回填距离后，普通校准应立即进入绿光采集；绿光失败时保留距离供重试。
-- Camera2 EIS 必须继续关闭；本条目只约束 BLE 距离数据流。
+- 本条目只约束 BLE 距离数据流，不擅自切换 Camera2 EIS；EIS 默认 OFF，只有用户显式选择实验模式时才可开启。
 
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin`
