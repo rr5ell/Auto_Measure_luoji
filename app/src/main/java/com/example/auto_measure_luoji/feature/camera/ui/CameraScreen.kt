@@ -1,6 +1,7 @@
 package com.example.auto_measure_luoji.feature.camera.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.RectF
@@ -85,6 +86,8 @@ private const val WIDE_CALIBRATION_ZOOM = 5f
 private const val NORMAL_PREVIEW_MAX_ZOOM = 24f
 private const val NORMAL_MIN_ZOOM_OFFSET = 0.1f
 private const val CALIBRATION_EXPOSURE_EV = -2.0f
+private const val CAMERA_SCREEN_PREFS = "camera_screen_settings"
+private const val KEY_YOLO_FRAME_SOURCE = "yolo_frame_source"
 
 /**
  * 相机预览屏幕
@@ -105,9 +108,25 @@ private enum class YoloCaptureMode(
     fun next(): YoloCaptureMode = if (this == P1080) UHD4K else P1080
 }
 
+private enum class YoloFrameSource(val label: String) {
+    PREVIEW_BITMAP("预览截图"),
+    IMAGE_READER_YUV("YUV数据流");
+
+    fun next(): YoloFrameSource = if (this == PREVIEW_BITMAP) IMAGE_READER_YUV else PREVIEW_BITMAP
+}
+
+private data class LaserFrameCapture(
+    val normalizedBitmap: Bitmap,
+    val pngBytes: ByteArray,
+    val sourceLabel: String,
+)
+
 @Composable
 fun CameraScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val cameraPrefs = remember(context.applicationContext) {
+        context.applicationContext.getSharedPreferences(CAMERA_SCREEN_PREFS, Context.MODE_PRIVATE)
+    }
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     val isLaserCompareApp = remember(context.packageName) {
         context.packageName.endsWith(".lasercompare")
@@ -194,6 +213,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var modelLoadStatus by remember { mutableStateOf("未加载") }
     var yoloDetector by remember { mutableStateOf<YoloDetector?>(null) }
     var yoloCaptureMode by remember { mutableStateOf(YoloCaptureMode.P1080) }
+    var yoloFrameSource by remember {
+        mutableStateOf(
+            YoloFrameSource.values().firstOrNull {
+                it.name == cameraPrefs.getString(KEY_YOLO_FRAME_SOURCE, YoloFrameSource.PREVIEW_BITMAP.name)
+            } ?: YoloFrameSource.PREVIEW_BITMAP,
+        )
+    }
 
     // 在后台线程加载模型（避免 Tasks.await 阻塞主线程）
     LaunchedEffect(Unit) {
@@ -325,6 +351,79 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         val dy = current.cy - legacy.cy
         val distance = kotlin.math.sqrt(dx * dx + dy * dy)
         return "差值: dx=${"%.1f".format(dx)}, dy=${"%.1f".format(dy)}, d=${"%.1f".format(distance)}px"
+    }
+
+    suspend fun captureLaserFrameForCalibration(): LaserFrameCapture {
+        return when (yoloFrameSource) {
+            YoloFrameSource.PREVIEW_BITMAP -> {
+                val tv = textureViewRef ?: throw IllegalStateException("预览未就绪")
+                if (!tv.isAvailable) throw IllegalStateException("预览未就绪")
+                var snapshot: Bitmap? = null
+                var normalized: Bitmap? = null
+                try {
+                    snapshot = withContext(Dispatchers.Main) { tv.getBitmap() }
+                        ?: throw IllegalStateException("截取预览失败")
+                    val frame = snapshot ?: throw IllegalStateException("截取预览失败")
+                    normalized = withContext(Dispatchers.Default) {
+                        ImageUtils.resize(frame, ImageUtils.OUT_W, ImageUtils.OUT_H)
+                    }
+                    val normalizedFrame = normalized ?: throw IllegalStateException("归一化预览失败")
+                    val bytes = withContext(Dispatchers.Default) {
+                        ImageUtils.bitmapToPngBytes(normalizedFrame)
+                    }
+                    val label = "PreviewBitmap ${frame.width}x${frame.height}"
+                    if (normalizedFrame !== frame) {
+                        frame.recycle()
+                        snapshot = null
+                    }
+                    normalized = null
+                    LaserFrameCapture(normalizedFrame, bytes, label)
+                } catch (e: Exception) {
+                    try {
+                        if (normalized != null && normalized !== snapshot) normalized.recycle()
+                        snapshot?.recycle()
+                    } catch (_: Exception) {
+                    }
+                    throw e
+                }
+            }
+
+            YoloFrameSource.IMAGE_READER_YUV -> {
+                if (cameraController.analysisImageReader == null) {
+                    throw IllegalStateException("YUV数据流不可用：当前相机会话未创建ImageReader")
+                }
+                cameraController.acquireLatestAnalysisImage()?.close()
+                val deadline = android.os.SystemClock.elapsedRealtime() + 700L
+                var image = cameraController.acquireLatestAnalysisImage()
+                while (image == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                    delay(20)
+                    image = cameraController.acquireLatestAnalysisImage()
+                }
+                val frame = image ?: throw IllegalStateException("等待YUV帧超时")
+                var normalized: Bitmap? = null
+                try {
+                    val rotation = cameraController.sensorOrientation
+                    normalized = withContext(Dispatchers.Default) {
+                        ImageUtils.normalizeYuv420ForCalibration(frame, rotation)
+                    }
+                    val normalizedFrame = normalized ?: throw IllegalStateException("归一化YUV帧失败")
+                    val bytes = withContext(Dispatchers.Default) {
+                        ImageUtils.bitmapToPngBytes(normalizedFrame)
+                    }
+                    val label = "ImageReaderYUV ${frame.width}x${frame.height} rot=$rotation"
+                    normalized = null
+                    LaserFrameCapture(normalizedFrame, bytes, label)
+                } catch (e: Exception) {
+                    try {
+                        normalized?.recycle()
+                    } catch (_: Exception) {
+                    }
+                    throw e
+                } finally {
+                    frame.close()
+                }
+            }
+        }
     }
 
     fun toggleLaserComparePanel() {
@@ -1027,102 +1126,154 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    // 检测帧处理循环（TextureView.getBitmap()）
-    LaunchedEffect(detectionEnabled) {
+    // 检测帧处理循环：支持 TextureView.getBitmap() 和 ImageReader YUV 两种数据源。
+
+    LaunchedEffect(detectionEnabled, yoloCaptureMode, yoloFrameSource) {
         if (!detectionEnabled || yoloDetector == null) {
             detectionBoxes = emptyList()
             detectionPerfText = ""
             return@LaunchedEffect
         }
         detectionPerfText = "等待首帧..."
-        Log.d("CameraScreen", "检测循环启动 (getBitmap)")
+        Log.d("CameraScreen", "detection loop started: source=${yoloFrameSource.label}")
 
         try {
             while (detectionEnabled) {
                 if (!isCameraReady) { delay(10); continue }
                 val tv = textureViewRef
-                if (tv == null || !tv.isAvailable || isDetecting.get()) { delay(10); continue }
+                if (isProcessing) { delay(10); continue }
+                if (yoloFrameSource == YoloFrameSource.PREVIEW_BITMAP && (tv == null || !tv.isAvailable)) {
+                    delay(10)
+                    continue
+                }
+                if (isDetecting.get()) { delay(10); continue }
 
                 isDetecting.set(true)
                 try {
-                    val captureMode = yoloCaptureMode
-                    val snapshot = withContext(Dispatchers.Main) {
-                        tv.getBitmap(captureMode.width, captureMode.height)
-                    }
                     val detector = yoloDetector
-                    if (snapshot != null && detector != null) {
+                    if (detector != null) {
+                        val captureMode = yoloCaptureMode
                         val t0 = System.currentTimeMillis()
-                        Log.d(
-                            "CameraScreen",
-                            "YOLO图源: ${captureMode.label}=${snapshot.width}x${snapshot.height}",
-                        )
-                        val result = withContext(Dispatchers.Default) { detector.detect(snapshot) }
-                        val totalMs = System.currentTimeMillis() - t0
-                        Log.d("CameraScreen", "预处理=${result.timings.preprocessMs}ms 推理=${result.timings.inferenceMs}ms 后处理=${result.timings.postprocessMs}ms 总耗时=${totalMs}ms")
-
-                        val wrapper = wrapperRef
-                        if (wrapper != null && wrapper.width > 0 && wrapper.height > 0) {
-                            val viewW = wrapper.width.toFloat()
-                            val viewH = wrapper.height.toFloat()
-                            val srcW = snapshot.width.toFloat()
-                            val srcH = snapshot.height.toFloat()
-
-                            val scale = max(viewW / srcW, viewH / srcH)
-                            val dx = (viewW - srcW * scale) / 2f
-                            val dy = (viewH - srcH * scale) / 2f
-
-                            val mapped = result.detections.map { d ->
-                                val r = RectF(
-                                    d.box.left * scale + dx,
-                                    d.box.top * scale + dy,
-                                    d.box.right * scale + dx,
-                                    d.box.bottom * scale + dy,
-                                )
-                                r to "${d.label} ${"%.2f".format(d.score)}"
-                            }
-                            detectionBoxes = mapped
-                            detectionPerfText = "${captureMode.label} ${snapshot.width}x${snapshot.height} | pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms total=${totalMs}ms | ${result.detections.size}obj"
-                            Log.d("CameraScreen", "检测完成: ${result.detections.size}个目标, 耗时${totalMs}ms")
-
-                            val screenCX = viewW / 2f
-                            val screenCY = viewH / 2f
-                            val areaHalfW = areaWidthPx / 2f
-                            val areaHalfH = areaHeightPx / 2f
-                            val tx = wrapperTx; val ty = wrapperTy; val s = wrapperScale
-                            val pts = checkPoints
-                            val hasTargetInArea = mapped.any { (box, _) ->
-                                fun isPointInside(pctW: Float, pctH: Float): Boolean {
-                                    val px = box.left + box.width() * pctW
-                                    val py = box.top + box.height() * pctH
-                                    val cx = (px - screenCX) * s + screenCX + tx
-                                    val cy = (py - screenCY) * s + screenCY + ty
-                                    return cx in (screenCX - areaHalfW)..(screenCX + areaHalfW) &&
-                                            cy in (screenCY - areaHalfH)..(screenCY + areaHalfH)
+                        var sourceLabel = ""
+                        var sourceWidth = 0
+                        var sourceHeight = 0
+                        val result = when (yoloFrameSource) {
+                            YoloFrameSource.PREVIEW_BITMAP -> {
+                                val snapshot = withContext(Dispatchers.Main) {
+                                    tv?.getBitmap(captureMode.width, captureMode.height)
                                 }
-                                if (requireAllPoints) pts.isNotEmpty() && pts.all { isPointInside(it.first, it.second) }
-                                else pts.any { isPointInside(it.first, it.second) }
+                                if (snapshot == null) {
+                                    null
+                                } else {
+                                    try {
+                                        sourceWidth = snapshot.width
+                                        sourceHeight = snapshot.height
+                                        sourceLabel = "PreviewBitmap ${captureMode.label} ${snapshot.width}x${snapshot.height}"
+                                        Log.d("CameraScreen", "YOLO source: $sourceLabel")
+                                        withContext(Dispatchers.Default) { detector.detect(snapshot) }
+                                    } finally {
+                                        snapshot.recycle()
+                                    }
+                                }
                             }
-                            showMeasurePrompt = hasTargetInArea
-                            // 上升沿检测：目标刚进入区域时触发测距
-                            if (hasTargetInArea && !wasTargetInArea) {
-                                measureTrigger = true
+
+                            YoloFrameSource.IMAGE_READER_YUV -> {
+                                if (cameraController.analysisImageReader == null) {
+                                    detectionBoxes = emptyList()
+                                    showMeasurePrompt = false
+                                    wasTargetInArea = false
+                                    detectionPerfText = "YUV数据流不可用：当前相机会话未创建ImageReader"
+                                    null
+                                } else {
+                                    val image = cameraController.acquireLatestAnalysisImage()
+                                    if (image == null) {
+                                        detectionPerfText = "等待YUV帧..."
+                                        null
+                                    } else {
+                                        try {
+                                            val rotation = cameraController.sensorOrientation
+                                            sourceWidth = if (rotation == 90 || rotation == 270) image.height else image.width
+                                            sourceHeight = if (rotation == 90 || rotation == 270) image.width else image.height
+                                            sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation"
+                                            Log.d("CameraScreen", "YOLO source: $sourceLabel")
+                                            withContext(Dispatchers.Default) { detector.detectFromYuv(image, rotation) }
+                                        } finally {
+                                            image.close()
+                                        }
+                                    }
+                                }
                             }
-                            wasTargetInArea = hasTargetInArea
                         }
 
-                        // 30 秒统计
-                        if (statMeasuring) {
-                            if (android.os.SystemClock.elapsedRealtime() > statEndMs) {
-                                statMeasuring = false
-                                val rate = if (statTotal > 0) statHit * 100f / statTotal else 0f
-                                statResultText = "成功率: ${"%.1f".format(rate)}%  命中=$statHit/$statTotal"
-                            } else {
-                                statTotal++
-                                if (result.detections.isNotEmpty()) statHit++
+                        if (result != null && sourceWidth > 0 && sourceHeight > 0) {
+                            val totalMs = System.currentTimeMillis() - t0
+                            Log.d(
+                                "CameraScreen",
+                                "YOLO timing source=$sourceLabel pre=${result.timings.preprocessMs}ms " +
+                                    "inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms " +
+                                    "total=${totalMs}ms",
+                            )
+
+                            val wrapper = wrapperRef
+                            if (wrapper != null && wrapper.width > 0 && wrapper.height > 0) {
+                                val viewW = wrapper.width.toFloat()
+                                val viewH = wrapper.height.toFloat()
+                                val srcW = sourceWidth.toFloat()
+                                val srcH = sourceHeight.toFloat()
+
+                                val scale = max(viewW / srcW, viewH / srcH)
+                                val dx = (viewW - srcW * scale) / 2f
+                                val dy = (viewH - srcH * scale) / 2f
+
+                                val mapped = result.detections.map { d ->
+                                    val r = RectF(
+                                        d.box.left * scale + dx,
+                                        d.box.top * scale + dy,
+                                        d.box.right * scale + dx,
+                                        d.box.bottom * scale + dy,
+                                    )
+                                    r to "${d.label} ${"%.2f".format(d.score)}"
+                                }
+                                detectionBoxes = mapped
+                                detectionPerfText = "$sourceLabel | pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms total=${totalMs}ms | ${result.detections.size}obj"
+                                Log.d("CameraScreen", "detection done: objects=${result.detections.size}, total=${totalMs}ms")
+
+                                val screenCX = viewW / 2f
+                                val screenCY = viewH / 2f
+                                val areaHalfW = areaWidthPx / 2f
+                                val areaHalfH = areaHeightPx / 2f
+                                val tx = wrapperTx; val ty = wrapperTy; val s = wrapperScale
+                                val pts = checkPoints
+                                val hasTargetInArea = mapped.any { (box, _) ->
+                                    fun isPointInside(pctW: Float, pctH: Float): Boolean {
+                                        val px = box.left + box.width() * pctW
+                                        val py = box.top + box.height() * pctH
+                                        val cx = (px - screenCX) * s + screenCX + tx
+                                        val cy = (py - screenCY) * s + screenCY + ty
+                                        return cx in (screenCX - areaHalfW)..(screenCX + areaHalfW) &&
+                                                cy in (screenCY - areaHalfH)..(screenCY + areaHalfH)
+                                    }
+                                    if (requireAllPoints) pts.isNotEmpty() && pts.all { isPointInside(it.first, it.second) }
+                                    else pts.any { isPointInside(it.first, it.second) }
+                                }
+                                showMeasurePrompt = hasTargetInArea
+                                if (hasTargetInArea && !wasTargetInArea) {
+                                    measureTrigger = true
+                                }
+                                wasTargetInArea = hasTargetInArea
+                            }
+
+                            if (statMeasuring) {
+                                if (android.os.SystemClock.elapsedRealtime() > statEndMs) {
+                                    statMeasuring = false
+                                    val rate = if (statTotal > 0) statHit * 100f / statTotal else 0f
+                                    statResultText = "成功率 ${"%.1f".format(rate)}%  命中=$statHit/$statTotal"
+                                } else {
+                                    statTotal++
+                                    if (result.detections.isNotEmpty()) statHit++
+                                }
                             }
                         }
-
-                        snapshot.recycle()
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
@@ -1135,13 +1286,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 delay(10)
             }
         } catch (_: kotlinx.coroutines.CancellationException) {
-            // LaunchedEffect 被取消（detectionEnabled 变为 false），正常退出
+            // LaunchedEffect 被取消，正常退出。
+
         }
-        Log.d("CameraScreen", "检测循环结束")
+        Log.d("CameraScreen", "detection loop stopped")
         detectionBoxes = emptyList()
         detectionPerfText = ""
     }
-
     // UI
     Box(modifier = modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         // 预览区域：FrameLayout 包裹 TextureView，变换应用在 FrameLayout 上
@@ -1261,6 +1412,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             eisMode != Camera2Controller.getDefaultVideoStabilizationMode() ||
                             isVoiceListening ||
                             yoloCaptureMode == YoloCaptureMode.UHD4K ||
+                            yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV ||
                             showLaserComparePanel ||
                             statMeasuring,
                         accent = Color(0xFF607D8B),
@@ -1323,6 +1475,23 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 val nextMode = yoloCaptureMode.next()
                                 yoloCaptureMode = nextMode
                                 statusText = "模型图源: ${nextMode.label} ${nextMode.width}x${nextMode.height} -> 模型输入"
+                            },
+                        )
+                        ToolMenuItem(
+                            text = "YOLO源 ${yoloFrameSource.label}",
+                            active = yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV,
+                            accent = Color(0xFF03A9F4),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                val nextSource = yoloFrameSource.next()
+                                yoloFrameSource = nextSource
+                                cameraPrefs.edit()
+                                    .putString(KEY_YOLO_FRAME_SOURCE, nextSource.name)
+                                    .apply()
+                                detectionBoxes = emptyList()
+                                showMeasurePrompt = false
+                                wasTargetInArea = false
+                                statusText = "YOLO数据源: ${nextSource.label}"
                             },
                         )
                         if (!isLaserCompareApp) {
@@ -1557,36 +1726,57 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 calManager = calManager,
                 bleManager = bleManager,
                 onCollect = { distance, onResult ->
-                    val tv = textureViewRef
-                    if (tv == null || !tv.isAvailable) { lastResultText = "预览未就绪"; onResult(false); return@CalibrationPanel }
                     scope.launch {
-                        isProcessing = true; lastResultText = "正在检测..."
+                        isProcessing = true
+                        lastResultText = "正在检测...（${yoloFrameSource.label}）"
                         var success = false
+                        var capture: LaserFrameCapture? = null
                         try {
-                            val snapshot = tv.getBitmap()
-                            if (snapshot == null) { lastResultText = "截取预览失败"; isProcessing = false; onResult(false); return@launch }
-                            val normalized = withContext(Dispatchers.Default) { ImageUtils.resize(snapshot, ImageUtils.OUT_W, ImageUtils.OUT_H) }
+                            val frameCapture = captureLaserFrameForCalibration()
+                            capture = frameCapture
+                            val normalized = frameCapture.normalizedBitmap
                             val ts = System.currentTimeMillis()
-                            val rawBytes = withContext(Dispatchers.Default) { ImageUtils.bitmapToPngBytes(normalized) }
+                            val rawBytes = frameCapture.pngBytes
+                            val sourcePrefix = if (yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV) {
+                                "cal_yuv"
+                            } else {
+                                "cal_preview"
+                            }
                             try {
-                                GallerySaver.savePng(context, rawBytes, "cal_raw_$ts.png")
-                            } catch (e: Exception) { Log.e("CameraScreen", "保存原始图失败", e) }
+                                GallerySaver.savePng(context, rawBytes, "${sourcePrefix}_raw_$ts.png")
+                            } catch (e: Exception) {
+                                Log.e("CameraScreen", "保存原始图失败", e)
+                            }
                             val result = withContext(Dispatchers.Default) {
                                 calManager.collectSample(rawBytes, distance, currentEquivRatio.toDouble())
                             }
-                            Log.d("CameraScreen", "采集结果: ${if (result != null) "成功" else "失败"}, 状态=${calManager.state}, 样本数=${calManager.getSampleCount()}")
+                            Log.d(
+                                "CameraScreen",
+                                "single calibration source=${frameCapture.sourceLabel}, " +
+                                    "result=${if (result != null) "success" else "failed"}, " +
+                                    "state=${calManager.state}, samples=${calManager.getSampleCount()}",
+                            )
                             if (result != null) {
                                 success = true
                                 try {
-                                    val markedBytes = withContext(Dispatchers.Default) { ImageUtils.drawMarkOnBitmap(normalized, result.cx, result.cy, 1f) }
-                                    GallerySaver.savePng(context, markedBytes, "cal_marked_$ts.png")
-                                } catch (_: Exception) {}
-                                lastResultText = "检测成功: (${result.cx.toInt()}, ${result.cy.toInt()}) conf=${"%.2f".format(result.confidence)} | 第 ${calManager.state.ordinal}/2 次"
-                            } else { lastResultText = "绿光识别失败：未检测到绿光，请调整瞄准后重试" }
-                            try { if (normalized !== snapshot) normalized.recycle(); snapshot.recycle() } catch (_: Exception) {}
-                        } catch (e: Exception) { Log.e("CameraScreen", "采集异常", e); lastResultText = "采集异常: ${e.message}" }
-                        isProcessing = false
-                        onResult(success)
+                                    val markedBytes = withContext(Dispatchers.Default) {
+                                        ImageUtils.drawMarkOnBitmap(normalized, result.cx, result.cy, 1f)
+                                    }
+                                    GallerySaver.savePng(context, markedBytes, "${sourcePrefix}_marked_$ts.png")
+                                } catch (_: Exception) {
+                                }
+                                lastResultText = "检测成功[${frameCapture.sourceLabel}]: (${result.cx.toInt()}, ${result.cy.toInt()}) conf=${"%.2f".format(result.confidence)} | 第${calManager.state.ordinal}/2次"
+                            } else {
+                                lastResultText = "绿光识别失败：未检测到绿光，请调整瞄准后重试"
+                            }
+                        } catch (e: Exception) {
+                            Log.e("CameraScreen", "采集异常", e)
+                            lastResultText = "采集异常: ${e.message}"
+                        } finally {
+                            try { capture?.normalizedBitmap?.recycle() } catch (_: Exception) {}
+                            isProcessing = false
+                            onResult(success)
+                        }
                     }
                 },
                 onApplyTarget = { targetDistance ->
@@ -1632,34 +1822,29 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         .onFailure { dualLastResultText = it.message ?: "距离输入失败" }
                 },
                 onCollect = {
-                    val tv = textureViewRef
-                    if (tv == null || !tv.isAvailable) {
-                        dualLastResultText = "预览未就绪"
-                        return@DualCalibrationPanel
-                    }
                     scope.launch {
                         isProcessing = true
-                        dualLastResultText = "正在检测绿光..."
+                        dualLastResultText = "正在检测绿光...（${yoloFrameSource.label}）"
+                        var capture: LaserFrameCapture? = null
                         try {
-                            val snapshot = withContext(Dispatchers.Main) { tv.getBitmap() }
-                            if (snapshot == null) {
-                                dualLastResultText = "截取预览失败"
-                                return@launch
-                            }
-
-                            val normalized = withContext(Dispatchers.Default) {
-                                ImageUtils.resize(snapshot, ImageUtils.OUT_W, ImageUtils.OUT_H)
-                            }
+                            val frameCapture = captureLaserFrameForCalibration()
+                            capture = frameCapture
+                            val normalized = frameCapture.normalizedBitmap
                             val ts = System.currentTimeMillis()
-                            val prefix = if (dualCalManager.state == DualCalibrationManager.State.WAIT_WIDE) {
+                            val prefixBase = if (dualCalManager.state == DualCalibrationManager.State.WAIT_WIDE) {
                                 "dual_wide"
                             } else {
                                 "dual_tele"
                             }
+                            val sourcePrefix = if (yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV) {
+                                "${prefixBase}_yuv"
+                            } else {
+                                "${prefixBase}_preview"
+                            }
 
-                            val rawBytes = withContext(Dispatchers.Default) { ImageUtils.bitmapToPngBytes(normalized) }
+                            val rawBytes = frameCapture.pngBytes
                             try {
-                                GallerySaver.savePng(context, rawBytes, "${prefix}_raw_$ts.png")
+                                GallerySaver.savePng(context, rawBytes, "${sourcePrefix}_raw_$ts.png")
                             } catch (e: Exception) {
                                 Log.e("CameraScreen", "保存双摄原始图失败", e)
                             }
@@ -1669,7 +1854,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             }
                             if (result == null) {
                                 dualLastResultText = "未检测到绿光，请调整瞄准后重试"
-                                try { if (normalized !== snapshot) normalized.recycle(); snapshot.recycle() } catch (_: Exception) {}
                                 return@launch
                             }
 
@@ -1677,7 +1861,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 val markedBytes = withContext(Dispatchers.Default) {
                                     ImageUtils.drawMarkOnBitmap(normalized, result.cx, result.cy, 1f)
                                 }
-                                GallerySaver.savePng(context, markedBytes, "${prefix}_marked_$ts.png")
+                                GallerySaver.savePng(context, markedBytes, "${sourcePrefix}_marked_$ts.png")
                             } catch (e: Exception) {
                                 Log.e("CameraScreen", "保存双摄标记图失败", e)
                             }
@@ -1688,7 +1872,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     dualCalManager.recordWidePoint(point, wideZoom = 5.0)
                                         .onSuccess {
                                             dualLastResultText =
-                                                "广角 5x 成功: (${point.x.toInt()}, ${point.y.toInt()})，切到长焦 ${dualTelephotoMag}x"
+                                                "广角5x成功[${frameCapture.sourceLabel}]: (${point.x.toInt()}, ${point.y.toInt()})，切到长焦${dualTelephotoMag}x"
                                             applyDualZoom(dualTelephotoMag.toFloat(), keepAnchor = false)
                                         }
                                         .onFailure { dualLastResultText = it.message ?: "广角采集失败" }
@@ -1705,7 +1889,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                                         "长焦100m=(${tele100?.x?.toInt()}, ${tele100?.y?.toInt()})"
                                             } else {
                                                 dualLastResultText =
-                                                    "长焦 ${dualTelephotoMag}x 成功: (${point.x.toInt()}, ${point.y.toInt()})，请输入 d2"
+                                                    "长焦${dualTelephotoMag}x成功[${frameCapture.sourceLabel}]: (${point.x.toInt()}, ${point.y.toInt()})，请输入d2"
                                             }
                                         }
                                         .onFailure { dualLastResultText = it.message ?: "长焦采集失败" }
@@ -1715,12 +1899,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     dualLastResultText = "请按当前步骤操作"
                                 }
                             }
-
-                            try { if (normalized !== snapshot) normalized.recycle(); snapshot.recycle() } catch (_: Exception) {}
                         } catch (e: Exception) {
                             Log.e("CameraScreen", "双摄采集异常", e)
                             dualLastResultText = "采集异常: ${e.message}"
                         } finally {
+                            try { capture?.normalizedBitmap?.recycle() } catch (_: Exception) {}
                             isProcessing = false
                         }
                     }

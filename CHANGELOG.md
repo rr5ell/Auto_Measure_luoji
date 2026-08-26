@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-yolo-frame-source-toggle-2026-08-26] - 2026-08-26
+
+### Added
+- 按 `E:\StudioProjects\Auto_measure` 同步 YOLO 数据源切换，`更多 -> YOLO源` 可在 `预览截图` 和 `YUV数据流` 间切换并持久化选择。
+- 普通逻辑相机会话的 `ImageReader` 不再立即丢弃帧，而是只缓存最新一帧供 YOLO/YUV 模式消费；实时识别的 YUV 路径调用 `YoloDetector.detectFromYuv()`。
+- 普通校准和双镜头校准复用统一采帧函数，按当前数据源保存 `cal_yuv/cal_preview` 与 `dual_*_yuv/dual_*_preview` 图片。
+- `ImageUtils` 补齐 YUV420 转 bitmap、旋转和 `1080x1920` 校准归一化工具。
+
+### Risk
+- `strictPhysical=true` 的双摄物理绑定会话当前不创建分析 `ImageReader`，YUV 数据源在该路径下会提示不可用；普通预览仍保持父逻辑相机 Session，不恢复普通预览物理绑定。
+
 ## [camera-eis-experimental-toggle-2026-08-25] - 2026-08-25
 
 ### Added

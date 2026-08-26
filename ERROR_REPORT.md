@@ -1,5 +1,24 @@
 # Error Report
 
+## [2026-08-26] YOLO 数据源切换同步报告
+
+### 发现的问题
+- `E:\StudioProjects\Auto_measure` 已支持在预览截图与 YUV 数据流之间切换 YOLO 输入，luoji 当前仅支持 `TextureView.getBitmap()` 截图源。
+- `Camera2Controller` 的分析 `ImageReader` 虽然已创建，但监听器会立即获取并关闭帧，UI 无法消费最新 YUV 帧。
+- 普通校准和双镜头校准固定从预览截图采集，无法跟随 YOLO 数据源切换验证 YUV 坐标链路。
+- 严重程度：中。影响真机对比 YUV 流与预览截图流的识别耗时、画面来源和坐标一致性验证。
+
+### 解决方案
+- 新增 `YoloFrameSource` 与 `KEY_YOLO_FRAME_SOURCE`，在 `更多 -> YOLO源` 中切换并持久化 `预览截图/YUV数据流`。
+- `Camera2Controller` 改为只缓存最新 `ImageReader` YUV 帧，并提供 `acquireLatestAnalysisImage()`；相机关闭或重建 session 时释放旧帧。
+- 实时 YOLO 检测按数据源分流：预览截图走 `detect(bitmap)`，YUV 数据流走 `detectFromYuv(image, rotation)`。
+- 普通校准和双镜头校准改用 `captureLaserFrameForCalibration()`，YUV 采样通过 `ImageUtils.normalizeYuv420ForCalibration()` 转成原有 `1080x1920` PNG bytes 链路。
+
+### 预防措施
+- 后续修改 YOLO 数据源时，必须同时检查实时识别、普通校准、双镜头校准三条入口是否共用同一数据源策略。
+- YUV 帧取走后必须 `close()`，缓存替换或相机关闭前也必须释放旧帧，避免 `ImageReader.maxImages` 堵塞。
+- 普通预览继续保持父逻辑相机 Session；不得为了 YUV 数据源重新引入普通预览 `OutputConfiguration.setPhysicalCameraId()`。
+
 ## [2026-08-25] EIS 实验防抖同步报告
 
 ### 发现的问题

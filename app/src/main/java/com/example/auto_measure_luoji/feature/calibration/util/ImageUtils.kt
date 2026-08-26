@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
+import android.media.Image
 import android.text.TextPaint
 import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayOutputStream
@@ -76,6 +77,80 @@ object ImageUtils {
         val out = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
         return out.toByteArray()
+    }
+
+    fun normalizeYuv420ForCalibration(
+        image: Image,
+        rotationDegrees: Int = 0,
+        width: Int = OUT_W,
+        height: Int = OUT_H,
+    ): Bitmap {
+        val src = yuv420ToBitmap(image)
+        val oriented = rotateBitmap(src, rotationDegrees)
+        if (oriented !== src) {
+            src.recycle()
+        }
+        val srcAspect = oriented.width.toDouble() / oriented.height.toDouble()
+        val aspected = if (kotlin.math.abs(srcAspect - TARGET_ASPECT) > 0.02) {
+            cropToAspect(oriented, TARGET_ASPECT)
+        } else {
+            oriented
+        }
+        val resized = resize(aspected, width, height)
+        if (aspected !== oriented && aspected !== resized) {
+            aspected.recycle()
+        }
+        if (resized !== oriented) {
+            oriented.recycle()
+        }
+        return resized
+    }
+
+    fun rotateBitmap(src: Bitmap, rotationDegrees: Int): Bitmap {
+        val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
+        if (normalizedRotation == 0) return src
+        val matrix = Matrix().apply { postRotate(normalizedRotation.toFloat()) }
+        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+    }
+
+    fun yuv420ToBitmap(image: Image): Bitmap {
+        val width = image.width
+        val height = image.height
+        val yPlane = image.planes[0]
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        val yRowStride = yPlane.rowStride
+        val yPixelStride = yPlane.pixelStride
+        val uRowStride = uPlane.rowStride
+        val uPixelStride = uPlane.pixelStride
+        val vRowStride = vPlane.rowStride
+        val vPixelStride = vPlane.pixelStride
+        val argb = IntArray(width * height)
+
+        for (y in 0 until height) {
+            val yRow = y * yRowStride
+            val uvY = y / 2
+            for (x in 0 until width) {
+                val yValue = yBuffer.get(yRow + x * yPixelStride).toInt() and 0xFF
+                val uvX = x / 2
+                val uValue = uBuffer.get(uvY * uRowStride + uvX * uPixelStride).toInt() and 0xFF
+                val vValue = vBuffer.get(uvY * vRowStride + uvX * vPixelStride).toInt() and 0xFF
+
+                val c = (yValue - 16).coerceAtLeast(0)
+                val d = uValue - 128
+                val e = vValue - 128
+                val r = ((298 * c + 409 * e + 128) shr 8).coerceIn(0, 255)
+                val g = ((298 * c - 100 * d - 208 * e + 128) shr 8).coerceIn(0, 255)
+                val b = ((298 * c + 516 * d + 128) shr 8).coerceIn(0, 255)
+
+                argb[y * width + x] = Color.rgb(r, g, b)
+            }
+        }
+
+        return Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
     }
 
     fun drawMarkOnBitmap(

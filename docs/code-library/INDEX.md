@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/copy-auto-measure-code` |
+| 当前主要分支 | `feature/yolo-frame-source-toggle` |
 
 ## 可复用能力
 
@@ -26,6 +26,7 @@
 | android-laser-detection-compare-panel | 绿光新旧算法对比 App 与面板 | android, kotlin, compose, laser-detection, debug-tool, build-type, gallery-output | `app/build.gradle.kts`; `app/src/laserCompare/res/values/strings.xml`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/util/ImageUtils.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/detector/LaserDetector.kt` | active |
 | android-ble-distance-state-notification | BLE 测距数据事件通知 | android, kotlin, ble, compose-state, distance-measurement | `app/src/main/java/com/example/auto_measure_luoji/feature/bluetooth/domain/BleConnectionManager.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/ui/CalibrationPanel.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/ui/DualCalibrationPanel.kt` | active |
 | android-yolo-capture-resolution-toggle | YOLO TextureView 图源 1080P/4K 切换 | android, kotlin, compose, yolo, textureview, model-input | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/detection/domain/YoloDetector.kt` | active |
+| android-yolo-frame-source-toggle | YOLO 预览截图/YUV 数据源切换 | android, kotlin, camera2, imagereader, yuv, textureview, yolo, calibration | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/util/ImageUtils.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/detection/domain/YoloDetector.kt` | active |
 | android-camera-top-action-two-row-layout | 相机页顶部按钮两行布局 | android, kotlin, compose, camera-ui, toolbar-layout | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | superseded |
 | android-camera-top-action-collapsible-menu | 相机页顶部按钮折叠菜单与广角切换 | android, kotlin, compose, camera-ui, toolbar-layout, lens-switch | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-camera2-control-zoom-ratio-preview-zoom | Camera2 CONTROL_ZOOM_RATIO 倍率放大 | android, kotlin, camera2, zoom, control-zoom-ratio, coordinate-map | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/util/ZoomController.kt` | active |
@@ -40,4 +41,4 @@
 
 ## 最后更新
 
-2026-08-25，Codex Agent。按 `E:\StudioProjects\Auto_measure` 同步 EIS 实验模式 OFF/ON/PREVIEW 和防抖弹窗；EIS 默认 OFF，用户显式选择时才下发。
+2026-08-26，Codex Agent。按 `E:\StudioProjects\Auto_measure` 同步 YOLO 数据源切换，支持预览截图与 ImageReader YUV 两路输入；普通预览仍保持父逻辑相机 Session。

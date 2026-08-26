@@ -7,6 +7,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
+import android.media.Image
 import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
@@ -97,10 +98,23 @@ class Camera2Controller(private val context: Context) {
 
     val isActive: Boolean get() = cameraDevice != null
     private var surfaceTexture: SurfaceTexture? = null
+    private val analysisImageLock = Any()
+    private var latestAnalysisImage: Image? = null
 
     /** 检测用 ImageReader (YUV_420_888)，与预览分离 */
     var analysisImageReader: ImageReader? = null
         private set
+
+    fun acquireLatestAnalysisImage(): Image? = synchronized(analysisImageLock) {
+        latestAnalysisImage.also { latestAnalysisImage = null }
+    }
+
+    private fun closeLatestAnalysisImage() {
+        synchronized(analysisImageLock) {
+            latestAnalysisImage?.close()
+            latestAnalysisImage = null
+        }
+    }
 
     fun start() {
         cameraThread = HandlerThread("CameraThread").apply { start() }
@@ -217,6 +231,7 @@ class Camera2Controller(private val context: Context) {
         val usePhysicalOutput = strictPhysical &&
             lens.physicalId != null &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        closeLatestAnalysisImage()
         analysisImageReader?.close()
         analysisImageReader = if (usePhysicalOutput) {
             null
@@ -225,9 +240,17 @@ class Camera2Controller(private val context: Context) {
                 previewSize.width, previewSize.height, ImageFormat.YUV_420_888, 3
             ).apply {
                 setOnImageAvailableListener({ reader ->
-                    // 立即 drain + close，不阻塞相机管线
-                    val image = reader.acquireLatestImage()
-                    image?.close()
+                    // 只保留最新分析帧，供 YOLO 在 YUV 数据源模式下取用。
+                    val image = try {
+                        reader.acquireLatestImage()
+                    } catch (e: Exception) {
+                        Log.w("Camera2Ctrl", "analysis image acquire failed: ${e.message}")
+                        null
+                    } ?: return@setOnImageAvailableListener
+                    synchronized(analysisImageLock) {
+                        latestAnalysisImage?.close()
+                        latestAnalysisImage = image
+                    }
                 }, cameraHandler)
             }
         }
@@ -660,6 +683,7 @@ class Camera2Controller(private val context: Context) {
         cameraDevice = null
         currentStrictPhysical = false
         previewRequestBuilder = null
+        closeLatestAnalysisImage()
         try { analysisImageReader?.close() } catch (_: Exception) {}
         analysisImageReader = null
         if (wasActive) onCameraClosed?.invoke()

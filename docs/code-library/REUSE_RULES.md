@@ -11,6 +11,7 @@
 - 绿光算法实验需要单独安装包时，优先新增 Android build type 并设置 `applicationIdSuffix`，禁止复制整套项目。
 - `laserCompare` 对比包必须固定显示明确的 `绿光对比` 按钮，不能只复用主 App 的普通 `绿光` 文案。
 - YOLO TextureView 图源切换只改变 `getBitmap(width, height)` 的截图尺寸；模型输入尺寸必须继续以 TFLite input tensor 为准，不得硬编码覆盖模型 shape。
+- YOLO 数据源切换必须复用 `YoloFrameSource`：预览截图走 `TextureView.getBitmap()`，YUV 数据流走 `ImageReader` + `YoloDetector.detectFromYuv()`；切换数据源不得重新引入普通预览 `setPhysicalCameraId()`。
 - 相机页顶部按钮新增入口时，优先保留高频主操作和硬件状态入口固定可见，低频工具放入 `更多` 折叠菜单；不要再增加顶部行数。
 - `广角/广角中` 必须和 `更多/OIS/语音/Log` 一起固定在横向滚动区外，不能再放入主操作 `horizontalScroll`。
 - `更多` 是低频工具的关键入口，必须固定可见，禁止放进 `horizontalScroll` 横向滚动按钮组内。
