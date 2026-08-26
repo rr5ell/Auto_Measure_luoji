@@ -5,6 +5,11 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.26] - 2026-08-26
+
+### Fixed
+- Android 构建版本同步为 `versionName=0.8.26`、`versionCode=826`，避免蒲公英与上一版 `0.8.25 (825)` 显示重复。
+
 ## [camera-yolo-frame-source-toggle-2026-08-26] - 2026-08-26
 
 ### Added
