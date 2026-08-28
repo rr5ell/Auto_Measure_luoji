@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [yuv-jni-package-binding-2026-08-28] - 2026-08-28
+
+### Fixed
+- 修正 luoji 包名下 `YuvPreprocessNative.process()` 的 C++ JNI 导出名，避免切换 YOLO `YUV数据流` 后因找不到 native 方法直接闪退。
+- `detectFromYuv()` 增加 native 预处理失败回退到 Kotlin YUV 预处理的保护，后续 JNI 绑定异常会显示检测异常而不是直接崩溃。
+- 同步修正 `SherpaOnnxHotwordNative` 的 C++ JNI 导出名，避免第三方语音 native 入口在 luoji 包名下出现同类绑定崩溃。
+
 ## [calibration-auto-capture-delay-2026-08-28] - 2026-08-28
 
 ### Fixed

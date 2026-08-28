@@ -1,5 +1,22 @@
 # Error Report
 
+## [2026-08-28] YUV 识别 JNI 包名绑定闪退报告
+
+### 发现的问题
+- luoji 项目 Kotlin 包名为 `com.example.auto_measure_luoji`，但 `yuv_preprocess.cpp` 仍导出旧项目 `com.example.auto_measure` 对应的 JNI 函数名。
+- 切换 YOLO `YUV数据流` 后，`YuvPreprocessNative.process()` 首次执行时会找不到 native 符号，触发 `UnsatisfiedLinkError` 这类 `LinkageError`；原检测循环只捕获 `Exception`，因此会直接闪退。
+- 同类问题也存在于 `sherpa_hotword_jni.cpp` 的第三方语音 native 函数导出名。
+- 严重程度：高。用户一进入 YUV 实时识别路径就可能崩溃。
+
+### 解决方案
+- 将 `yuv_preprocess.cpp` 的导出名改为 `Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_process`。
+- 将 `sherpa_hotword_jni.cpp` 的四个导出名同步改为 `auto_measure_luoji` 包名。
+- `YoloDetector.detectFromYuv()` 捕获 native 绑定 `LinkageError`，native 不可用时回退到 `YuvFrameProcessor.fillInputFromYuv()`。
+
+### 预防措施
+- 复制或重命名 Android 项目包名后，必须同步检查所有 `external fun` 对应的 C++ 静态 JNI 导出名。
+- YUV 实时识别不依赖 Camera2 EIS；不要为规避崩溃改动相机会话或防抖配置。
+
 ## [2026-08-28] 普通校准测距后立即采集报告
 
 ### 发现的问题

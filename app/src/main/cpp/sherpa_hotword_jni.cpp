@@ -85,7 +85,7 @@ jobjectArray ToJavaStringArray(JNIEnv* env, const std::vector<std::string>& valu
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nativeCreate(
+Java_com_example_auto_1measure_1luoji_feature_voice_domain_SherpaOnnxHotwordNative_nativeCreate(
     JNIEnv* env,
     jobject,
     jstring modelPath,
@@ -143,7 +143,7 @@ Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nati
 }
 
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nativeAcceptWaveform(
+Java_com_example_auto_1measure_1luoji_feature_voice_domain_SherpaOnnxHotwordNative_nativeAcceptWaveform(
     JNIEnv* env,
     jobject,
     jlong handle,
@@ -163,7 +163,7 @@ Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nati
 }
 
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nativeFlush(
+Java_com_example_auto_1measure_1luoji_feature_voice_domain_SherpaOnnxHotwordNative_nativeFlush(
     JNIEnv* env,
     jobject,
     jlong handle
@@ -176,7 +176,7 @@ Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nati
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_example_auto_1measure_feature_voice_domain_SherpaOnnxHotwordNative_nativeDestroy(
+Java_com_example_auto_1measure_1luoji_feature_voice_domain_SherpaOnnxHotwordNative_nativeDestroy(
     JNIEnv*,
     jobject,
     jlong handle

@@ -16,8 +16,12 @@
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
   - E:\StudioProjects\Auto_Measure_luoji\DEV_GUIDE.md
   - E:\StudioProjects\Auto_Measure_luoji\关于VAD.md
-- last_updated: 2026-08-03
+- last_updated: 2026-08-28
 - author: Codex Agent
+
+## 2026-08-28 Update
+- luoji 包名下 `SherpaOnnxHotwordNative` 的 C++ JNI 导出名必须包含 `auto_1measure_1luoji`，不能保留旧项目 `auto_1measure` 包名。
+- 复制或重命名项目包名后，第三方语音 native create/acceptWaveform/flush/destroy 四个入口都要同步检查。
 
 ## 适用场景
 - Android Kotlin App 需要绕开系统 `SpeechRecognizer`，使用本地 SenseVoice + Silero VAD 做中文热词识别。
@@ -51,6 +55,7 @@
 ## 注意事项
 - APK 会因为 `app/src/main/jniLibs` 中的 Sherpa-ONNX ABI 库显著变大；后续可按 ABI 拆包或改为动态下载 native 库。
 - `System.loadLibrary` 需要先加载 `onnxruntime`、`sherpa-onnx-cxx-api`、`sherpa-onnx-c-api`，最后加载 `sherpa_hotword_jni`。
+- `sherpa_hotword_jni.cpp` 的静态 JNI 函数名必须和当前 Kotlin 包名一致。
 - 调试时过滤 `ChineseVoiceHotword|SherpaHotword`，确认状态出现 `第三方语音识别中（SenseVoice+VAD）`。
 
 ## 测试与验证

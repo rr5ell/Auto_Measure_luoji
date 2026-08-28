@@ -121,7 +121,7 @@ app/src/main/java/com/example/auto_measure_luoji/
 - TFLite 实时推理（GPU 三级降级：LOCAL_GPU → GMS_GPU → CPU）
 - 检测开关按钮（"识别" / "识别中"）
 - `更多` 菜单中的 `图源` 可切换 YOLO 检测前的 `TextureView` 截图源尺寸：默认 `1080x1920`，4K 为 `2160x3840`，随后按模型输入 tensor 转换到模型尺寸（如 `1280x1280`）
-- `更多` 菜单中的 `YOLO源` 可在 `预览截图` 与 `YUV数据流` 间切换；YUV 模式使用 Camera2 `ImageReader` 的 `YUV_420_888` 最新帧，实时识别走 `detectFromYuv()`，普通校准和双镜头校准也会按当前源采集并保存对应文件前缀
+- `更多` 菜单中的 `YOLO源` 可在 `预览截图` 与 `YUV数据流` 间切换；YUV 模式使用 Camera2 `ImageReader` 的 `YUV_420_888` 最新帧，实时识别走 `detectFromYuv()`，native 预处理不可用时会回退 Kotlin 预处理，普通校准和双镜头校准也会按当前源采集并保存对应文件前缀
 - 每 10ms 帧捕获 → Letterbox 预处理 → 模型推理 → NMS → 检测框绘制
 - 支持 FLOAT32 / UINT8 / INT8 模型输出
 - 单类别 "flag" 检测（可替换模型文件扩展）

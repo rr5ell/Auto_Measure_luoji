@@ -66,7 +66,7 @@ extern "C" {
 
 // 主处理函数
 JNIEXPORT jint JNICALL
-Java_com_example_auto_1measure_feature_camera_domain_YuvPreprocessNative_process(
+Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_process(
     JNIEnv* env,
     jclass /* clazz */,
     jobject yBuffer,

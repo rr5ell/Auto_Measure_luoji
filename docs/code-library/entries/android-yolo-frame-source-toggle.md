@@ -9,12 +9,19 @@
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\calibration\util\ImageUtils.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\detection\domain\YoloDetector.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\YuvPreprocessNative.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\YuvFrameProcessor.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\cpp\yuv_preprocess.cpp
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- last_updated: 2026-08-26
+- last_updated: 2026-08-28
 - author: Codex Agent
+
+## 2026-08-28 Update
+- luoji 包名下的 `YuvPreprocessNative.process()` 必须导出为 `Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_process`；旧 `auto_measure` 导出名会导致 YUV 模式运行时 `UnsatisfiedLinkError`。
+- `YoloDetector.detectFromYuv()` 优先走 native 预处理，捕获 `LinkageError` 后回退 `YuvFrameProcessor.fillInputFromYuv()`，避免 JNI 绑定异常直接闪退。
 
 ## 适用场景
 - 需要在同一个 Camera2 逻辑相机会话中切换 YOLO 输入来源：`TextureView.getBitmap()` 预览截图或 `ImageReader` 的 `YUV_420_888` 数据流。
@@ -41,6 +48,7 @@
 ## 注意事项
 - YUV 帧消费后必须 `close()`，否则 Camera2 管线会被 `maxImages` 堵住。
 - YUV 检测框映射使用旋转后的有效尺寸：`rotation` 为 90/270 时宽高互换。
+- 复制或重命名 App 包名后，必须同步检查 `YuvPreprocessNative` 的 C++ JNI 导出名，或保留 Kotlin fallback。
 - 预览截图源的 1080P/4K 是截图尺寸，不是模型 tensor 输入尺寸；模型输入仍由 `YoloDetector` 读取 TFLite tensor shape。
 
 ## 测试与验证

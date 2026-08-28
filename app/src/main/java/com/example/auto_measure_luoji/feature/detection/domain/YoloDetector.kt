@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.RectF
 import android.os.SystemClock
 import android.util.Log
+import com.example.auto_measure_luoji.feature.camera.domain.YuvFrameProcessor
+import com.example.auto_measure_luoji.feature.camera.domain.YuvPreprocessNative
 import com.example.auto_measure_luoji.feature.detection.data.AssetUtils
 import com.example.auto_measure_luoji.feature.detection.model.DetectResult
 import com.example.auto_measure_luoji.feature.detection.model.Detection
@@ -206,14 +208,22 @@ class YoloDetector(
         val srcH = if (rotation == 90 || rotation == 270) image.width else image.height
         Log.i(TAG, "YUV输入: ${image.width}x${image.height} (旋转${rotation}°) -> ${inputW}x${inputH}")
 
-        // 2. Native 预处理：YUV → RGB + 旋转 + Letterbox + 归一化
+        // 2. 预处理：优先 native，JNI 绑定不可用时回退到 Kotlin 实现，避免 YUV 模式直接闪退。
         val tPre0 = SystemClock.elapsedRealtimeNanos()
         val inputBuffer = ensureInputBuffer(inType, inputW, inputH)
         if (inType == DataType.FLOAT32) {
-            val ret = com.example.auto_measure_luoji.feature.camera.domain.YuvPreprocessNative.processImage(
-                image, rotation, inputW, inputH, inputBuffer
-            )
-            if (ret != 0) error("Native 预处理失败: $ret")
+            val nativeResult = try {
+                YuvPreprocessNative.processImage(image, rotation, inputW, inputH, inputBuffer)
+            } catch (error: LinkageError) {
+                Log.e(TAG, "YUV native预处理绑定失败，回退Kotlin实现", error)
+                null
+            }
+            if (nativeResult != 0) {
+                if (nativeResult != null) {
+                    Log.w(TAG, "YUV native预处理返回$nativeResult，回退Kotlin实现")
+                }
+                YuvFrameProcessor.fillInputFromYuv(image, rotation, inputW, inputH, inputBuffer)
+            }
         } else {
             error("YUV 输入仅支持 FLOAT32，当前: $inType")
         }
@@ -231,7 +241,7 @@ class YoloDetector(
 
         // 4. postprocess
         val tPost0 = SystemClock.elapsedRealtimeNanos()
-        val plan = com.example.auto_measure_luoji.feature.camera.domain.YuvFrameProcessor.getOrBuildPlan(srcW, srcH, inputW, inputH)
+        val plan = YuvFrameProcessor.getOrBuildPlan(srcW, srcH, inputW, inputH)
         val detections = parseAndNms(outputObj, outTensor, outShape, outType,
             LbMeta(plan.scale.toFloat(), plan.padX.toFloat(), plan.padY.toFloat(), inputW, inputH),
             srcW, srcH)
