@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [yuv-native-preprocess-perf-2026-08-28] - 2026-08-28
+
+### Changed
+- 优化 `yuv_preprocess.cpp` 的 YOLO YUV native 预处理路径，复用 Letterbox 映射缓存，去掉每帧 `new/delete`。
+- 将旋转分支移出逐像素循环，左右 padding 改为整段填充，降低 1920x1080 YUV 到 1280x1280 FloatBuffer 的 CPU 成本。
+- 将 YUV 到 RGB 的逐像素浮点矩阵计算改为 BT.601 full-range 定点整数近似，减少实时 YUV 模式下 `pre=` 耗时。
+
 ## [yuv-active-lens-diagnostics-2026-08-28] - 2026-08-28
 
 ### Added

@@ -24,6 +24,11 @@
 - 该日志只能证明逻辑相机当前 capture result 上报的 active 物理镜头，不能证明每个 Surface 都有独立的物理来源上报。
 - 普通预览仍禁止重新启用 `OutputConfiguration.setPhysicalCameraId()`；如需强制同源，应先做单独诊断模式，避免改变普通逻辑相机链路。
 
+## 2026-08-28 YUV Native Preprocess Perf Update
+- `yuv_preprocess.cpp` 是 YUV 数据源实时识别的优先预处理路径，当前实现复用线程本地 Letterbox 映射缓存，旋转分支已移出逐像素循环。
+- 1920x1080 YUV 输入到 1280x1280 模型时，性能判断以 `YOLO timing ... pre=` 为准；`inf=` 只代表 LiteRT/GMS 推理耗时。
+- 详细复用规则见 `android-yuv-native-preprocess-fast-path`。
+
 ## 2026-08-28 Update
 - luoji 包名下的 `YuvPreprocessNative.process()` 必须导出为 `Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_process`；旧 `auto_measure` 导出名会导致 YUV 模式运行时 `UnsatisfiedLinkError`。
 - `YoloDetector.detectFromYuv()` 优先走 native 预处理，捕获 `LinkageError` 后回退 `YuvFrameProcessor.fillInputFromYuv()`，避免 JNI 绑定异常直接闪退。
