@@ -25,6 +25,7 @@ private val AccentBlue = Color(0xFF2196F3)
 private val SurfaceDark = Color(0xCC1A1A1A)
 private val TextPrimary = Color(0xFFE0E0E0)
 private val TextSecondary = Color(0xFF9E9E9E)
+private const val AUTO_CAPTURE_DELAY_AFTER_MEASURE_MS = 500L
 
 @Composable
 fun CalibrationPanel(
@@ -43,6 +44,8 @@ fun CalibrationPanel(
     var distanceError by remember { mutableStateOf<String?>(null) }
     var targetError by remember { mutableStateOf<String?>(null) }
     var isMeasuringDistance by remember { mutableStateOf(false) }
+    var isWaitingCaptureAfterMeasure by remember { mutableStateOf(false) }
+    var pendingAutoCollectDistance by remember { mutableStateOf<Double?>(null) }
     var ignoredDistance by remember { mutableStateOf(bleManager.lastDistance) }
     val isBleConnected = bleManager.state == BleConnectionManager.State.CONNECTED
     val lastDistance = bleManager.lastDistance
@@ -51,8 +54,9 @@ fun CalibrationPanel(
         if (isBleConnected) bleManager.laserOn()
     }
 
-    fun collectDistance(distanceMeters: Double) {
+    fun collectDistance(distanceMeters: Double, onFinished: (() -> Unit)? = null) {
         onCollect(distanceMeters) { success ->
+            onFinished?.invoke()
             if (success) {
                 lastCollectedDistance = distanceMeters
                 distanceInput = ""
@@ -75,7 +79,17 @@ fun CalibrationPanel(
             distanceError = null
             isMeasuringDistance = false
             bleManager.stopMeasure()
-            collectDistance(data.line)
+            pendingAutoCollectDistance = data.line
+        }
+    }
+
+    LaunchedEffect(pendingAutoCollectDistance) {
+        val distance = pendingAutoCollectDistance ?: return@LaunchedEffect
+        isWaitingCaptureAfterMeasure = true
+        delay(AUTO_CAPTURE_DELAY_AFTER_MEASURE_MS)
+        collectDistance(distance) {
+            isWaitingCaptureAfterMeasure = false
+            pendingAutoCollectDistance = null
         }
     }
 
@@ -192,7 +206,7 @@ fun CalibrationPanel(
                             }
                         }
                     },
-                    enabled = !isProcessing && !isDuplicate && !isMeasuringDistance,
+                    enabled = !isProcessing && !isDuplicate && !isMeasuringDistance && !isWaitingCaptureAfterMeasure,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isDuplicate) Color(0xFFFF9800) else AccentGreen,
                         disabledContainerColor = TextSecondary.copy(alpha = 0.2f),
@@ -204,6 +218,7 @@ fun CalibrationPanel(
                     Text(
                         text = when {
                             isProcessing -> "检测中..."
+                            isWaitingCaptureAfterMeasure -> "等待采集..."
                             isMeasuringDistance -> "测距中..."
                             isDuplicate -> "换位置"
                             else -> "采集"

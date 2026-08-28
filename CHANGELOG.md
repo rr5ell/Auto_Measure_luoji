@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [calibration-auto-capture-delay-2026-08-28] - 2026-08-28
+
+### Fixed
+- 普通校准在 BLE 自动测距成功后，不再立即采集图片和执行绿光识别；先延迟 500ms 等待画面稳定，再复用原有采帧识别链路。
+- 500ms 等待和识别期间禁用“采集”按钮，避免同一次测距触发重复采集。
+
 ## [0.8.26] - 2026-08-26
 
 ### Fixed

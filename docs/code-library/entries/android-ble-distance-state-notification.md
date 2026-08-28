@@ -11,8 +11,12 @@
 - related_docs:
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- last_updated: 2026-07-31
+- last_updated: 2026-08-28
 - author: Codex Agent
+
+## 2026-08-28 Update
+- 普通校准 BLE 自动测距收到 `line > 0` 后，不再立刻触发图片采集和绿光识别；先停止测距、回填距离，再延迟 500ms 调用原有 `onCollect` 链路。
+- 500ms 等待与后续识别期间通过 `isWaitingCaptureAfterMeasure` 禁用“采集”按钮，防止重复采集。
 
 ## 适用场景
 - BLE 设备返回 `AT+Distance=` 数据后，需要驱动 Compose UI、普通校准或双镜头校准继续处理。
@@ -36,7 +40,7 @@
 
 ## 注意事项
 - `lastDistance` 是事件状态，不是纯缓存字段；不要用默认 `mutableStateOf(null)`。
-- 自动测距回填距离后，普通校准应立即进入绿光采集；绿光失败时保留距离供重试。
+- 自动测距回填距离后，普通校准应延迟 500ms 再进入绿光采集；绿光失败时保留距离供重试。
 - 本条目只约束 BLE 距离数据流，不擅自切换 Camera2 EIS；EIS 默认 OFF，只有用户显式选择实验模式时才可开启。
 
 ## 测试与验证

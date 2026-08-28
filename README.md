@@ -76,7 +76,7 @@ app/src/main/java/com/example/auto_measure_luoji/
 - `更多` 菜单中的 `绿光识别` 可展开新旧算法对比面板；`识别开关` 会用同一帧分别输出新算法和旧算法结果、坐标差值和两组 marked 图；旧算法保留旧 resize 与旧 bright-core refine，不包含大绿光区域几何中心修正
 - 两点校准：a/d+b 反投影模型，预测任意距离下的 1x 坐标
 - 锚点居中：以预测坐标为中心放大预览
-- 校准面板：距离输入、采集、应用目标距离；距离输入为空且 BLE 已连接时会自动测距、回填距离并采集；绿光识别失败会提示并允许重试
+- 校准面板：距离输入、采集、应用目标距离；距离输入为空且 BLE 已连接时会自动测距、回填距离，并在 500ms 稳定延迟后采集图片与识别绿光；绿光识别失败会提示并允许重试
 
 ### 绿光算法对比 App
 - 普通 Debug 包：`.\gradlew.bat :app:assembleDebug`，包名 `com.example.auto_measure_luoji`
