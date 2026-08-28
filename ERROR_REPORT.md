@@ -1,5 +1,20 @@
 # Error Report
 
+## [2026-08-28] 纯 UI 放大逻辑相机退回广角修复
+
+### 发现的问题
+- luoji 普通模式使用逻辑相机；纯 UI 放大开启后如果把 Camera2 请求倍率固定成 `1x`，HAL 会退回广角视场，导致原本约 `10x` 的画面在点击 UI 放大后明显回到 `1x`。
+- 严重程度：中。UI 显示倍率仍按目标倍率展示，但真实预览源和校准样本倍率不一致，会影响观察和普通校准数据。
+
+### 解决方案
+- `cameraZoomForMode()` 在纯 UI 普通模式下改为返回 `normalMinZoomFor(selectedLens)`，保持当前镜头的最低有效底倍。
+- `uiZoomDisplayScale()` 改为用实际 Camera2 底倍计算 UI matrix 缩放，底倍以上的差值才交给显示层放大。
+- `calibrationSampleZoom()` 改为记录纯 UI 模式下真实下发给 Camera2 的底倍，避免误写 `1x`。
+
+### 预防措施
+- 后续从物理镜头项目同步“纯 UI 放大”时，不能直接复用“Camera2 固定 1x”的假设；逻辑相机必须先保持镜头选择所需的最低有效 zoom。
+- 验证纯 UI 放大时查看 `zoom-map` 日志中的 `camera`、`uiScale`、`cameraBase`，确认 `camera * uiScale` 与 UI 目标倍率一致。
+
 ## [2026-08-28] 纯 UI 放大按钮同步报告
 
 ### 发现的问题
@@ -8,8 +23,8 @@
 
 ### 解决方案
 - 在 luoji 的 `CameraScreen` 中新增 `KEY_UI_ZOOM_ONLY_ENABLED`、`uiZoomOnlyEnabled` 状态和 `更多 -> 纯UI放大` 菜单按钮。
-- 开启后普通模式下 `cameraZoomForMode()` 固定向 Camera2 下发 `1x`，`TextureView.setTransform(Matrix)` 承担显示层放大，并同步 overlay 变换参数。
-- 普通校准样本通过 `calibrationSampleZoom()` 记录真实相机倍率；双镜头校准逻辑不套用纯 UI zoom。
+- 开启后普通模式下 `cameraZoomForMode()` 向 Camera2 下发当前逻辑相机镜头的最低有效底倍，`TextureView.setTransform(Matrix)` 承担底倍以上的显示层放大，并同步 overlay 变换参数。
+- 普通校准样本通过 `calibrationSampleZoom()` 记录真实 Camera2 底倍；双镜头校准逻辑不套用纯 UI zoom。
 
 ### 预防措施
 - 纯 UI 放大仅作为实验模式，默认保持关闭；验证真实相机裁切、YUV 输出或坐标校准时应关闭该开关。

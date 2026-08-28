@@ -7,10 +7,14 @@
 
 ## [camera-ui-zoom-only-button-2026-08-28] - 2026-08-28
 
+### Fixed
+- 修正 luoji 逻辑相机下纯 UI 放大把 Camera2 请求倍率固定成 `1x` 的问题；开启后改为保持当前镜头的最低有效底倍，避免点击放大时画面退回广角。
+- 纯 UI 放大的 HUD 日志新增 `cameraBase`，普通校准样本记录实际 Camera2 底倍，不再误写为 `1x`。
+
 ### Added
 - 按 `E:\StudioProjects\Auto_measure` 同步 `更多 -> 纯UI放大` 实验按钮，默认关闭并持久化到 `camera_screen_settings`。
-- 开启后普通模式下 Camera2 请求倍率固定为 `1x`，预览通过 `TextureView.setTransform(Matrix)` 做显示层放大，overlay 使用同一组 scale/translation。
-- 普通校准在纯 UI 模式下记录真实相机倍率 `1x`；双镜头校准保持原 Camera2 zoom 和物理长焦切换逻辑。
+- 开启后普通模式下 Camera2 保持当前逻辑相机镜头的最低有效底倍，预览通过 `TextureView.setTransform(Matrix)` 做底倍以上的显示层放大，overlay 使用同一组 scale/translation。
+- 普通校准在纯 UI 模式下记录真实 Camera2 底倍；双镜头校准保持原 Camera2 zoom 和物理长焦切换逻辑。
 
 ## [0.8.28] - 2026-08-28
 

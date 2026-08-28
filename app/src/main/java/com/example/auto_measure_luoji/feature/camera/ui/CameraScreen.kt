@@ -757,10 +757,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         textureView?.setTransform(Matrix())
     }
 
+    fun uiCameraBaseZoomForLens(lens: LensCandidate? = selectedLens): Float {
+        return normalMinZoomFor(lens).coerceAtLeast(1f)
+    }
+
     fun uiZoomDisplayScale(): Float {
         return if (isUiZoomActive()) {
-            val opticalBase = opticalBaseForLens()
-            (currentEquivRatio.coerceAtLeast(opticalBase) / opticalBase).coerceAtLeast(1f)
+            val cameraBase = uiCameraBaseZoomForLens()
+            (currentEquivRatio.coerceAtLeast(cameraBase) / cameraBase).coerceAtLeast(1f)
         } else {
             1f
         }
@@ -772,7 +776,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         } else if (isDualCalibMode) {
             equivRatio.coerceAtLeast(1f)
         } else if (uiZoomOnlyEnabled) {
-            1f
+            uiCameraBaseZoomForLens(selectedLens)
         } else {
             clampNormalZoom(equivRatio, selectedLens)
         }
@@ -784,7 +788,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     fun calibrationSampleZoom(equivRatio: Float = currentEquivRatio): Double {
         return if (isUiZoomActive()) {
-            1.0
+            uiCameraBaseZoomForLens(selectedLens).toDouble()
         } else {
             equivRatio.coerceAtLeast(1f).toDouble()
         }
@@ -1141,17 +1145,19 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (!isCameraReady) return@LaunchedEffect
         val cameraZoom = cameraZoomForMode(currentEquivRatio)
         val opticalBase = opticalBaseForLens()
+        val uiCameraBase = uiCameraBaseZoomForLens()
         val uiScale = uiZoomDisplayScale()
         val zoomMode = if (isUiZoomActive()) "UI_TEXTURE_MATRIX" else "CAMERA2"
         Log.i(
             "CameraScreen",
             String.format(
                 Locale.US,
-                "zoom-map: equiv=%.2fx, camera=%.2fx, uiScale=%.2fx, opticalBase=%.2fx, mode=%s, lens=%s",
+                "zoom-map: equiv=%.2fx, camera=%.2fx, uiScale=%.2fx, opticalBase=%.2fx, uiCameraBase=%.2fx, mode=%s, lens=%s",
                 currentEquivRatio,
                 cameraZoom,
                 uiScale,
                 opticalBase,
+                uiCameraBase,
                 zoomMode,
                 selectedLens?.physicalId ?: selectedLens?.cameraId ?: "none",
             ),
@@ -1160,10 +1166,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (isUiZoomActive()) {
             val message = String.format(
                 Locale.US,
-                "zoom: backend=UI_TEXTURE_MATRIX, ratio=%.2f, camera=%.2f, uiScale=%.2f, opticalBase=%.2f",
+                "zoom: backend=UI_TEXTURE_MATRIX, ratio=%.2f, camera=%.2f, uiScale=%.2f, cameraBase=%.2f, opticalBase=%.2f",
                 currentEquivRatio,
                 cameraZoom,
                 uiScale,
+                uiCameraBase,
                 opticalBase,
             )
             Log.i("CameraScreen", message)
@@ -1638,7 +1645,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 }
                                 applyCameraZoomForMode(currentEquivRatio)
                                 statusText = if (next) {
-                                    "纯UI放大：相机倍率固定 1x，TextureView 矩阵缩放画面"
+                                    "纯UI放大：相机保持最低有效底倍，超出部分由 UI 矩阵放大"
                                 } else {
                                     "纯UI放大已关闭：恢复 Camera2 数码放大"
                                 }
@@ -2360,7 +2367,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         calManager.startCalibration()
                         showCalPanel = true
                         lastResultText = if (isUiZoomActive()) {
-                            "UI校准倍率: ${"%.1f".format(calibrationZoom)}x，相机=1x"
+                            "UI校准倍率: ${"%.1f".format(calibrationZoom)}x，相机=${"%.1f".format(calibrationSampleZoom())}x"
                         } else {
                             "校准倍率: ${"%.1f".format(calibrationZoom)}x"
                         }

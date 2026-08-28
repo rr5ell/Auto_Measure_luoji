@@ -43,4 +43,4 @@
 
 ## 最后更新
 
-2026-08-28，Codex Agent。按 Auto_measure 同步 `更多 -> 纯UI放大` 实验按钮，普通模式可切换到 TextureView Matrix 显示层放大，双镜头校准逻辑保持 Camera2 zoom。
+2026-08-28，Codex Agent。按 Auto_measure 同步 `更多 -> 纯UI放大` 实验按钮；luoji 逻辑相机下 Camera2 保持当前镜头最低有效底倍，TextureView Matrix 只补足额外放大，双镜头校准逻辑保持 Camera2 zoom。
