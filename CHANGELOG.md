@@ -5,6 +5,11 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.28] - 2026-08-28
+
+### Fixed
+- Android 构建版本同步为 `versionName=0.8.28`、`versionCode=828`，用于上传包含两轮 YUV native 图片预处理优化的新包。
+
 ## [yuv-native-preprocess-parallel-2026-08-28] - 2026-08-28
 
 ### Changed
