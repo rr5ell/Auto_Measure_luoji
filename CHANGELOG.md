@@ -5,6 +5,11 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.27] - 2026-08-28
+
+### Fixed
+- Android 构建版本同步为 `versionName=0.8.27`、`versionCode=827`，用于上传包含 YUV JNI 绑定闪退修复和普通校准自动采集延迟修复的新包。
+
 ## [yuv-jni-package-binding-2026-08-28] - 2026-08-28
 
 ### Fixed
