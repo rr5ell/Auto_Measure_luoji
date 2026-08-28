@@ -41,4 +41,4 @@
 
 ## 最后更新
 
-2026-08-28，Codex Agent。修正 luoji 包名下 YUV 预处理与 Sherpa 热词 native JNI 导出名；YUV native 预处理不可用时回退 Kotlin 实现，避免直接闪退。
+2026-08-28，Codex Agent。YOLO 源日志新增 active 物理镜头、选中镜头与倍率，便于排查逻辑多摄下预览流和 YUV 分析流来源是否一致。

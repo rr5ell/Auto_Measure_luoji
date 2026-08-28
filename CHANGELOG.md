@@ -5,6 +5,11 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [yuv-active-lens-diagnostics-2026-08-28] - 2026-08-28
+
+### Added
+- YOLO 预览截图和 YUV 数据流检测日志新增 active 物理镜头、选中镜头与当前倍率，便于排查逻辑多摄下预览流和 YUV 分析流是否表现为同一焦距画面。
+
 ## [0.8.27] - 2026-08-28
 
 ### Fixed

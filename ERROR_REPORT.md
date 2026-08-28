@@ -1,5 +1,19 @@
 # Error Report
 
+## [2026-08-28] YUV 分析流镜头来源排查报告
+
+### 发现的问题
+- 当前普通预览和 YUV 分析流挂在同一个 logical `CaptureRequest`，代码没有对任一普通输出使用 `OutputConfiguration.setPhysicalCameraId()`。
+- `CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID` 是结果级回传，现有日志没有把它和每次 YOLO 源帧放在同一行，现场难以判断 YUV 模式下 HAL 是否切到预期焦距镜头。
+- 严重程度：中。若厂商 HAL 对预览 Surface 和 YUV Surface 使用不同处理链，可能出现预览画面和识别帧视场不一致。
+
+### 解决方案
+- 在 PreviewBitmap 和 ImageReaderYUV 两条 YOLO 源日志中加入 active 物理镜头、选中镜头与当前倍率。
+- 保持普通预览为 logical Session，不重新启用普通输出物理绑定，避免改变现有逻辑相机行为。
+
+### 预防措施
+- 真机排查时对比 `YOLO source` 日志中的 `active=`、`selected=`、`zoom=`；若 active 焦距和预期不一致，优先调整逻辑 zoom 阈值或进入专门的物理绑定诊断模式，不直接改普通校准逻辑。
+
 ## [2026-08-28] 蒲公英 0.8.27 发布记录
 
 ### 发现的问题

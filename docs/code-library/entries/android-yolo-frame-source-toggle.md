@@ -19,6 +19,11 @@
 - last_updated: 2026-08-28
 - author: Codex Agent
 
+## 2026-08-28 Active Lens Diagnostics Update
+- `CameraScreen` 的 PreviewBitmap 和 ImageReaderYUV 检测日志会输出 `active=<physicalId>/<eq35mm>mm selected=<id>/<eq35mm>mm zoom=<ratio>x`。
+- 该日志只能证明逻辑相机当前 capture result 上报的 active 物理镜头，不能证明每个 Surface 都有独立的物理来源上报。
+- 普通预览仍禁止重新启用 `OutputConfiguration.setPhysicalCameraId()`；如需强制同源，应先做单独诊断模式，避免改变普通逻辑相机链路。
+
 ## 2026-08-28 Update
 - luoji 包名下的 `YuvPreprocessNative.process()` 必须导出为 `Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_process`；旧 `auto_measure` 导出名会导致 YUV 模式运行时 `UnsatisfiedLinkError`。
 - `YoloDetector.detectFromYuv()` 优先走 native 预处理，捕获 `LinkageError` 后回退 `YuvFrameProcessor.fillInputFromYuv()`，避免 JNI 绑定异常直接闪退。

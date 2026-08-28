@@ -578,6 +578,28 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         )
     }
 
+    fun activeLensDebugText(): String {
+        val activeId = activePhysicalCameraId
+        val activeLens = lensByCameraId(activeId)
+        val activeText = if (activeId != null && activeLens != null) {
+            String.format(Locale.US, "active=%s/%.0fmm", activeId, activeLens.eq35mm)
+        } else if (activePhysicalLensReported) {
+            "active=${activeId ?: "not_reported"}"
+        } else {
+            "active=pending"
+        }
+        val selected = selectedLens
+        val selectedText = selected?.let {
+            String.format(
+                Locale.US,
+                "selected=%s/%.0fmm",
+                it.physicalId ?: it.cameraId,
+                it.eq35mm,
+            )
+        } ?: "selected=none"
+        return String.format(Locale.US, "%s %s zoom=%.2fx", activeText, selectedText, currentEquivRatio)
+    }
+
     fun findWideLens(candidates: List<LensCandidate>): LensCandidate? {
         return candidates
             .filter { it.category == LensCategory.WIDE }
@@ -1168,7 +1190,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     try {
                                         sourceWidth = snapshot.width
                                         sourceHeight = snapshot.height
-                                        sourceLabel = "PreviewBitmap ${captureMode.label} ${snapshot.width}x${snapshot.height}"
+                                        val lensDebug = activeLensDebugText()
+                                        sourceLabel = "PreviewBitmap ${captureMode.label} ${snapshot.width}x${snapshot.height} $lensDebug"
                                         Log.d("CameraScreen", "YOLO source: $sourceLabel")
                                         withContext(Dispatchers.Default) { detector.detect(snapshot) }
                                     } finally {
@@ -1194,7 +1217,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                             val rotation = cameraController.sensorOrientation
                                             sourceWidth = if (rotation == 90 || rotation == 270) image.height else image.width
                                             sourceHeight = if (rotation == 90 || rotation == 270) image.width else image.height
-                                            sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation"
+                                            val lensDebug = activeLensDebugText()
+                                            sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation $lensDebug"
                                             Log.d("CameraScreen", "YOLO source: $sourceLabel")
                                             withContext(Dispatchers.Default) { detector.detectFromYuv(image, rotation) }
                                         } finally {
