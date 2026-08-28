@@ -298,18 +298,18 @@ Release 构建：
 flutter build apk --release
 ```
 
-Release APK 输出：
+Debug APK 输出：
 
 ```text
-build/app/outputs/flutter-apk/app-release.apk
+app/build/outputs/apk/debug/app-debug.apk
 ```
 
 上传蒲公英：
 
 ```powershell
 .\scripts\upload_pgyer.ps1 `
-  -ApkPath "E:\StudioProjects\Speech2Text\build\app\outputs\flutter-apk\app-release.apk" `
-  -UpdateDescription "release版本"
+  -ApkPath "E:\StudioProjects\Auto_Measure_luoji\app\build\outputs\apk\debug\app-debug.apk" `
+  -UpdateDescription "0.8.29 纯UI放大逻辑相机底倍修复"
 ```
 
 脚本默认读取用户环境变量 `PGYER_API_KEY`。不要把 API Key 写进脚本、README 或提交记录。

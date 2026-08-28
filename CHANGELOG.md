@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.29] - 2026-08-28
+
+### Fixed
+- Android 构建版本同步为 `versionName=0.8.29`、`versionCode=829`，用于上传包含纯 UI 放大逻辑相机底倍修复的新包。
+- 蒲公英已上传并确认显示 `Auto_Measure_luoji 0.8.29 (829)`，下载页为 `https://www.pgyer.com/automeasureluoji`。
+
+### Added
+- 新增项目内蒲公英上传脚本 `scripts/upload_pgyer.ps1`，默认读取环境变量 `PGYER_API_KEY`，避免继续依赖其它项目脚本。
+
 ## [camera-ui-zoom-only-button-2026-08-28] - 2026-08-28
 
 ### Fixed

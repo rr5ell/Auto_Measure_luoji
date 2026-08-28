@@ -1,5 +1,20 @@
 # Error Report
 
+## [2026-08-28] 蒲公英 0.8.29 发布记录
+
+### 发现的问题
+- 纯 UI 放大逻辑相机底倍修复后，项目版本仍停留在已上传过的 `0.8.28 (828)`，继续上传会让测试包难以区分是否包含本次修复。
+- 严重程度：中。版本重复会影响现场验证和问题回溯。
+
+### 解决方案
+- 上传前将 Android 构建版本提升为 `versionName=0.8.29`、`versionCode=829`。
+- 新增项目内 `scripts/upload_pgyer.ps1`，默认读取环境变量 `PGYER_API_KEY`，避免依赖其它项目脚本。
+- 蒲公英已确认显示 `Auto_Measure_luoji 0.8.29 (829)`，下载页为 `https://www.pgyer.com/automeasureluoji`。
+
+### 预防措施
+- 每次蒲公英发布包含行为修复时，先确认 `app/build.gradle.kts` 中的 `versionName/versionCode` 已递增。
+- 上传脚本只读取环境变量或命令行参数中的 API Key，不得把凭据写入仓库。
+
 ## [2026-08-28] 纯 UI 放大逻辑相机退回广角修复
 
 ### 发现的问题
