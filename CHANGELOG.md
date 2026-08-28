@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-visual-zoom-display-2026-08-28] - 2026-08-28
+
+### Changed
+- 校准锁定坐标后，状态栏锁定倍率和底部倍率标题改为显示视觉总倍率，包含用于坐标居中的 UI scale。
+- `ZoomSlider` 新增 `displayRatio` 参数，滑块控制值仍使用真实目标倍率，避免把视觉显示倍率反写到 Camera2 或校准计算。
+
 ## [0.8.29] - 2026-08-28
 
 ### Fixed

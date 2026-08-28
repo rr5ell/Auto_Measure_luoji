@@ -32,6 +32,7 @@
 | `cameraZoomForMode()` | 函数 | `currentEquivRatio` 或最低有效底倍 | 计算 Camera2 请求倍率 | 纯 UI 普通模式返回 `uiCameraBaseZoomForLens()` |
 | `uiZoomDisplayScale()` | 函数 | `1f` | 计算 TextureView Matrix 显示缩放 | 纯 UI 模式用 `currentEquivRatio / uiCameraBaseZoomForLens()`；双镜头模式保持 `1f` |
 | `calibrationSampleZoom()` | 函数 | `currentEquivRatio` 或最低有效底倍 | 计算写入普通校准样本的真实相机倍率 | 纯 UI 普通模式记录真实 Camera2 底倍 |
+| `visualZoomDisplayRatio()` | 函数 | 真实底倍乘 UI scale | 计算校准锁定后 UI 显示的视觉总倍率 | 只用于 UI 文本，不得写入 Camera2 或校准样本 |
 
 ## 复用方式
 - 开关入口在 `CameraScreen` 的 `更多` 菜单中，默认关闭。
@@ -39,11 +40,13 @@
 - 预览内容通过 `TextureView.setTransform(Matrix)` 做显示层矩阵缩放和平移，外层 `FrameLayout` 保持 `1x`。
 - 检测框 overlay 和命中判断复用 `wrapperScale/wrapperTx/wrapperTy`，保证画面、overlay、命中区域坐标同层变换。
 - 普通校准采集继续使用现有 bytes/YUV 输入链路，但标定计算倍率必须调用 `calibrationSampleZoom()`。
+- 校准锁定后的倍率显示调用 `visualZoomDisplayRatio()`，把坐标居中产生的 UI scale 合入显示值。
 
 ## 注意事项
 - `TextureView.setTransform(Matrix)` 只表示预览显示层变换；`ImageReader YUV` 仍是相机原始输出。
 - luoji 当前普通预览保持逻辑相机 Session，不使用 `OutputConfiguration.setPhysicalCameraId()` 绑定普通预览 Surface。
 - 纯 UI 模式下 `zoom-map` 日志会输出 `mode=UI_TEXTURE_MATRIX` 和 `uiCameraBase`，HUD 会显示 `zoom: backend=UI_TEXTURE_MATRIX`、`cameraBase`。
+- `visualZoomDisplayRatio()` 是显示值，不是物理相机倍率；不要把它传给 `setZoomRatio()` 或 `collectSample()`。
 - 电子防抖 EIS 默认保持 OFF；不要用 EIS 处理纯 UI 模式下的坐标差异。
 
 ## 测试与验证

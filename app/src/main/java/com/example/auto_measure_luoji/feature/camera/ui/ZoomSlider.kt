@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.sp
  * 放大滑块 UI
  *
  * @param currentRatio    当前等效倍率
+ * @param displayRatio    仅用于 UI 文本显示的视觉总倍率
  * @param minRatio        最小倍率（光学底倍）
  * @param maxRatio        最大倍率
  * @param onRatioChanged  倍率变化回调
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ZoomSlider(
     currentRatio: Float,
+    displayRatio: Float = currentRatio,
     minRatio: Float,
     maxRatio: Float,
     labelSuffix: String = "",
@@ -32,6 +34,12 @@ fun ZoomSlider(
     val safeMinRatio = minRatio.coerceAtLeast(1f)
     val safeMaxRatio = maxRatio.coerceAtLeast(safeMinRatio)
     val sliderValue = currentRatio.coerceIn(safeMinRatio, safeMaxRatio)
+    val displayValue = displayRatio.coerceAtLeast(1f)
+    val suffixText = when {
+        labelSuffix.isBlank() -> ""
+        labelSuffix.startsWith(" ") -> labelSuffix
+        else -> " $labelSuffix"
+    }
 
     Column(
         modifier = modifier
@@ -41,7 +49,7 @@ fun ZoomSlider(
     ) {
         // 倍率显示
         Text(
-            text = "%.1fx%s".format(sliderValue, labelSuffix),
+            text = "%.1fx%s".format(displayValue, suffixText),
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold

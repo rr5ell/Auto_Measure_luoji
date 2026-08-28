@@ -71,6 +71,7 @@
 
 ## 注意事项
 - Camera2 zoom 和 UI 居中变换是两个层次：倍率放大由 Camera2 负责，校准点居中可使用 UI 平移和最小覆盖 scale。
+- 校准锁定后的 UI 倍率文本可以显示 `currentEquivRatio * wrapperScale` 这样的视觉总倍率，但 Camera2 请求和校准样本仍必须使用真实倍率。
 - 普通预览使用父逻辑相机 zoom 参数；只有双摄 strictPhysical 使用当前物理候选 zoom 参数，新增调用点必须显式判断模式。
 - 普通模式最大倍率固定 `24x`；实际后端仍可能因设备 HAL 对 `CONTROL_ZOOM_RATIO` 的范围限制而切到 fallback crop。
 - 应用内 Log 面板需要包含 `Camera2Ctrl:I/D/W` 和 `CameraScreen:I`，否则真机上可能误以为没有 zoom 日志。

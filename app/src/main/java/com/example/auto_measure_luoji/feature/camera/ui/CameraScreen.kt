@@ -794,6 +794,25 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    fun visualZoomDisplayRatio(): Float {
+        val uiScale = wrapperScale.coerceAtLeast(1f)
+        val baseZoom = if (isUiZoomActive()) {
+            uiCameraBaseZoomForLens(selectedLens)
+        } else {
+            currentEquivRatio.coerceAtLeast(1f)
+        }
+        return (baseZoom * uiScale).coerceAtLeast(1f)
+    }
+
+    fun visualZoomLabelSuffix(baseSuffix: String = ""): String {
+        val hasUiScale = anchorActive && wrapperScale > 1.01f
+        return when {
+            !hasUiScale -> baseSuffix
+            baseSuffix.isBlank() -> "视觉"
+            else -> "$baseSuffix 视觉"
+        }
+    }
+
     fun prepareSingleCalibrationZoom(): Float {
         val lens = selectedLens
         val targetZoom = if (lens?.category == LensCategory.WIDE) {
@@ -1780,7 +1799,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     zoomText = zoomBackendText,
                     anchorText = if (anchorActive && anchorCenter1x != null) {
                         val a = anchorCenter1x!!
-                        "锁定 (${a.x.toInt()}, ${a.y.toInt()}) · ${"%.1f".format(currentEquivRatio)}x"
+                        val suffix = visualZoomLabelSuffix()
+                        val suffixText = if (suffix.isBlank()) "" else " $suffix"
+                        "锁定 (${a.x.toInt()}, ${a.y.toInt()}) · " +
+                            "${"%.1f".format(visualZoomDisplayRatio())}x$suffixText"
                     } else {
                         ""
                     },
@@ -2133,17 +2155,18 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (isCameraReady && !showCalPanel && !showDualCalPanel) {
             ZoomSlider(
                 currentRatio = currentEquivRatio,
+                displayRatio = visualZoomDisplayRatio(),
                 minRatio = if (isDualCalibMode) 1f else normalMinZoomFor(selectedLens),
                 maxRatio = if (isDualCalibMode) {
                     dualTelephotoMag.toFloat()
                 } else {
                     normalMaxZoomFor(selectedLens)
                 },
-                labelSuffix = if (isDualCalibMode) {
+                labelSuffix = visualZoomLabelSuffix(if (isDualCalibMode) {
                     if (isUsingDualTele) " (T)" else " (W)"
                 } else {
                     ""
-                },
+                }),
                 onRatioChanged = { ratio ->
                     if (isDualCalibMode) {
                         applyDualZoom(ratio, keepAnchor = true)

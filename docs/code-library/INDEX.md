@@ -44,4 +44,4 @@
 
 ## 最后更新
 
-2026-08-28，Codex Agent。发布 `0.8.29 (829)` 前补齐项目内蒲公英上传脚本；纯 UI 放大在 luoji 逻辑相机下保持 Camera2 最低有效底倍，TextureView Matrix 只补足额外放大。
+2026-08-28，Codex Agent。校准锁定后倍率文本改为显示包含 UI 居中 scale 的视觉总倍率；Camera2 请求倍率和校准样本继续使用真实倍率。

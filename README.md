@@ -57,6 +57,7 @@ app/src/main/java/com/example/auto_measure_luoji/
 - 进入普通预览后直接放大到最大焦距对应的光学基准倍率 + `0.1x`，倍率滑块最低只能回到该上浮后的基准倍率，最高固定为 `24x`
 - 倍率滑块使用父逻辑相机 Camera2 `CONTROL_ZOOM_RATIO` 优先链路执行数码放大；请求超出设备 `CONTROL_ZOOM_RATIO_RANGE` 时回退 `SCALER_CROP_REGION`
 - `更多 -> 纯UI放大` 提供实验开关，开启后普通模式下 Camera2 保持当前逻辑相机镜头的最低有效底倍，预览显示层通过 `TextureView.setTransform(Matrix)` 补足额外放大；双镜头校准不受该开关影响
+- 校准锁定坐标后，倍率文本显示视觉总倍率：普通模式为 `currentEquivRatio * wrapperScale`，纯 UI 模式为 `uiCameraBaseZoomForLens() * wrapperScale`；该值只用于 UI 显示，不写入 Camera2 或校准样本
 - 主界面状态区会用 35mm 等效焦距显示当前画面实际活跃物理镜头；如果厂商 HAL 未回传 `activePhysicalId`，会显示未上报
 - 主界面状态区会显示最近一次 `zoom: backend=...`，应用内 Log 面板也会显示 `Camera2Ctrl` / `CameraScreen` 的 zoom 日志
 - 历史 `ZoomController.applyZoom()` 已委托到同一 Camera2 zoom 链路，避免普通倍率重新变成纯 crop 或 UI 放大

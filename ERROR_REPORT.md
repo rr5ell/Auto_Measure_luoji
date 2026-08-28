@@ -1,5 +1,20 @@
 # Error Report
 
+## [2026-08-28] 校准后视觉倍率显示修正
+
+### 发现的问题
+- 校准锁定坐标后，系统会用 UI scale 把目标坐标移动到屏幕中心，但状态栏和底部倍率标题仍只显示 `currentEquivRatio`，没有体现额外 UI 放大。
+- 严重程度：低到中。相机实际请求和校准计算不受影响，但现场观察会误以为画面视觉倍率仍等于原始滑块倍率。
+
+### 解决方案
+- 新增 `visualZoomDisplayRatio()`，普通模式按 `currentEquivRatio * wrapperScale` 显示，纯 UI 模式按 `uiCameraBaseZoomForLens() * wrapperScale` 显示。
+- `ZoomSlider` 新增 `displayRatio` 参数，只改变标题文本，不改变滑块真实值、范围或回调倍率。
+- 当校准锁定后的 UI scale 大于 `1.01x` 时，倍率文本追加“视觉”标记。
+
+### 预防措施
+- 后续涉及倍率时必须区分三类值：Camera2 请求倍率、校准/预测使用的真实倍率、屏幕展示用视觉倍率。
+- 禁止把视觉倍率传入 `Camera2Controller.setZoomRatio()` 或 `CalibrationManager.collectSample()`。
+
 ## [2026-08-28] 蒲公英 0.8.29 发布记录
 
 ### 发现的问题
