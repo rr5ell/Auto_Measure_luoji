@@ -12,6 +12,8 @@
 - native 主循环按旋转角度拆分，避免每个像素执行 `switch(rotation)`。
 - 左右和整行 padding 改成连续 `std::fill`，减少无效像素分支。
 - YUV 到 RGB 使用 BT.601 full-range 定点整数近似，降低 `1280x1280` 逐像素浮点计算成本。
+- 连续 YUV 检测时只在首次、输入 buffer 变化、尺寸/旋转变化或从预览截图源切回 YUV 时重填 padding，后续帧只写有效图像内容区。
+- 大尺寸输入按输出行最多分 4 个 native worker 并行处理，降低单线程 CPU 转换耗时。
 
 ### 预防措施
 - 后续优化 YUV 实时识别时，优先查看 `YOLO timing ... pre=`，不要把 GPU 推理耗时和 CPU 预处理耗时混在一起判断。

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <thread>
 
 // YUV_420_888 → RGB → 旋转 → Letterbox → 归一化 → FloatBuffer
 // 所有预处理在 native 完成，Kotlin 层只传参数
@@ -165,6 +166,149 @@ static inline void writeYuvAsRgb(
     *dst++ = static_cast<float>(clampByte(b)) * inv255;
 }
 
+static int chooseThreadCount(int dstH, int contentPixels) {
+    if (contentPixels < 512 * 512) {
+        return 1;
+    }
+    const unsigned int hardware = std::thread::hardware_concurrency();
+    const int available = hardware == 0 ? 2 : static_cast<int>(hardware);
+    const int byRows = std::max(1, dstH / 64);
+    return std::max(1, std::min(std::min(available, byRows), 4));
+}
+
+static void processRows(
+    int normalizedRotation,
+    int rowStart,
+    int rowEnd,
+    int dstW,
+    int imageW,
+    int imageH,
+    const uint8_t* yPlane,
+    const uint8_t* uPlane,
+    const uint8_t* vPlane,
+    int yRowStride,
+    int uvRowStride,
+    int uvPixelStride,
+    const int* xMap,
+    const int* yMap,
+    int contentXStart,
+    int contentXEnd,
+    bool fillPadding,
+    float* out,
+    float inv255,
+    float padVal
+) {
+    const int rowStrideFloats = dstW * 3;
+    switch (normalizedRotation) {
+        case 90:
+            for (int y = rowStart; y < rowEnd; ++y) {
+                float* dst = out + static_cast<size_t>(y) * rowStrideFloats;
+                const int srcRotY = yMap[y];
+                if (srcRotY < 0) {
+                    if (fillPadding) {
+                        writePaddingPixels(dst, dstW, padVal);
+                    }
+                    continue;
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, contentXStart, padVal);
+                } else {
+                    dst += contentXStart * 3;
+                }
+                for (int x = contentXStart; x < contentXEnd; ++x) {
+                    const int srcRotX = xMap[x];
+                    const int origX = srcRotY;
+                    const int origY = imageH - 1 - srcRotX;
+                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride,
+                                  uvRowStride, uvPixelStride, origX, origY, inv255);
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, dstW - contentXEnd, padVal);
+                }
+            }
+            break;
+        case 180:
+            for (int y = rowStart; y < rowEnd; ++y) {
+                float* dst = out + static_cast<size_t>(y) * rowStrideFloats;
+                const int srcRotY = yMap[y];
+                if (srcRotY < 0) {
+                    if (fillPadding) {
+                        writePaddingPixels(dst, dstW, padVal);
+                    }
+                    continue;
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, contentXStart, padVal);
+                } else {
+                    dst += contentXStart * 3;
+                }
+                for (int x = contentXStart; x < contentXEnd; ++x) {
+                    const int srcRotX = xMap[x];
+                    const int origX = imageW - 1 - srcRotX;
+                    const int origY = imageH - 1 - srcRotY;
+                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride,
+                                  uvRowStride, uvPixelStride, origX, origY, inv255);
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, dstW - contentXEnd, padVal);
+                }
+            }
+            break;
+        case 270:
+            for (int y = rowStart; y < rowEnd; ++y) {
+                float* dst = out + static_cast<size_t>(y) * rowStrideFloats;
+                const int srcRotY = yMap[y];
+                if (srcRotY < 0) {
+                    if (fillPadding) {
+                        writePaddingPixels(dst, dstW, padVal);
+                    }
+                    continue;
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, contentXStart, padVal);
+                } else {
+                    dst += contentXStart * 3;
+                }
+                for (int x = contentXStart; x < contentXEnd; ++x) {
+                    const int srcRotX = xMap[x];
+                    const int origX = imageW - 1 - srcRotY;
+                    const int origY = srcRotX;
+                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride,
+                                  uvRowStride, uvPixelStride, origX, origY, inv255);
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, dstW - contentXEnd, padVal);
+                }
+            }
+            break;
+        default:
+            for (int y = rowStart; y < rowEnd; ++y) {
+                float* dst = out + static_cast<size_t>(y) * rowStrideFloats;
+                const int srcRotY = yMap[y];
+                if (srcRotY < 0) {
+                    if (fillPadding) {
+                        writePaddingPixels(dst, dstW, padVal);
+                    }
+                    continue;
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, contentXStart, padVal);
+                } else {
+                    dst += contentXStart * 3;
+                }
+                for (int x = contentXStart; x < contentXEnd; ++x) {
+                    const int srcRotX = xMap[x];
+                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride,
+                                  uvRowStride, uvPixelStride, srcRotX, srcRotY, inv255);
+                }
+                if (fillPadding) {
+                    writePaddingPixels(dst, dstW - contentXEnd, padVal);
+                }
+            }
+            break;
+    }
+}
+
 extern "C" {
 
 // 主处理函数
@@ -183,6 +327,7 @@ Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_
     jint rotation,
     jint dstW,
     jint dstH,
+    jboolean refillPadding,
     jobject outBuffer
 ) {
     // 获取 direct buffer 地址
@@ -204,76 +349,35 @@ Java_com_example_auto_1measure_1luoji_feature_camera_domain_YuvPreprocessNative_
     const float padVal = 114.0f * inv255;
     const int contentXStart = std::max(0, plan.padX);
     const int contentXEnd = std::min(dstW, plan.padX + plan.nw);
-    float* dst = out;
+    const int contentPixels = std::max(0, contentXEnd - contentXStart) * dstH;
+    const bool fillPadding = refillPadding == JNI_TRUE;
+    const int threadCount = chooseThreadCount(dstH, contentPixels);
 
-    // 主循环：旋转分支前置，padding 整段填充，直接写入 FloatBuffer。
-    switch (normalizedRotation) {
-        case 90:
-            for (int y = 0; y < dstH; ++y) {
-                const int srcRotY = yMap[y];
-                if (srcRotY < 0) {
-                    writePaddingPixels(dst, dstW, padVal);
-                    continue;
-                }
-                writePaddingPixels(dst, contentXStart, padVal);
-                for (int x = contentXStart; x < contentXEnd; ++x) {
-                    const int srcRotX = xMap[x];
-                    const int origX = srcRotY;
-                    const int origY = imageH - 1 - srcRotX;
-                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride, uvRowStride, uvPixelStride, origX, origY, inv255);
-                }
-                writePaddingPixels(dst, dstW - contentXEnd, padVal);
-            }
-            break;
-        case 180:
-            for (int y = 0; y < dstH; ++y) {
-                const int srcRotY = yMap[y];
-                if (srcRotY < 0) {
-                    writePaddingPixels(dst, dstW, padVal);
-                    continue;
-                }
-                writePaddingPixels(dst, contentXStart, padVal);
-                for (int x = contentXStart; x < contentXEnd; ++x) {
-                    const int srcRotX = xMap[x];
-                    const int origX = imageW - 1 - srcRotX;
-                    const int origY = imageH - 1 - srcRotY;
-                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride, uvRowStride, uvPixelStride, origX, origY, inv255);
-                }
-                writePaddingPixels(dst, dstW - contentXEnd, padVal);
-            }
-            break;
-        case 270:
-            for (int y = 0; y < dstH; ++y) {
-                const int srcRotY = yMap[y];
-                if (srcRotY < 0) {
-                    writePaddingPixels(dst, dstW, padVal);
-                    continue;
-                }
-                writePaddingPixels(dst, contentXStart, padVal);
-                for (int x = contentXStart; x < contentXEnd; ++x) {
-                    const int srcRotX = xMap[x];
-                    const int origX = imageW - 1 - srcRotY;
-                    const int origY = srcRotX;
-                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride, uvRowStride, uvPixelStride, origX, origY, inv255);
-                }
-                writePaddingPixels(dst, dstW - contentXEnd, padVal);
-            }
-            break;
-        default:
-            for (int y = 0; y < dstH; ++y) {
-                const int srcRotY = yMap[y];
-                if (srcRotY < 0) {
-                    writePaddingPixels(dst, dstW, padVal);
-                    continue;
-                }
-                writePaddingPixels(dst, contentXStart, padVal);
-                for (int x = contentXStart; x < contentXEnd; ++x) {
-                    const int srcRotX = xMap[x];
-                    writeYuvAsRgb(dst, yPlane, uPlane, vPlane, yRowStride, uvRowStride, uvPixelStride, srcRotX, srcRotY, inv255);
-                }
-                writePaddingPixels(dst, dstW - contentXEnd, padVal);
-            }
-            break;
+    if (threadCount <= 1) {
+        processRows(normalizedRotation, 0, dstH, dstW, imageW, imageH,
+                    yPlane, uPlane, vPlane, yRowStride, uvRowStride, uvPixelStride,
+                    xMap, yMap, contentXStart, contentXEnd, fillPadding,
+                    out, inv255, padVal);
+    } else {
+        const int rowsPerThread = dstH / threadCount;
+        std::vector<std::thread> workers;
+        workers.reserve(threadCount - 1);
+        for (int i = 1; i < threadCount; ++i) {
+            const int rowStart = i * rowsPerThread;
+            const int rowEnd = (i == threadCount - 1) ? dstH : (i + 1) * rowsPerThread;
+            workers.emplace_back(processRows, normalizedRotation, rowStart, rowEnd,
+                                 dstW, imageW, imageH, yPlane, uPlane, vPlane,
+                                 yRowStride, uvRowStride, uvPixelStride,
+                                 xMap, yMap, contentXStart, contentXEnd,
+                                 fillPadding, out, inv255, padVal);
+        }
+        processRows(normalizedRotation, 0, rowsPerThread, dstW, imageW, imageH,
+                    yPlane, uPlane, vPlane, yRowStride, uvRowStride, uvPixelStride,
+                    xMap, yMap, contentXStart, contentXEnd, fillPadding,
+                    out, inv255, padVal);
+        for (std::thread& worker : workers) {
+            worker.join();
+        }
     }
 
     return 0;

@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [yuv-native-preprocess-parallel-2026-08-28] - 2026-08-28
+
+### Changed
+- YUV native 预处理新增 `refillPadding` 状态控制，连续 YUV 检测时复用不变的 Letterbox 灰边，只重写有效图像内容区。
+- `yuv_preprocess.cpp` 按输出行分块并行处理，较大模型输入最多使用 4 个 native worker，降低单核逐像素转换瓶颈。
+- 从预览截图源切回 YUV 源、输入 buffer 重建、尺寸或旋转变化时会强制重新填充 padding，避免复用脏输入。
+
 ## [yuv-native-preprocess-perf-2026-08-28] - 2026-08-28
 
 ### Changed

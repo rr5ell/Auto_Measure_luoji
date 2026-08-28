@@ -26,6 +26,7 @@
 
 ## 2026-08-28 YUV Native Preprocess Perf Update
 - `yuv_preprocess.cpp` 是 YUV 数据源实时识别的优先预处理路径，当前实现复用线程本地 Letterbox 映射缓存，旋转分支已移出逐像素循环。
+- 连续 YUV 检测时，`YoloDetector` 会让 native 复用已初始化的 Letterbox padding；从预览截图源切回 YUV 时会重新填充，避免污染。
 - 1920x1080 YUV 输入到 1280x1280 模型时，性能判断以 `YOLO timing ... pre=` 为准；`inf=` 只代表 LiteRT/GMS 推理耗时。
 - 详细复用规则见 `android-yuv-native-preprocess-fast-path`。
 

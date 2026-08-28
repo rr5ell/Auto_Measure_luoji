@@ -44,6 +44,7 @@ object YuvPreprocessNative {
         rotation: Int,
         dstW: Int,
         dstH: Int,
+        refillPadding: Boolean,
         outBuffer: ByteBuffer,
     ): Int
 
@@ -54,6 +55,7 @@ object YuvPreprocessNative {
      * @param rotation  传感器旋转角度
      * @param dstW      模型输入宽度
      * @param dstH      模型输入高度
+     * @param refillPadding 是否重新填充不变的 Letterbox padding 区域
      * @param outBuffer TFLite 输入 ByteBuffer (direct, FLOAT32)
      * @return 0 成功，-1 失败
      */
@@ -63,6 +65,7 @@ object YuvPreprocessNative {
         dstW: Int,
         dstH: Int,
         outBuffer: ByteBuffer,
+        refillPadding: Boolean = true,
     ): Int {
         val yPlane = image.planes[0].buffer
         val uPlane = image.planes[1].buffer
@@ -78,6 +81,7 @@ object YuvPreprocessNative {
             image.width, image.height,
             rotation,
             dstW, dstH,
+            refillPadding,
             outBuffer,
         )
     }

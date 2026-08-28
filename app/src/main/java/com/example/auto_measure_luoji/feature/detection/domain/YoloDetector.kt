@@ -97,6 +97,16 @@ class YoloDetector(
         val meta: LbMeta,
     )
 
+    private data class YuvNativePaddingKey(
+        val bufferIdentity: Int,
+        val bufferCapacity: Int,
+        val imageW: Int,
+        val imageH: Int,
+        val rotation: Int,
+        val dstW: Int,
+        val dstH: Int,
+    )
+
     private var backend: Backend = Backend.CPU
     private var runner: Runner? = null
     private var gpuDelegate: GpuDelegate? = null
@@ -110,6 +120,7 @@ class YoloDetector(
     private var cachedSrcPixels: IntArray? = null
     private var cachedFloatInput: FloatArray? = null
     private var cachedPlan: LbPlan? = null
+    private var yuvNativePaddingKey: YuvNativePaddingKey? = null
 
     init {
         val model = AssetUtils.loadMappedFile(context, modelAssetPath)
@@ -212,13 +223,33 @@ class YoloDetector(
         val tPre0 = SystemClock.elapsedRealtimeNanos()
         val inputBuffer = ensureInputBuffer(inType, inputW, inputH)
         if (inType == DataType.FLOAT32) {
+            val paddingKey = YuvNativePaddingKey(
+                bufferIdentity = System.identityHashCode(inputBuffer),
+                bufferCapacity = inputBuffer.capacity(),
+                imageW = image.width,
+                imageH = image.height,
+                rotation = rotation,
+                dstW = inputW,
+                dstH = inputH,
+            )
+            val refillPadding = yuvNativePaddingKey != paddingKey
             val nativeResult = try {
-                YuvPreprocessNative.processImage(image, rotation, inputW, inputH, inputBuffer)
+                YuvPreprocessNative.processImage(
+                    image = image,
+                    rotation = rotation,
+                    dstW = inputW,
+                    dstH = inputH,
+                    outBuffer = inputBuffer,
+                    refillPadding = refillPadding,
+                )
             } catch (error: LinkageError) {
                 Log.e(TAG, "YUV native预处理绑定失败，回退Kotlin实现", error)
                 null
             }
-            if (nativeResult != 0) {
+            if (nativeResult == 0) {
+                yuvNativePaddingKey = paddingKey
+            } else {
+                yuvNativePaddingKey = null
                 if (nativeResult != null) {
                     Log.w(TAG, "YUV native预处理返回$nativeResult，回退Kotlin实现")
                 }
@@ -271,6 +302,7 @@ class YoloDetector(
         val plan = getOrBuildPlan(bitmap.width, bitmap.height, inputW, inputH)
         val srcPixels = getSrcPixelsCached(bitmap)
         val inputBuffer = ensureInputBuffer(inType, inputW, inputH)
+        yuvNativePaddingKey = null
         if (inType == DataType.FLOAT32) {
             fillInputFloatFast(srcPixels, plan, inputW, inputH, inputBuffer)
         } else if (inType == DataType.UINT8 || inType == DataType.INT8) {

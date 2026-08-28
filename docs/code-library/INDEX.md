@@ -42,4 +42,4 @@
 
 ## 最后更新
 
-2026-08-28，Codex Agent。YOLO YUV native 预处理新增映射缓存、旋转专用循环、整段 padding 填充和定点 YUV 转 RGB，降低 `pre=` 耗时。
+2026-08-28，Codex Agent。YOLO YUV native 预处理新增映射缓存、padding 复用、旋转专用循环、多线程分块和定点 YUV 转 RGB，降低 `pre=` 耗时。
