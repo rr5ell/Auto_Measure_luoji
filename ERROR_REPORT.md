@@ -1,5 +1,20 @@
 # Error Report
 
+## [2026-08-28] 纯 UI 放大按钮同步报告
+
+### 发现的问题
+- `E:\StudioProjects\Auto_measure` 已有 `更多 -> 纯UI放大` 实验开关，luoji 项目缺少该入口，无法对比 Camera2 zoom 与显示层 UI zoom 的差异。
+- 严重程度：低。属于实验入口缺失，不影响默认 Camera2 zoom 主流程。
+
+### 解决方案
+- 在 luoji 的 `CameraScreen` 中新增 `KEY_UI_ZOOM_ONLY_ENABLED`、`uiZoomOnlyEnabled` 状态和 `更多 -> 纯UI放大` 菜单按钮。
+- 开启后普通模式下 `cameraZoomForMode()` 固定向 Camera2 下发 `1x`，`TextureView.setTransform(Matrix)` 承担显示层放大，并同步 overlay 变换参数。
+- 普通校准样本通过 `calibrationSampleZoom()` 记录真实相机倍率；双镜头校准逻辑不套用纯 UI zoom。
+
+### 预防措施
+- 纯 UI 放大仅作为实验模式，默认保持关闭；验证真实相机裁切、YUV 输出或坐标校准时应关闭该开关。
+- 后续修改倍率逻辑时，必须区分 `currentEquivRatio` 显示倍率、Camera2 请求倍率和 UI matrix scale。
+
 ## [2026-08-28] 蒲公英 0.8.28 发布记录
 
 ### 发现的问题

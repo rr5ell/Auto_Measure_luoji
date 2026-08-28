@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-ui-zoom-only-button-2026-08-28] - 2026-08-28
+
+### Added
+- 按 `E:\StudioProjects\Auto_measure` 同步 `更多 -> 纯UI放大` 实验按钮，默认关闭并持久化到 `camera_screen_settings`。
+- 开启后普通模式下 Camera2 请求倍率固定为 `1x`，预览通过 `TextureView.setTransform(Matrix)` 做显示层放大，overlay 使用同一组 scale/translation。
+- 普通校准在纯 UI 模式下记录真实相机倍率 `1x`；双镜头校准保持原 Camera2 zoom 和物理长焦切换逻辑。
+
 ## [0.8.28] - 2026-08-28
 
 ### Fixed

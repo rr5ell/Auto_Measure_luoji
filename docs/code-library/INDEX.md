@@ -31,6 +31,7 @@
 | android-camera-top-action-two-row-layout | 相机页顶部按钮两行布局 | android, kotlin, compose, camera-ui, toolbar-layout | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | superseded |
 | android-camera-top-action-collapsible-menu | 相机页顶部按钮折叠菜单与广角切换 | android, kotlin, compose, camera-ui, toolbar-layout, lens-switch | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-camera2-control-zoom-ratio-preview-zoom | Camera2 CONTROL_ZOOM_RATIO 倍率放大 | android, kotlin, camera2, zoom, control-zoom-ratio, coordinate-map | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/util/ZoomController.kt` | active |
+| android-camera-ui-zoom-only-mode | 纯 UI 放大实验开关 | android, kotlin, compose, camera-ui, zoom, calibration, coordinate-map | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-camera2-active-physical-lens-display | 当前画面活跃物理镜头焦距显示 | android, kotlin, camera2, logical-multi-camera, active-physical-id, lens-display | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/data/LensScanner.kt` | active |
 | android-camera2-physical-preview-output-binding | 逻辑相机 Session 中绑定物理预览输出 | android, kotlin, camera2, logical-multi-camera, physical-output, fusion-avoidance | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | deprecated |
 
@@ -42,4 +43,4 @@
 
 ## 最后更新
 
-2026-08-28，Codex Agent。YOLO YUV native 预处理新增映射缓存、padding 复用、旋转专用循环、多线程分块和定点 YUV 转 RGB，降低 `pre=` 耗时。
+2026-08-28，Codex Agent。按 Auto_measure 同步 `更多 -> 纯UI放大` 实验按钮，普通模式可切换到 TextureView Matrix 显示层放大，双镜头校准逻辑保持 Camera2 zoom。

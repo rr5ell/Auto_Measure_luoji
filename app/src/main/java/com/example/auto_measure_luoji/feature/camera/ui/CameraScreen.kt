@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.util.Log
@@ -88,14 +89,15 @@ private const val NORMAL_MIN_ZOOM_OFFSET = 0.1f
 private const val CALIBRATION_EXPOSURE_EV = -2.0f
 private const val CAMERA_SCREEN_PREFS = "camera_screen_settings"
 private const val KEY_YOLO_FRAME_SOURCE = "yolo_frame_source"
+private const val KEY_UI_ZOOM_ONLY_ENABLED = "ui_zoom_only_enabled"
 
 /**
  * 相机预览屏幕
  *
  * 变换方案：
- * - TextureView 完全不变换（setTransform/rotation/scaleX 都会黑屏）
- * - 变换应用在 FrameLayout 容器上（scaleX/scaleY/translationX/translationY）
- * - 参考项目用 CameraX PreviewView 做同样的事，PreviewView 也是 ViewGroup
+ * - 默认倍率放大交给 Camera2，校准点居中仍应用在 FrameLayout 容器上。
+ * - 纯 UI 放大实验模式使用 TextureView.setTransform(Matrix) 在显示层做 GPU 矩阵变换。
+ * - 检测框 overlay 复用同一组 scale/translation，保持和预览画面一致。
  */
 private enum class YoloCaptureMode(
     val label: String,
@@ -157,6 +159,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var showStabilizationDialog by remember { mutableStateOf(false) }
     var eisMode by remember { mutableIntStateOf(Camera2Controller.getDefaultVideoStabilizationMode()) }
     var videoStabilizationText by remember { mutableStateOf("") }
+    var uiZoomOnlyEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_UI_ZOOM_ONLY_ENABLED, false))
+    }
     var showLaserComparePanel by remember { mutableStateOf(false) }
     var laserCompareEnabled by remember { mutableStateOf(false) }
     var laserCompareText by remember { mutableStateOf("") }
@@ -623,14 +628,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         return findWideLens(sameLogical.ifEmpty { candidates })
     }
 
+    fun isUiZoomActive(): Boolean = uiZoomOnlyEnabled && !isDualCalibMode
+
+    fun opticalBaseForLens(lens: LensCandidate? = selectedLens): Float {
+        if (lens == null) return 1f
+        val wide = findWideLensInSameLogicalCamera(lens, lensCandidates) ?: return 1f
+        if (lens.eq35mm <= 0f || wide.eq35mm <= 0f) return 1f
+
+        // 当前物理镜头在 Camera2 1x 输出时已经带有自身光学底倍。
+        // 光学底倍按镜头显示语义四舍五入，避免 4.86x 这类浮点值导致 UI 放大和用户认知的 5x 不一致。
+        // 纯 UI 放大只补足 targetEquiv / roundedOpticalBase 的差值，例如 5x 物理镜头显示 7x 时，UI scale 为 7 / 5 = 1.4。
+        return (lens.eq35mm / wide.eq35mm).roundToInt().coerceAtLeast(1).toFloat()
+    }
+
     fun normalMinZoomFor(lens: LensCandidate?): Float {
         if (lens == null) return 1f
-        val wide = findWideLensInSameLogicalCamera(lens, lensCandidates)
-        val rawOpticalBase = if (wide != null && wide != lens && wide.eq35mm > 0f) {
-            (lens.eq35mm / wide.eq35mm).roundToInt().coerceAtLeast(1).toFloat()
-        } else {
-            1f
-        }
+        val rawOpticalBase = opticalBaseForLens(lens)
         return (rawOpticalBase.coerceAtLeast(1f) + NORMAL_MIN_ZOOM_OFFSET)
             .coerceAtMost(NORMAL_PREVIEW_MAX_ZOOM)
     }
@@ -702,7 +715,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     fun updateCenterFromAnchorForZoom(zoom: Float) {
         val anchor = anchorCenter1x
         currentCenterPx = if (anchorActive && anchor != null) {
-            centerFromAnchorAtZoom(anchor, zoom)
+            if (isUiZoomActive()) {
+                anchor
+            } else {
+                centerFromAnchorAtZoom(anchor, zoom)
+            }
         } else {
             null
         }
@@ -712,6 +729,65 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         val minLR = max(1f, min(focusX, width - focusX))
         val minTB = max(1f, min(focusY, height - focusY))
         return max(1f, max(width / (2f * minLR), height / (2f * minTB)))
+    }
+
+    fun applyTextureMatrixZoom(
+        textureView: TextureView?,
+        scale: Float,
+        translationX: Float,
+        translationY: Float,
+        pivotX: Float,
+        pivotY: Float,
+    ) {
+        val tv = textureView ?: return
+        val matrix = Matrix()
+        if (scale != 1f || translationX != 0f || translationY != 0f) {
+            // Matrix 坐标映射：
+            // 1. 先以屏幕中心 pivot 做缩放：p1 = pivot + (p0 - pivot) * scale。
+            // 2. 再追加平移：p2 = p1 + translation。
+            // 当需要把绿光/校准点 focus 移到屏幕中心时，
+            // translation = (center - focus) * scale，可让 p2(focus) = center。
+            matrix.setScale(scale, scale, pivotX, pivotY)
+            matrix.postTranslate(translationX, translationY)
+        }
+        tv.setTransform(matrix)
+    }
+
+    fun resetTextureMatrixZoom(textureView: TextureView?) {
+        textureView?.setTransform(Matrix())
+    }
+
+    fun uiZoomDisplayScale(): Float {
+        return if (isUiZoomActive()) {
+            val opticalBase = opticalBaseForLens()
+            (currentEquivRatio.coerceAtLeast(opticalBase) / opticalBase).coerceAtLeast(1f)
+        } else {
+            1f
+        }
+    }
+
+    fun cameraZoomForMode(equivRatio: Float = currentEquivRatio): Float {
+        return if (isDualCalibMode && isUsingDualTele) {
+            1f
+        } else if (isDualCalibMode) {
+            equivRatio.coerceAtLeast(1f)
+        } else if (uiZoomOnlyEnabled) {
+            1f
+        } else {
+            clampNormalZoom(equivRatio, selectedLens)
+        }
+    }
+
+    fun applyCameraZoomForMode(equivRatio: Float = currentEquivRatio) {
+        cameraController.setZoomRatio(cameraZoomForMode(equivRatio))
+    }
+
+    fun calibrationSampleZoom(equivRatio: Float = currentEquivRatio): Double {
+        return if (isUiZoomActive()) {
+            1.0
+        } else {
+            equivRatio.coerceAtLeast(1f).toDouble()
+        }
     }
 
     fun prepareSingleCalibrationZoom(): Float {
@@ -725,11 +801,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         anchorActive = false
         anchorZoom = 1f
         currentCenterPx = null
-        cameraController.setZoomRatio(targetZoom)
+        applyCameraZoomForMode(targetZoom)
         statusText = if (lens?.category == LensCategory.WIDE) {
-            "普通校准：广角镜头已请求 5x"
+            if (isUiZoomActive()) "普通校准：广角镜头已切到 UI 5x" else "普通校准：广角镜头已请求 5x"
         } else {
-            "普通校准：保持当前 ${"%.1f".format(targetZoom)}x"
+            if (isUiZoomActive()) "普通校准：保持当前 UI ${"%.1f".format(targetZoom)}x" else "普通校准：保持当前 ${"%.1f".format(targetZoom)}x"
         }
         return targetZoom
     }
@@ -891,7 +967,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             selectedLens = fallback
             currentEquivRatio = normalMinZoomFor(fallback)
             anchorZoom = currentEquivRatio
-            cameraController.setZoomRatio(currentEquivRatio)
+            applyCameraZoomForMode(currentEquivRatio)
         } else {
             currentEquivRatio = 1f
             anchorZoom = 1f
@@ -997,7 +1073,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             } else if (isDualCalibMode) {
                                 currentEquivRatio.coerceAtLeast(1f)
                             } else {
-                                clampNormalZoom(currentEquivRatio, lens)
+                                cameraZoomForMode(clampNormalZoom(currentEquivRatio, lens))
                             }
                             cameraController.setZoomRatio(resumeZoom)
                             cameraController.openCamera(
@@ -1026,12 +1102,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         selectedLens = lens
         currentEquivRatio = normalMinZoomFor(lens)
         anchorZoom = currentEquivRatio
-        cameraController.setZoomRatio(currentEquivRatio)
+        applyCameraZoomForMode(currentEquivRatio)
         statusText = "选中: ${describeLens(lens)}，逻辑相机起始 ${"%.1f".format(currentEquivRatio)}x"
     }
 
     // 统一相机打开
-    LaunchedEffect(selectedLens, surfaceAvailable, isDualCalibMode, isUsingDualTele) {
+    LaunchedEffect(selectedLens, surfaceAvailable, isDualCalibMode, isUsingDualTele, uiZoomOnlyEnabled) {
         val lens = selectedLens ?: return@LaunchedEffect
         if (!surfaceAvailable) return@LaunchedEffect
         val tv = textureViewRef ?: return@LaunchedEffect
@@ -1041,7 +1117,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         } else if (isDualCalibMode) {
             currentEquivRatio.coerceAtLeast(1f)
         } else {
-            clampNormalZoom(currentEquivRatio, lens)
+            cameraZoomForMode(clampNormalZoom(currentEquivRatio, lens))
         }
         cameraController.setZoomRatio(initialZoom)
         cameraController.closeCamera()
@@ -1052,26 +1128,47 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         )
     }
 
-    LaunchedEffect(isCameraReady, isDualCalibMode, isUsingDualTele, currentEquivRatio, selectedLens) {
-        if (!isCameraReady) return@LaunchedEffect
-        val cameraZoom = if (isDualCalibMode && isUsingDualTele) {
-            1f
-        } else if (isDualCalibMode) {
-            currentEquivRatio.coerceAtLeast(1f)
-        } else {
-            clampNormalZoom(currentEquivRatio, selectedLens)
+    LaunchedEffect(uiZoomOnlyEnabled, selectedLens, lensCandidates, isDualCalibMode) {
+        if (isUiZoomActive()) {
+            val minEquivRatio = normalMinZoomFor(selectedLens)
+            if (currentEquivRatio < minEquivRatio) {
+                currentEquivRatio = minEquivRatio
+            }
         }
+    }
+
+    LaunchedEffect(isCameraReady, isDualCalibMode, isUsingDualTele, currentEquivRatio, selectedLens, uiZoomOnlyEnabled) {
+        if (!isCameraReady) return@LaunchedEffect
+        val cameraZoom = cameraZoomForMode(currentEquivRatio)
+        val opticalBase = opticalBaseForLens()
+        val uiScale = uiZoomDisplayScale()
+        val zoomMode = if (isUiZoomActive()) "UI_TEXTURE_MATRIX" else "CAMERA2"
         Log.i(
             "CameraScreen",
             String.format(
                 Locale.US,
-                "zoom-map: equiv=%.2fx, camera=%.2fx, lens=%s",
+                "zoom-map: equiv=%.2fx, camera=%.2fx, uiScale=%.2fx, opticalBase=%.2fx, mode=%s, lens=%s",
                 currentEquivRatio,
                 cameraZoom,
+                uiScale,
+                opticalBase,
+                zoomMode,
                 selectedLens?.physicalId ?: selectedLens?.cameraId ?: "none",
             ),
         )
         cameraController.setZoomRatio(cameraZoom)
+        if (isUiZoomActive()) {
+            val message = String.format(
+                Locale.US,
+                "zoom: backend=UI_TEXTURE_MATRIX, ratio=%.2f, camera=%.2f, uiScale=%.2f, opticalBase=%.2f",
+                currentEquivRatio,
+                cameraZoom,
+                uiScale,
+                opticalBase,
+            )
+            Log.i("CameraScreen", message)
+            zoomBackendText = message
+        }
     }
 
     LaunchedEffect(isCameraReady, showCalPanel, showDualCalPanel) {
@@ -1086,11 +1183,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
     }
 
-    // 变换效果：倍率放大交给 Camera2；这里只做校准点居中和必要的边界覆盖。
-    LaunchedEffect(currentCenterPx, anchorCenter1x, anchorZoom, anchorActive, currentEquivRatio, isCameraReady, isDualCalibMode, isUsingDualTele) {
+    // 变换效果：默认倍率放大交给 Camera2；纯 UI 放大实验模式下由 TextureView Matrix 承担显示 zoom。
+    LaunchedEffect(currentCenterPx, anchorCenter1x, anchorZoom, anchorActive, currentEquivRatio, isCameraReady, isDualCalibMode, isUsingDualTele, uiZoomOnlyEnabled) {
         val wrapper = wrapperRef ?: return@LaunchedEffect
         if (!isCameraReady) return@LaunchedEffect
-        val point = if (isDualCalibMode) {
+        val point = if (isUiZoomActive()) {
+            anchorCenter1x?.takeIf { anchorActive } ?: currentCenterPx
+        } else if (isDualCalibMode) {
             currentCenterPx ?: anchorCenter1x?.takeIf { anchorActive }?.let {
                 centerFromAnchorAtZoom(it, anchorZoom)
             }
@@ -1105,6 +1204,40 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             if (w <= 0f || h <= 0f) return@post
             val screenCX = w / 2f
             val screenCY = h / 2f
+            val displayScale = uiZoomDisplayScale()
+
+            if (isUiZoomActive()) {
+                var scale = displayScale
+                var tx = 0f
+                var ty = 0f
+                if (anchorActive && point != null) {
+                    val focusX = (point.x / ImageUtils.OUT_W.toDouble() * w).toFloat()
+                    val focusY = (point.y / ImageUtils.OUT_H.toDouble() * h).toFloat()
+                    val coverScale = minCoverScaleForFocus(focusX, focusY, w, h)
+                    scale = max(coverScale, displayScale)
+                    tx = (screenCX - focusX) * scale
+                    ty = (screenCY - focusY) * scale
+                }
+
+                wrapper.pivotX = screenCX
+                wrapper.pivotY = screenCY
+                wrapper.translationX = 0f
+                wrapper.translationY = 0f
+                wrapper.scaleX = 1f
+                wrapper.scaleY = 1f
+                applyTextureMatrixZoom(
+                    textureViewRef,
+                    scale,
+                    tx,
+                    ty,
+                    screenCX,
+                    screenCY,
+                )
+                wrapperTx = tx
+                wrapperTy = ty
+                wrapperScale = scale
+                return@post
+            }
 
             if (anchorActive && point != null) {
                 val focusX = (point.x / ImageUtils.OUT_W.toDouble() * w).toFloat()
@@ -1124,6 +1257,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 wrapperTx = wrapper.translationX
                 wrapperTy = wrapper.translationY
                 wrapperScale = scale
+                resetTextureMatrixZoom(textureViewRef)
             } else if (isDualCalibMode) {
                 wrapper.pivotX = screenCX
                 wrapper.pivotY = screenCY
@@ -1134,6 +1268,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 wrapperTx = 0f
                 wrapperTy = 0f
                 wrapperScale = 1f
+                resetTextureMatrixZoom(textureViewRef)
             } else {
                 wrapper.pivotX = screenCX
                 wrapper.pivotY = screenCY
@@ -1144,6 +1279,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 wrapperTx = 0f
                 wrapperTy = 0f
                 wrapperScale = 1f
+                resetTextureMatrixZoom(textureViewRef)
             }
         }
     }
@@ -1336,7 +1472,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                         }
                     }
-                    // TextureView 填满容器，不做任何变换
+                    // TextureView 填满容器；纯 UI 放大时通过 setTransform(Matrix) 做显示层变换。
                     wrapper.addView(tv, FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
@@ -1434,6 +1570,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             wideLensActive ||
                             oisEnabled ||
                             eisMode != Camera2Controller.getDefaultVideoStabilizationMode() ||
+                            uiZoomOnlyEnabled ||
                             isVoiceListening ||
                             yoloCaptureMode == YoloCaptureMode.UHD4K ||
                             yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV ||
@@ -1473,6 +1610,38 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             onClick = {
                                 toolsMenuExpanded = false
                                 showStabilizationDialog = true
+                            },
+                        )
+                        ToolMenuItem(
+                            text = if (uiZoomOnlyEnabled) "纯UI放大 开" else "纯UI放大",
+                            active = uiZoomOnlyEnabled,
+                            enabled = !showCalPanel && !showDualCalPanel && !isDualCalibMode,
+                            accent = Color(0xFF80CBC4),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                val next = !uiZoomOnlyEnabled
+                                uiZoomOnlyEnabled = next
+                                cameraPrefs.edit()
+                                    .putBoolean(KEY_UI_ZOOM_ONLY_ENABLED, next)
+                                    .apply()
+                                if (next) {
+                                    val minEquivRatio = normalMinZoomFor(selectedLens)
+                                    if (currentEquivRatio < minEquivRatio) {
+                                        currentEquivRatio = minEquivRatio
+                                    }
+                                }
+                                detectionBoxes = emptyList()
+                                showMeasurePrompt = false
+                                wasTargetInArea = false
+                                if (anchorActive) {
+                                    updateCenterFromAnchorForZoom(currentEquivRatio)
+                                }
+                                applyCameraZoomForMode(currentEquivRatio)
+                                statusText = if (next) {
+                                    "纯UI放大：相机倍率固定 1x，TextureView 矩阵缩放画面"
+                                } else {
+                                    "纯UI放大已关闭：恢复 Camera2 数码放大"
+                                }
                             },
                         )
                         ToolMenuItem(
@@ -1772,7 +1941,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 Log.e("CameraScreen", "保存原始图失败", e)
                             }
                             val result = withContext(Dispatchers.Default) {
-                                calManager.collectSample(rawBytes, distance, currentEquivRatio.toDouble())
+                                calManager.collectSample(rawBytes, distance, calibrationSampleZoom())
                             }
                             Log.d(
                                 "CameraScreen",
@@ -2190,7 +2359,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         val calibrationZoom = prepareSingleCalibrationZoom()
                         calManager.startCalibration()
                         showCalPanel = true
-                        lastResultText = "校准倍率: ${"%.1f".format(calibrationZoom)}x"
+                        lastResultText = if (isUiZoomActive()) {
+                            "UI校准倍率: ${"%.1f".format(calibrationZoom)}x，相机=1x"
+                        } else {
+                            "校准倍率: ${"%.1f".format(calibrationZoom)}x"
+                        }
                     }) { Text("没有，开始校准") }
                 },
             )
