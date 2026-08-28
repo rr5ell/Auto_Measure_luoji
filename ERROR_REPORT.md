@@ -1,5 +1,20 @@
 # Error Report
 
+## [2026-08-28] 蒲公英 0.8.30 发布记录
+
+### 发现的问题
+- 校准后视觉倍率显示修正完成后，项目版本仍停留在已上传过的 `0.8.29 (829)`，继续上传会让蒲公英页面和测试设备无法区分是否包含新显示逻辑。
+- 严重程度：中。版本重复会影响现场验证和问题回溯。
+
+### 解决方案
+- 上传前将 Android 构建版本提升为 `versionName=0.8.30`、`versionCode=830`。
+- 使用项目内 `scripts/upload_pgyer.ps1` 读取环境变量 `PGYER_API_KEY` 上传 Debug APK。
+- 蒲公英已确认显示 `Auto_Measure_luoji 0.8.30 (830)`，下载页为 `https://www.pgyer.com/automeasureluoji`。
+
+### 预防措施
+- 每次蒲公英发布包含功能或显示行为变化时，先递增 `app/build.gradle.kts` 中的 `versionName/versionCode`。
+- 上传命令和文档不得包含真实 API Key。
+
 ## [2026-08-28] 校准后视觉倍率显示修正
 
 ### 发现的问题

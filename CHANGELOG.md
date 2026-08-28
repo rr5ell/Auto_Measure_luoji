@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.30] - 2026-08-28
+
+### Fixed
+- Android 构建版本同步为 `versionName=0.8.30`、`versionCode=830`，用于上传包含校准后视觉倍率显示修正的新包。
+- 蒲公英已上传并确认显示 `Auto_Measure_luoji 0.8.30 (830)`，下载页为 `https://www.pgyer.com/automeasureluoji`。
+
 ## [camera-visual-zoom-display-2026-08-28] - 2026-08-28
 
 ### Changed
