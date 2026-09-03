@@ -7,7 +7,12 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.util.Log
+import android.view.Surface
 import android.view.TextureView
 import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,6 +72,7 @@ import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.data.LensCategory
 import com.example.auto_measure_luoji.feature.camera.data.LensScanner
 import com.example.auto_measure_luoji.feature.camera.domain.Camera2Controller
+import com.example.auto_measure_luoji.feature.camera.domain.GyroPreviewStabilizer
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
 import com.example.auto_measure_luoji.feature.detection.ui.DetectionOverlay
@@ -79,9 +85,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 private const val WIDE_CALIBRATION_ZOOM = 5f
 private const val NORMAL_PREVIEW_MAX_ZOOM = 24f
@@ -90,6 +98,95 @@ private const val CALIBRATION_EXPOSURE_EV = -2.0f
 private const val CAMERA_SCREEN_PREFS = "camera_screen_settings"
 private const val KEY_YOLO_FRAME_SOURCE = "yolo_frame_source"
 private const val KEY_UI_ZOOM_ONLY_ENABLED = "ui_zoom_only_enabled"
+private const val KEY_GYRO_PREVIEW_CONFIG_VERSION = "gyro_preview_config_version"
+private const val KEY_GYRO_PREVIEW_STABILIZATION_ENABLED = "gyro_preview_stabilization_enabled"
+private const val KEY_GYRO_PREVIEW_STRENGTH = "gyro_preview_strength"
+private const val KEY_GYRO_PREVIEW_PATH_FOLLOW = "gyro_preview_path_follow"
+private const val KEY_GYRO_PREVIEW_OUTPUT_ALPHA = "gyro_preview_output_alpha"
+private const val KEY_GYRO_PREVIEW_OUTPUT_RATE_LIMIT = "gyro_preview_output_rate_limit"
+private const val KEY_GYRO_PREVIEW_CROP_SCALE = "gyro_preview_crop_scale"
+private const val KEY_GYRO_PREVIEW_MAX_SHIFT = "gyro_preview_max_shift"
+private const val KEY_GYRO_PREVIEW_DEADBAND_PX = "gyro_preview_deadband_px"
+private const val KEY_GYRO_PREVIEW_HORIZONTAL_GAIN = "gyro_preview_horizontal_gain"
+private const val KEY_GYRO_PREVIEW_VERTICAL_GAIN = "gyro_preview_vertical_gain"
+private const val KEY_GYRO_PREVIEW_AIM_STABILIZATION_ENABLED = "gyro_preview_aim_stabilization_enabled"
+private const val KEY_GYRO_PREVIEW_AIM_RPS_THRESHOLD = "gyro_preview_aim_rps_threshold"
+private const val KEY_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER = "gyro_preview_aim_strength_multiplier"
+private const val KEY_GYRO_PREVIEW_AIM_PATH_FOLLOW = "gyro_preview_aim_path_follow"
+private const val KEY_GYRO_PREVIEW_AIM_DEADBAND_PX = "gyro_preview_aim_deadband_px"
+private const val KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT = "gyro_preview_aim_output_rate_limit"
+private const val KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_ENABLED = "gyro_preview_zoom_compensation_enabled"
+private const val KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH = "gyro_preview_zoom_compensation_strength"
+private const val KEY_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM = "gyro_preview_max_compensation_zoom"
+private const val KEY_GYRO_PREVIEW_FRAME_SYNC_ENABLED = "gyro_preview_frame_sync_enabled"
+private const val KEY_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS = "gyro_preview_frame_timestamp_offset_ms"
+private const val KEY_GYRO_PREVIEW_GL_RENDER_ENABLED = "gyro_preview_gl_render_enabled"
+private const val KEY_GYRO_PREVIEW_DIAGNOSTICS_ENABLED = "gyro_preview_diagnostics_enabled"
+private const val KEY_GYRO_PREVIEW_ROLL_COMPENSATION_ENABLED = "gyro_preview_roll_compensation_enabled"
+private const val KEY_GYRO_PREVIEW_ROLL_STRENGTH = "gyro_preview_roll_strength"
+private const val KEY_GYRO_PREVIEW_MAX_ROLL_DEGREES = "gyro_preview_max_roll_degrees"
+private const val KEY_GYRO_PREVIEW_INVERT_ROLL = "gyro_preview_invert_roll"
+private const val KEY_GYRO_PREVIEW_SWAP_AXES = "gyro_preview_swap_axes"
+private const val KEY_GYRO_PREVIEW_INVERT_HORIZONTAL = "gyro_preview_invert_horizontal"
+private const val KEY_GYRO_PREVIEW_INVERT_VERTICAL = "gyro_preview_invert_vertical"
+private const val KEY_GYRO_STABILIZATION_CALIBRATION_ENABLED = "gyro_stabilization_calibration_enabled"
+private const val KEY_GYRO_STABILIZATION_CALIBRATION_FINE_SAMPLE_ENABLED =
+    "gyro_stabilization_calibration_fine_sample_enabled"
+private const val GYRO_PREVIEW_STABILIZATION_SENSOR_DELAY_US = 5_000
+private const val GYRO_PREVIEW_MATRIX_UPDATE_INTERVAL_MS = 16L
+private const val GYRO_PREVIEW_OVERLAY_UPDATE_INTERVAL_MS = 33L
+private const val GYRO_PREVIEW_HUD_UPDATE_INTERVAL_MS = 180L
+private const val GYRO_PREVIEW_MODEL_LOG_INTERVAL_MS = 500L
+private const val GYRO_STABILIZATION_CALIBRATION_INTERVAL_MS = 220L
+private const val GYRO_STABILIZATION_CALIBRATION_SAMPLE_W = 180
+private const val GYRO_STABILIZATION_CALIBRATION_FINE_SAMPLE_W = 540
+private const val GYRO_STABILIZATION_CALIBRATION_TEMPLATE_SIZE = 48
+private const val GYRO_STABILIZATION_CALIBRATION_FINE_TEMPLATE_SIZE = 96
+private const val GYRO_STABILIZATION_CALIBRATION_SEARCH_RADIUS = 14
+private const val GYRO_STABILIZATION_CALIBRATION_FINE_SEARCH_RADIUS = 24
+private const val GYRO_STABILIZATION_CALIBRATION_FAST_MAX_SAMPLE_H = 360
+private const val GYRO_STABILIZATION_CALIBRATION_FINE_MAX_SAMPLE_H = 1280
+private const val GYRO_STABILIZATION_CALIBRATION_MIN_SCORE = 0.18f
+private const val GYRO_STABILIZATION_CALIBRATION_HINT_MIN_SIGNAL_PX = 0.6f
+private const val GYRO_STABILIZATION_CALIBRATION_HINT_WINDOW_MS = 1_200L
+private const val GYRO_PREVIEW_CONFIG_VERSION = 4
+private const val MIN_GYRO_PREVIEW_STRENGTH = 0.0f
+private const val MAX_GYRO_PREVIEW_STRENGTH = 1.5f
+private const val MIN_GYRO_PREVIEW_PATH_FOLLOW = 1.0f
+private const val MAX_GYRO_PREVIEW_PATH_FOLLOW = 30.0f
+private const val MIN_GYRO_PREVIEW_OUTPUT_ALPHA = 0.05f
+private const val MAX_GYRO_PREVIEW_OUTPUT_ALPHA = 1.0f
+private const val MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT = 0.0f
+private const val MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT = 5_000.0f
+private const val MIN_GYRO_PREVIEW_CROP_SCALE = 1.0f
+private const val MAX_GYRO_PREVIEW_CROP_SCALE = 1.25f
+private const val MIN_GYRO_PREVIEW_MAX_SHIFT = 0.0f
+private const val MAX_GYRO_PREVIEW_MAX_SHIFT = 0.10f
+private const val MIN_GYRO_PREVIEW_DEADBAND_PX = 0.0f
+private const val MAX_GYRO_PREVIEW_DEADBAND_PX = 5.0f
+private const val MIN_GYRO_PREVIEW_AXIS_GAIN = 0.0f
+private const val MAX_GYRO_PREVIEW_AXIS_GAIN = 4.0f
+private const val MIN_GYRO_PREVIEW_AIM_RPS_THRESHOLD = 0.001f
+private const val MAX_GYRO_PREVIEW_AIM_RPS_THRESHOLD = 0.300f
+private const val MIN_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER = 1.0f
+private const val MAX_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER = 3.0f
+private const val MIN_GYRO_PREVIEW_AIM_PATH_FOLLOW = 0.2f
+private const val MAX_GYRO_PREVIEW_AIM_PATH_FOLLOW = 10.0f
+private const val MIN_GYRO_PREVIEW_AIM_DEADBAND_PX = 0.0f
+private const val MAX_GYRO_PREVIEW_AIM_DEADBAND_PX = 2.0f
+private const val MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT = 0.0f
+private const val MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT = 5_000.0f
+private const val MIN_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH = 0.0f
+private const val MAX_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH = 2.0f
+private const val MIN_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM = 1.0f
+private const val MAX_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM = 80.0f
+private const val MIN_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS = -80.0f
+private const val MAX_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS = 80.0f
+private const val MIN_GYRO_PREVIEW_ROLL_STRENGTH = 0.0f
+private const val MAX_GYRO_PREVIEW_ROLL_STRENGTH = 1.5f
+private const val MIN_GYRO_PREVIEW_MAX_ROLL_DEGREES = 0.0f
+private const val MAX_GYRO_PREVIEW_MAX_ROLL_DEGREES = 5.0f
+private val DEFAULT_GYRO_PREVIEW_CONFIG = GyroPreviewStabilizer.Config()
 
 /**
  * 相机预览屏幕
@@ -117,10 +214,268 @@ private enum class YoloFrameSource(val label: String) {
     fun next(): YoloFrameSource = if (this == PREVIEW_BITMAP) IMAGE_READER_YUV else PREVIEW_BITMAP
 }
 
+private enum class StabilizationCalibrationSampleMode(
+    val label: String,
+    val sampleWidth: Int,
+    val templateSize: Int,
+    val searchRadius: Int,
+    val maxSampleHeight: Int,
+) {
+    FAST(
+        label = "快速",
+        sampleWidth = GYRO_STABILIZATION_CALIBRATION_SAMPLE_W,
+        templateSize = GYRO_STABILIZATION_CALIBRATION_TEMPLATE_SIZE,
+        searchRadius = GYRO_STABILIZATION_CALIBRATION_SEARCH_RADIUS,
+        maxSampleHeight = GYRO_STABILIZATION_CALIBRATION_FAST_MAX_SAMPLE_H,
+    ),
+    FINE(
+        label = "精细",
+        sampleWidth = GYRO_STABILIZATION_CALIBRATION_FINE_SAMPLE_W,
+        templateSize = GYRO_STABILIZATION_CALIBRATION_FINE_TEMPLATE_SIZE,
+        searchRadius = GYRO_STABILIZATION_CALIBRATION_FINE_SEARCH_RADIUS,
+        maxSampleHeight = GYRO_STABILIZATION_CALIBRATION_FINE_MAX_SAMPLE_H,
+    ),
+}
+
+private data class GyroLensProjection(
+    val focalPxX: Float = 0f,
+    val focalPxY: Float = 0f,
+    val fovXDegrees: Float = 0f,
+    val fovYDegrees: Float = 0f,
+)
+
+private data class GyroPreviewParameterPreset(
+    val label: String,
+    val strength: Float,
+    val pathFollowPerSecond: Float,
+    val outputLowPassAlpha: Float,
+    val outputRateLimitPxPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.outputRateLimitPxPerSecond,
+    val cropScale: Float,
+    val maxShiftRatio: Float,
+    val deadbandPx: Float,
+    val horizontalGain: Float,
+    val verticalGain: Float,
+    val aimStabilizationEnabled: Boolean,
+    val aimRpsThreshold: Float,
+    val aimStrengthMultiplier: Float,
+    val aimPathFollowPerSecond: Float,
+    val aimDeadbandPx: Float,
+    val aimOutputRateLimitPxPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputRateLimitPxPerSecond,
+    val zoomCompensationEnabled: Boolean,
+    val zoomCompensationStrength: Float,
+    val maxCompensationZoom: Float,
+    val frameSyncEnabled: Boolean = false,
+    val frameTimestampOffsetMs: Float = 0f,
+    val rollCompensationEnabled: Boolean,
+    val rollStrength: Float,
+    val maxRollDegrees: Float,
+    val invertRoll: Boolean,
+)
+
+private val GYRO_PREVIEW_PARAMETER_PRESETS = listOf(
+    GyroPreviewParameterPreset(
+        label = "帧同步",
+        strength = 0.62f,
+        pathFollowPerSecond = 7.0f,
+        outputLowPassAlpha = 0.86f,
+        cropScale = 1.18f,
+        maxShiftRatio = 0.060f,
+        deadbandPx = 0.0f,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = true,
+        aimRpsThreshold = 0.060f,
+        aimStrengthMultiplier = 1.6f,
+        aimPathFollowPerSecond = 1.2f,
+        aimDeadbandPx = 0.0f,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+        maxCompensationZoom = DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+        frameSyncEnabled = true,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+    GyroPreviewParameterPreset(
+        label = "瞄准稳定",
+        strength = 0.54f,
+        pathFollowPerSecond = 9.0f,
+        outputLowPassAlpha = 0.72f,
+        cropScale = 1.14f,
+        maxShiftRatio = 0.040f,
+        deadbandPx = 0.15f,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = true,
+        aimRpsThreshold = 0.060f,
+        aimStrengthMultiplier = 1.8f,
+        aimPathFollowPerSecond = 1.8f,
+        aimDeadbandPx = 0.0f,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+        maxCompensationZoom = DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+    GyroPreviewParameterPreset(
+        label = "强稳",
+        strength = 0.42f,
+        pathFollowPerSecond = 12.0f,
+        outputLowPassAlpha = 0.25f,
+        cropScale = 1.12f,
+        maxShiftRatio = 0.025f,
+        deadbandPx = 0.50f,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = true,
+        aimRpsThreshold = 0.050f,
+        aimStrengthMultiplier = 1.6f,
+        aimPathFollowPerSecond = 2.0f,
+        aimDeadbandPx = 0.0f,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+        maxCompensationZoom = DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+    GyroPreviewParameterPreset(
+        label = "均衡",
+        strength = DEFAULT_GYRO_PREVIEW_CONFIG.strength,
+        pathFollowPerSecond = DEFAULT_GYRO_PREVIEW_CONFIG.pathFollowPerSecond,
+        outputLowPassAlpha = DEFAULT_GYRO_PREVIEW_CONFIG.outputLowPassAlpha,
+        cropScale = DEFAULT_GYRO_PREVIEW_CONFIG.cropScale,
+        maxShiftRatio = DEFAULT_GYRO_PREVIEW_CONFIG.maxShiftRatio,
+        deadbandPx = DEFAULT_GYRO_PREVIEW_CONFIG.deadbandPx,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.aimStabilizationEnabled,
+        aimRpsThreshold = DEFAULT_GYRO_PREVIEW_CONFIG.aimRpsThreshold,
+        aimStrengthMultiplier = DEFAULT_GYRO_PREVIEW_CONFIG.aimStrengthMultiplier,
+        aimPathFollowPerSecond = DEFAULT_GYRO_PREVIEW_CONFIG.aimPathFollowPerSecond,
+        aimDeadbandPx = DEFAULT_GYRO_PREVIEW_CONFIG.aimDeadbandPx,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+        maxCompensationZoom = DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+        frameSyncEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.frameSyncEnabled,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+    GyroPreviewParameterPreset(
+        label = "快响应",
+        strength = 0.34f,
+        pathFollowPerSecond = 22.0f,
+        outputLowPassAlpha = 0.75f,
+        cropScale = 1.08f,
+        maxShiftRatio = 0.018f,
+        deadbandPx = 0.80f,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = false,
+        aimRpsThreshold = DEFAULT_GYRO_PREVIEW_CONFIG.aimRpsThreshold,
+        aimStrengthMultiplier = DEFAULT_GYRO_PREVIEW_CONFIG.aimStrengthMultiplier,
+        aimPathFollowPerSecond = DEFAULT_GYRO_PREVIEW_CONFIG.aimPathFollowPerSecond,
+        aimDeadbandPx = DEFAULT_GYRO_PREVIEW_CONFIG.aimDeadbandPx,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+        maxCompensationZoom = DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+    GyroPreviewParameterPreset(
+        label = "高倍强补偿",
+        strength = 1.05f,
+        pathFollowPerSecond = 6.0f,
+        outputLowPassAlpha = 0.82f,
+        cropScale = 1.20f,
+        maxShiftRatio = 0.080f,
+        deadbandPx = 0.05f,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = true,
+        aimRpsThreshold = 0.035f,
+        aimStrengthMultiplier = 1.4f,
+        aimPathFollowPerSecond = 0.8f,
+        aimDeadbandPx = 0.0f,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = 1.0f,
+        maxCompensationZoom = 30.0f,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+    GyroPreviewParameterPreset(
+        label = "10倍长焦",
+        strength = 0.36f,
+        pathFollowPerSecond = 20.0f,
+        outputLowPassAlpha = 0.55f,
+        cropScale = 1.12f,
+        maxShiftRatio = 0.018f,
+        deadbandPx = 0.70f,
+        horizontalGain = DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain,
+        verticalGain = DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain,
+        aimStabilizationEnabled = true,
+        aimRpsThreshold = 0.060f,
+        aimStrengthMultiplier = 1.6f,
+        aimPathFollowPerSecond = 2.5f,
+        aimDeadbandPx = 0.0f,
+        zoomCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+        zoomCompensationStrength = DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+        maxCompensationZoom = DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+        rollCompensationEnabled = DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+        rollStrength = DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength,
+        maxRollDegrees = DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees,
+        invertRoll = DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll,
+    ),
+)
+
 private data class LaserFrameCapture(
     val normalizedBitmap: Bitmap,
     val pngBytes: ByteArray,
     val sourceLabel: String,
+)
+
+private data class StabilizationCalibrationFrame(
+    val timestampMs: Long,
+    val width: Int,
+    val height: Int,
+    val viewWidth: Int,
+    val viewHeight: Int,
+    val sampleModeLabel: String,
+    val templateSize: Int,
+    val searchRadius: Int,
+    val luma: IntArray,
+    val captureCostMs: Long,
+    val lumaCostMs: Long,
+    val frameBuildCostMs: Long,
+    val compensationX: Float,
+    val compensationY: Float,
+    val rotationDegrees: Float,
+    val rps: Float,
+    val effectiveZoom: Float,
+)
+
+private data class StabilizationCalibrationResult(
+    val actualDxPx: Float,
+    val actualDyPx: Float,
+    val score: Float,
+    val sampleDx: Int,
+    val sampleDy: Int,
+)
+
+private data class StabilizationCalibrationHintSample(
+    val timestampMs: Long,
+    val xHint: String,
+    val yHint: String,
 )
 
 @Composable
@@ -142,6 +497,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     val dualCalManager = remember { DualCalibrationManager() }
     val bleManager = remember { BleConnectionManager(context) }
     val voiceRecognizer = remember { ChineseVoiceHotwordRecognizer(context.applicationContext) }
+    val gyroPreviewStabilizer = remember { GyroPreviewStabilizer() }
+    val sensorManager = remember(context.applicationContext) {
+        context.applicationContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    }
+    val gyroscopeSensor = remember(sensorManager) { sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) }
     val isBleConnected = bleManager.state == BleConnectionManager.State.CONNECTED
 
     var statusText by remember { mutableStateOf("正在扫描镜头...") }
@@ -162,10 +522,260 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var uiZoomOnlyEnabled by remember {
         mutableStateOf(cameraPrefs.getBoolean(KEY_UI_ZOOM_ONLY_ENABLED, false))
     }
+    var gyroPreviewStabilizationEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_STABILIZATION_ENABLED, false))
+    }
+    var gyroPreviewStrength by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_STRENGTH, DEFAULT_GYRO_PREVIEW_CONFIG.strength)
+                .coerceIn(MIN_GYRO_PREVIEW_STRENGTH, MAX_GYRO_PREVIEW_STRENGTH),
+        )
+    }
+    var gyroPreviewPathFollow by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_PATH_FOLLOW, DEFAULT_GYRO_PREVIEW_CONFIG.pathFollowPerSecond)
+                .coerceIn(MIN_GYRO_PREVIEW_PATH_FOLLOW, MAX_GYRO_PREVIEW_PATH_FOLLOW),
+        )
+    }
+    var gyroPreviewOutputAlpha by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_OUTPUT_ALPHA, DEFAULT_GYRO_PREVIEW_CONFIG.outputLowPassAlpha)
+                .coerceIn(MIN_GYRO_PREVIEW_OUTPUT_ALPHA, MAX_GYRO_PREVIEW_OUTPUT_ALPHA),
+        )
+    }
+    var gyroPreviewOutputRateLimit by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
+                DEFAULT_GYRO_PREVIEW_CONFIG.outputRateLimitPxPerSecond,
+            ).coerceIn(MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT, MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT),
+        )
+    }
+    var gyroPreviewCropScale by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_CROP_SCALE, DEFAULT_GYRO_PREVIEW_CONFIG.cropScale)
+                .coerceIn(MIN_GYRO_PREVIEW_CROP_SCALE, MAX_GYRO_PREVIEW_CROP_SCALE),
+        )
+    }
+    var gyroPreviewMaxShift by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_MAX_SHIFT, DEFAULT_GYRO_PREVIEW_CONFIG.maxShiftRatio)
+                .coerceIn(MIN_GYRO_PREVIEW_MAX_SHIFT, MAX_GYRO_PREVIEW_MAX_SHIFT),
+        )
+    }
+    var gyroPreviewDeadbandPx by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_DEADBAND_PX, DEFAULT_GYRO_PREVIEW_CONFIG.deadbandPx)
+                .coerceIn(MIN_GYRO_PREVIEW_DEADBAND_PX, MAX_GYRO_PREVIEW_DEADBAND_PX),
+        )
+    }
+    var gyroPreviewHorizontalGain by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_HORIZONTAL_GAIN, DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain)
+                .coerceIn(MIN_GYRO_PREVIEW_AXIS_GAIN, MAX_GYRO_PREVIEW_AXIS_GAIN),
+        )
+    }
+    var gyroPreviewVerticalGain by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_VERTICAL_GAIN, DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain)
+                .coerceIn(MIN_GYRO_PREVIEW_AXIS_GAIN, MAX_GYRO_PREVIEW_AXIS_GAIN),
+        )
+    }
+    var gyroPreviewAimStabilizationEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(
+                KEY_GYRO_PREVIEW_AIM_STABILIZATION_ENABLED,
+                DEFAULT_GYRO_PREVIEW_CONFIG.aimStabilizationEnabled,
+            ),
+        )
+    }
+    var gyroPreviewAimRpsThreshold by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_AIM_RPS_THRESHOLD, DEFAULT_GYRO_PREVIEW_CONFIG.aimRpsThreshold)
+                .coerceIn(MIN_GYRO_PREVIEW_AIM_RPS_THRESHOLD, MAX_GYRO_PREVIEW_AIM_RPS_THRESHOLD),
+        )
+    }
+    var gyroPreviewAimStrengthMultiplier by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER,
+                DEFAULT_GYRO_PREVIEW_CONFIG.aimStrengthMultiplier,
+            ).coerceIn(MIN_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER, MAX_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER),
+        )
+    }
+    var gyroPreviewAimPathFollow by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_AIM_PATH_FOLLOW,
+                DEFAULT_GYRO_PREVIEW_CONFIG.aimPathFollowPerSecond,
+            ).coerceIn(MIN_GYRO_PREVIEW_AIM_PATH_FOLLOW, MAX_GYRO_PREVIEW_AIM_PATH_FOLLOW),
+        )
+    }
+    var gyroPreviewAimDeadbandPx by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_AIM_DEADBAND_PX, DEFAULT_GYRO_PREVIEW_CONFIG.aimDeadbandPx)
+                .coerceIn(MIN_GYRO_PREVIEW_AIM_DEADBAND_PX, MAX_GYRO_PREVIEW_AIM_DEADBAND_PX),
+        )
+    }
+    var gyroPreviewAimOutputRateLimit by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+                DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputRateLimitPxPerSecond,
+            ).coerceIn(MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT, MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT),
+        )
+    }
+    var gyroPreviewZoomCompensationEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(
+                KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_ENABLED,
+                DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+            ),
+        )
+    }
+    var gyroPreviewZoomCompensationStrength by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+                DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+                MAX_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+            ),
+        )
+    }
+    var gyroPreviewMaxCompensationZoom by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM,
+                DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom,
+            ).coerceIn(MIN_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM, MAX_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM),
+        )
+    }
+    var gyroPreviewFrameSyncEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(
+                KEY_GYRO_PREVIEW_FRAME_SYNC_ENABLED,
+                DEFAULT_GYRO_PREVIEW_CONFIG.frameSyncEnabled,
+            ),
+        )
+    }
+    var gyroPreviewFrameTimestampOffsetMs by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS,
+                DEFAULT_GYRO_PREVIEW_CONFIG.frameTimestampOffsetMs,
+            ).coerceIn(MIN_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS, MAX_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS),
+        )
+    }
+    var gyroPreviewGlRenderEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_GL_RENDER_ENABLED, false))
+    }
+    var gyroPreviewDiagnosticsEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_DIAGNOSTICS_ENABLED, false))
+    }
+    var gyroPreviewRollCompensationEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(
+                KEY_GYRO_PREVIEW_ROLL_COMPENSATION_ENABLED,
+                DEFAULT_GYRO_PREVIEW_CONFIG.rollCompensationEnabled,
+            ),
+        )
+    }
+    var gyroPreviewRollStrength by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_ROLL_STRENGTH, DEFAULT_GYRO_PREVIEW_CONFIG.rollStrength)
+                .coerceIn(MIN_GYRO_PREVIEW_ROLL_STRENGTH, MAX_GYRO_PREVIEW_ROLL_STRENGTH),
+        )
+    }
+    var gyroPreviewMaxRollDegrees by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(KEY_GYRO_PREVIEW_MAX_ROLL_DEGREES, DEFAULT_GYRO_PREVIEW_CONFIG.maxRollDegrees)
+                .coerceIn(MIN_GYRO_PREVIEW_MAX_ROLL_DEGREES, MAX_GYRO_PREVIEW_MAX_ROLL_DEGREES),
+        )
+    }
+    var gyroPreviewInvertRoll by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_INVERT_ROLL, DEFAULT_GYRO_PREVIEW_CONFIG.invertRoll))
+    }
+    var gyroPreviewSwapAxes by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_SWAP_AXES, DEFAULT_GYRO_PREVIEW_CONFIG.swapPitchYawAxes),
+        )
+    }
+    var gyroPreviewInvertHorizontal by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_INVERT_HORIZONTAL, DEFAULT_GYRO_PREVIEW_CONFIG.invertHorizontal),
+        )
+    }
+    var gyroPreviewInvertVertical by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(KEY_GYRO_PREVIEW_INVERT_VERTICAL, DEFAULT_GYRO_PREVIEW_CONFIG.invertVertical),
+        )
+    }
+    var gyroStabilizationCalibrationEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_GYRO_STABILIZATION_CALIBRATION_ENABLED, false))
+    }
+    var gyroStabilizationCalibrationFineSampleEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(KEY_GYRO_STABILIZATION_CALIBRATION_FINE_SAMPLE_ENABLED, false),
+        )
+    }
+    var showGyroPreviewSettingsDialog by remember { mutableStateOf(false) }
+    var gyroPreviewSettingsError by remember { mutableStateOf<String?>(null) }
+    var gyroPreviewStrengthInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewStrength)) }
+    var gyroPreviewPathFollowInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewPathFollow)) }
+    var gyroPreviewOutputAlphaInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewOutputAlpha)) }
+    var gyroPreviewOutputRateLimitInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewOutputRateLimit)) }
+    var gyroPreviewCropScaleInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewCropScale)) }
+    var gyroPreviewMaxShiftInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewMaxShift)) }
+    var gyroPreviewDeadbandInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewDeadbandPx)) }
+    var gyroPreviewHorizontalGainInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewHorizontalGain)) }
+    var gyroPreviewVerticalGainInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewVerticalGain)) }
+    var gyroPreviewAimStabilizationEnabledInput by remember {
+        mutableStateOf(gyroPreviewAimStabilizationEnabled)
+    }
+    var gyroPreviewAimRpsThresholdInput by remember { mutableStateOf(formatGyroRps(gyroPreviewAimRpsThreshold)) }
+    var gyroPreviewAimStrengthMultiplierInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewAimStrengthMultiplier))
+    }
+    var gyroPreviewAimPathFollowInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewAimPathFollow)) }
+    var gyroPreviewAimDeadbandInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewAimDeadbandPx)) }
+    var gyroPreviewAimOutputRateLimitInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewAimOutputRateLimit))
+    }
+    var gyroPreviewZoomCompensationEnabledInput by remember {
+        mutableStateOf(gyroPreviewZoomCompensationEnabled)
+    }
+    var gyroPreviewZoomCompensationStrengthInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewZoomCompensationStrength))
+    }
+    var gyroPreviewMaxCompensationZoomInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewMaxCompensationZoom))
+    }
+    var gyroPreviewFrameSyncEnabledInput by remember { mutableStateOf(gyroPreviewFrameSyncEnabled) }
+    var gyroPreviewFrameTimestampOffsetInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewFrameTimestampOffsetMs))
+    }
+    var gyroPreviewGlRenderEnabledInput by remember { mutableStateOf(gyroPreviewGlRenderEnabled) }
+    var gyroPreviewDiagnosticsEnabledInput by remember { mutableStateOf(gyroPreviewDiagnosticsEnabled) }
+    var gyroStabilizationCalibrationFineSampleInput by remember {
+        mutableStateOf(gyroStabilizationCalibrationFineSampleEnabled)
+    }
+    var gyroPreviewRollCompensationEnabledInput by remember {
+        mutableStateOf(gyroPreviewRollCompensationEnabled)
+    }
+    var gyroPreviewRollStrengthInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewRollStrength)) }
+    var gyroPreviewMaxRollDegreesInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewMaxRollDegrees)) }
+    var gyroPreviewInvertRollInput by remember { mutableStateOf(gyroPreviewInvertRoll) }
+    var gyroPreviewSwapAxesInput by remember { mutableStateOf(gyroPreviewSwapAxes) }
+    var gyroPreviewInvertHorizontalInput by remember { mutableStateOf(gyroPreviewInvertHorizontal) }
+    var gyroPreviewInvertVerticalInput by remember { mutableStateOf(gyroPreviewInvertVertical) }
     var showLaserComparePanel by remember { mutableStateOf(false) }
     var laserCompareEnabled by remember { mutableStateOf(false) }
     var laserCompareText by remember { mutableStateOf("") }
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
+    var glPreviewViewRef by remember { mutableStateOf<GlStabilizedPreviewView?>(null) }
+    var previewSurfaceTextureRef by remember { mutableStateOf<SurfaceTexture?>(null) }
     var wrapperRef by remember { mutableStateOf<FrameLayout?>(null) }
 
     var showCalPanel by remember { mutableStateOf(false) }
@@ -210,9 +820,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var wrapperTx by remember { mutableFloatStateOf(0f) }
     var wrapperTy by remember { mutableFloatStateOf(0f) }
     var wrapperScale by remember { mutableFloatStateOf(1f) }
+    var wrapperRotation by remember { mutableFloatStateOf(0f) }
+    var textureBaseScale by remember { mutableFloatStateOf(1f) }
+    var textureBaseTx by remember { mutableFloatStateOf(0f) }
+    var textureBaseTy by remember { mutableFloatStateOf(0f) }
     var zoomBackendText by remember { mutableStateOf("") }
     var activePhysicalCameraId by remember { mutableStateOf<String?>(null) }
     var activePhysicalLensReported by remember { mutableStateOf(false) }
+    var gyroPreviewTransform by remember { mutableStateOf(GyroPreviewStabilizer.Transform.Identity) }
+    var gyroPreviewText by remember { mutableStateOf("") }
+    var gyroPreviewLastMatrixUpdateMs by remember { mutableLongStateOf(0L) }
+    var gyroPreviewLastOverlayUpdateMs by remember { mutableLongStateOf(0L) }
+    var gyroPreviewLastHudUpdateMs by remember { mutableLongStateOf(0L) }
+    var gyroPreviewLastModelLogMs by remember { mutableLongStateOf(0L) }
+    var gyroStabilizationCalibrationText by remember { mutableStateOf("") }
+    var gyroStabilizationCalibrationFrame by remember { mutableStateOf<StabilizationCalibrationFrame?>(null) }
+    val gyroStabilizationCalibrationHints = remember { mutableStateListOf<StabilizationCalibrationHintSample>() }
 
     // 检测状态
     var modelLoadStatus by remember { mutableStateOf("未加载") }
@@ -227,7 +850,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     // 在后台线程加载模型（避免 Tasks.await 阻塞主线程）
-    LaunchedEffect(Unit) {
+    LaunchedEffect(gyroPreviewGlRenderEnabled) {
+        if (gyroPreviewGlRenderEnabled) {
+            yoloDetector?.close()
+            yoloDetector = null
+            modelLoadStatus = "GL逐帧预览实验，未加载"
+            Log.i("CameraScreen", "gyro-preview-gl: YOLO model disabled")
+            return@LaunchedEffect
+        }
         modelLoadStatus = "加载中..."
         Log.d("CameraScreen", "开始加载 YOLO 模型...")
         try {
@@ -346,6 +976,512 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
     }
 
+    fun currentGyroPreviewConfig(): GyroPreviewStabilizer.Config {
+        return GyroPreviewStabilizer.Config(
+            strength = gyroPreviewStrength.coerceIn(MIN_GYRO_PREVIEW_STRENGTH, MAX_GYRO_PREVIEW_STRENGTH),
+            pathFollowPerSecond = gyroPreviewPathFollow.coerceIn(
+                MIN_GYRO_PREVIEW_PATH_FOLLOW,
+                MAX_GYRO_PREVIEW_PATH_FOLLOW,
+            ),
+            outputLowPassAlpha = gyroPreviewOutputAlpha.coerceIn(
+                MIN_GYRO_PREVIEW_OUTPUT_ALPHA,
+                MAX_GYRO_PREVIEW_OUTPUT_ALPHA,
+            ),
+            outputRateLimitPxPerSecond = gyroPreviewOutputRateLimit.coerceIn(
+                MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
+                MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
+            ),
+            cropScale = gyroPreviewCropScale.coerceIn(MIN_GYRO_PREVIEW_CROP_SCALE, MAX_GYRO_PREVIEW_CROP_SCALE),
+            maxShiftRatio = gyroPreviewMaxShift.coerceIn(MIN_GYRO_PREVIEW_MAX_SHIFT, MAX_GYRO_PREVIEW_MAX_SHIFT),
+            deadbandPx = gyroPreviewDeadbandPx.coerceIn(
+                MIN_GYRO_PREVIEW_DEADBAND_PX,
+                MAX_GYRO_PREVIEW_DEADBAND_PX,
+            ),
+            horizontalGain = gyroPreviewHorizontalGain.coerceIn(
+                MIN_GYRO_PREVIEW_AXIS_GAIN,
+                MAX_GYRO_PREVIEW_AXIS_GAIN,
+            ),
+            verticalGain = gyroPreviewVerticalGain.coerceIn(
+                MIN_GYRO_PREVIEW_AXIS_GAIN,
+                MAX_GYRO_PREVIEW_AXIS_GAIN,
+            ),
+            aimStabilizationEnabled = gyroPreviewAimStabilizationEnabled,
+            aimRpsThreshold = gyroPreviewAimRpsThreshold.coerceIn(
+                MIN_GYRO_PREVIEW_AIM_RPS_THRESHOLD,
+                MAX_GYRO_PREVIEW_AIM_RPS_THRESHOLD,
+            ),
+            aimStrengthMultiplier = gyroPreviewAimStrengthMultiplier.coerceIn(
+                MIN_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER,
+                MAX_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER,
+            ),
+            aimPathFollowPerSecond = gyroPreviewAimPathFollow.coerceIn(
+                MIN_GYRO_PREVIEW_AIM_PATH_FOLLOW,
+                MAX_GYRO_PREVIEW_AIM_PATH_FOLLOW,
+            ),
+            aimDeadbandPx = gyroPreviewAimDeadbandPx.coerceIn(
+                MIN_GYRO_PREVIEW_AIM_DEADBAND_PX,
+                MAX_GYRO_PREVIEW_AIM_DEADBAND_PX,
+            ),
+            aimOutputRateLimitPxPerSecond = gyroPreviewAimOutputRateLimit.coerceIn(
+                MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+                MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+            ),
+            zoomCompensationEnabled = gyroPreviewZoomCompensationEnabled,
+            zoomCompensationStrength = gyroPreviewZoomCompensationStrength.coerceIn(
+                MIN_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+                MAX_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+            ),
+            maxCompensationZoom = gyroPreviewMaxCompensationZoom.coerceIn(
+                MIN_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM,
+                MAX_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM,
+            ),
+            frameSyncEnabled = gyroPreviewFrameSyncEnabled,
+            frameTimestampOffsetMs = gyroPreviewFrameTimestampOffsetMs.coerceIn(
+                MIN_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS,
+                MAX_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS,
+            ),
+            rollCompensationEnabled = gyroPreviewRollCompensationEnabled,
+            rollStrength = gyroPreviewRollStrength.coerceIn(
+                MIN_GYRO_PREVIEW_ROLL_STRENGTH,
+                MAX_GYRO_PREVIEW_ROLL_STRENGTH,
+            ),
+            maxRollDegrees = gyroPreviewMaxRollDegrees.coerceIn(
+                MIN_GYRO_PREVIEW_MAX_ROLL_DEGREES,
+                MAX_GYRO_PREVIEW_MAX_ROLL_DEGREES,
+            ),
+            invertRoll = gyroPreviewInvertRoll,
+            swapPitchYawAxes = gyroPreviewSwapAxes,
+            invertHorizontal = gyroPreviewInvertHorizontal,
+            invertVertical = gyroPreviewInvertVertical,
+        )
+    }
+
+    fun gyroPreviewAxisText(): String {
+        val axes = if (gyroPreviewSwapAxes) "YX" else "XY"
+        val horizontal = if (gyroPreviewInvertHorizontal) "H-" else "H+"
+        val vertical = if (gyroPreviewInvertVertical) "V-" else "V+"
+        val roll = if (gyroPreviewRollCompensationEnabled) {
+            if (gyroPreviewInvertRoll) "R-" else "R+"
+        } else {
+            "R关"
+        }
+        return "$axes $horizontal $vertical $roll"
+    }
+
+    fun gyroPreviewSettingsChanged(): Boolean {
+        return currentGyroPreviewConfig() != DEFAULT_GYRO_PREVIEW_CONFIG ||
+            gyroPreviewDiagnosticsEnabled ||
+            gyroPreviewGlRenderEnabled ||
+            gyroStabilizationCalibrationFineSampleEnabled
+    }
+
+    fun stabilizationCalibrationSampleMode(): StabilizationCalibrationSampleMode {
+        return if (gyroStabilizationCalibrationFineSampleEnabled) {
+            StabilizationCalibrationSampleMode.FINE
+        } else {
+            StabilizationCalibrationSampleMode.FAST
+        }
+    }
+
+    fun fillGyroPreviewSettingInputs(config: GyroPreviewStabilizer.Config) {
+        gyroPreviewStrengthInput = formatFloatSetting(config.strength)
+        gyroPreviewPathFollowInput = formatFloatSetting(config.pathFollowPerSecond)
+        gyroPreviewOutputAlphaInput = formatFloatSetting(config.outputLowPassAlpha)
+        gyroPreviewOutputRateLimitInput = formatFloatSetting(config.outputRateLimitPxPerSecond)
+        gyroPreviewCropScaleInput = formatFloatSetting(config.cropScale)
+        gyroPreviewMaxShiftInput = formatFloatSetting(config.maxShiftRatio)
+        gyroPreviewDeadbandInput = formatFloatSetting(config.deadbandPx)
+        gyroPreviewHorizontalGainInput = formatFloatSetting(config.horizontalGain)
+        gyroPreviewVerticalGainInput = formatFloatSetting(config.verticalGain)
+        gyroPreviewAimStabilizationEnabledInput = config.aimStabilizationEnabled
+        gyroPreviewAimRpsThresholdInput = formatGyroRps(config.aimRpsThreshold)
+        gyroPreviewAimStrengthMultiplierInput = formatFloatSetting(config.aimStrengthMultiplier)
+        gyroPreviewAimPathFollowInput = formatFloatSetting(config.aimPathFollowPerSecond)
+        gyroPreviewAimDeadbandInput = formatFloatSetting(config.aimDeadbandPx)
+        gyroPreviewAimOutputRateLimitInput = formatFloatSetting(config.aimOutputRateLimitPxPerSecond)
+        gyroPreviewZoomCompensationEnabledInput = config.zoomCompensationEnabled
+        gyroPreviewZoomCompensationStrengthInput = formatFloatSetting(config.zoomCompensationStrength)
+        gyroPreviewMaxCompensationZoomInput = formatFloatSetting(config.maxCompensationZoom)
+        gyroPreviewFrameSyncEnabledInput = config.frameSyncEnabled
+        gyroPreviewFrameTimestampOffsetInput = formatFloatSetting(config.frameTimestampOffsetMs)
+        gyroPreviewGlRenderEnabledInput = gyroPreviewGlRenderEnabled
+        gyroPreviewDiagnosticsEnabledInput = gyroPreviewDiagnosticsEnabled
+        gyroStabilizationCalibrationFineSampleInput = gyroStabilizationCalibrationFineSampleEnabled
+        gyroPreviewRollCompensationEnabledInput = config.rollCompensationEnabled
+        gyroPreviewRollStrengthInput = formatFloatSetting(config.rollStrength)
+        gyroPreviewMaxRollDegreesInput = formatFloatSetting(config.maxRollDegrees)
+        gyroPreviewInvertRollInput = config.invertRoll
+        gyroPreviewSwapAxesInput = config.swapPitchYawAxes
+        gyroPreviewInvertHorizontalInput = config.invertHorizontal
+        gyroPreviewInvertVerticalInput = config.invertVertical
+        gyroPreviewSettingsError = null
+    }
+
+    fun applyGyroPreviewParameterPreset(preset: GyroPreviewParameterPreset) {
+        gyroPreviewStrengthInput = formatFloatSetting(preset.strength)
+        gyroPreviewPathFollowInput = formatFloatSetting(preset.pathFollowPerSecond)
+        gyroPreviewOutputAlphaInput = formatFloatSetting(preset.outputLowPassAlpha)
+        gyroPreviewOutputRateLimitInput = formatFloatSetting(preset.outputRateLimitPxPerSecond)
+        gyroPreviewCropScaleInput = formatFloatSetting(preset.cropScale)
+        gyroPreviewMaxShiftInput = formatFloatSetting(preset.maxShiftRatio)
+        gyroPreviewDeadbandInput = formatFloatSetting(preset.deadbandPx)
+        gyroPreviewHorizontalGainInput = formatFloatSetting(preset.horizontalGain)
+        gyroPreviewVerticalGainInput = formatFloatSetting(preset.verticalGain)
+        gyroPreviewAimStabilizationEnabledInput = preset.aimStabilizationEnabled
+        gyroPreviewAimRpsThresholdInput = formatGyroRps(preset.aimRpsThreshold)
+        gyroPreviewAimStrengthMultiplierInput = formatFloatSetting(preset.aimStrengthMultiplier)
+        gyroPreviewAimPathFollowInput = formatFloatSetting(preset.aimPathFollowPerSecond)
+        gyroPreviewAimDeadbandInput = formatFloatSetting(preset.aimDeadbandPx)
+        gyroPreviewAimOutputRateLimitInput = formatFloatSetting(preset.aimOutputRateLimitPxPerSecond)
+        gyroPreviewZoomCompensationEnabledInput = preset.zoomCompensationEnabled
+        gyroPreviewZoomCompensationStrengthInput = formatFloatSetting(preset.zoomCompensationStrength)
+        gyroPreviewMaxCompensationZoomInput = formatFloatSetting(preset.maxCompensationZoom)
+        gyroPreviewFrameSyncEnabledInput = preset.frameSyncEnabled
+        gyroPreviewFrameTimestampOffsetInput = formatFloatSetting(preset.frameTimestampOffsetMs)
+        gyroPreviewRollCompensationEnabledInput = preset.rollCompensationEnabled
+        gyroPreviewRollStrengthInput = formatFloatSetting(preset.rollStrength)
+        gyroPreviewMaxRollDegreesInput = formatFloatSetting(preset.maxRollDegrees)
+        gyroPreviewInvertRollInput = preset.invertRoll
+        gyroPreviewSettingsError = null
+        Log.i("CameraScreen", "gyro-preview-preset: label=${preset.label}")
+    }
+
+    fun openGyroPreviewSettingsDialog() {
+        fillGyroPreviewSettingInputs(currentGyroPreviewConfig())
+        showGyroPreviewSettingsDialog = true
+    }
+
+    fun saveGyroPreviewSettings() {
+        fun parseFloat(label: String, text: String, min: Float, max: Float): Float? {
+            val value = text.trim().toFloatOrNull()
+            if (value == null || value !in min..max) {
+                gyroPreviewSettingsError =
+                    "$label 请输入 ${formatFloatSetting(min)}-${formatFloatSetting(max)}"
+                return null
+            }
+            return value
+        }
+
+        val strength = parseFloat(
+            "强度",
+            gyroPreviewStrengthInput,
+            MIN_GYRO_PREVIEW_STRENGTH,
+            MAX_GYRO_PREVIEW_STRENGTH,
+        ) ?: return
+        val pathFollow = parseFloat(
+            "跟随速度",
+            gyroPreviewPathFollowInput,
+            MIN_GYRO_PREVIEW_PATH_FOLLOW,
+            MAX_GYRO_PREVIEW_PATH_FOLLOW,
+        ) ?: return
+        val outputAlpha = parseFloat(
+            "输出低通",
+            gyroPreviewOutputAlphaInput,
+            MIN_GYRO_PREVIEW_OUTPUT_ALPHA,
+            MAX_GYRO_PREVIEW_OUTPUT_ALPHA,
+        ) ?: return
+        val outputRateLimit = parseFloat(
+            "输出限速",
+            gyroPreviewOutputRateLimitInput,
+            MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
+            MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
+        ) ?: return
+        val cropScale = parseFloat(
+            "裁切倍数",
+            gyroPreviewCropScaleInput,
+            MIN_GYRO_PREVIEW_CROP_SCALE,
+            MAX_GYRO_PREVIEW_CROP_SCALE,
+        ) ?: return
+        val maxShift = parseFloat(
+            "最大平移",
+            gyroPreviewMaxShiftInput,
+            MIN_GYRO_PREVIEW_MAX_SHIFT,
+            MAX_GYRO_PREVIEW_MAX_SHIFT,
+        ) ?: return
+        val deadband = parseFloat(
+            "像素死区",
+            gyroPreviewDeadbandInput,
+            MIN_GYRO_PREVIEW_DEADBAND_PX,
+            MAX_GYRO_PREVIEW_DEADBAND_PX,
+        ) ?: return
+        val horizontalGain = parseFloat(
+            "横向增益",
+            gyroPreviewHorizontalGainInput,
+            MIN_GYRO_PREVIEW_AXIS_GAIN,
+            MAX_GYRO_PREVIEW_AXIS_GAIN,
+        ) ?: return
+        val verticalGain = parseFloat(
+            "纵向增益",
+            gyroPreviewVerticalGainInput,
+            MIN_GYRO_PREVIEW_AXIS_GAIN,
+            MAX_GYRO_PREVIEW_AXIS_GAIN,
+        ) ?: return
+        val aimRpsThreshold = parseFloat(
+            "瞄准转速阈值",
+            gyroPreviewAimRpsThresholdInput,
+            MIN_GYRO_PREVIEW_AIM_RPS_THRESHOLD,
+            MAX_GYRO_PREVIEW_AIM_RPS_THRESHOLD,
+        ) ?: return
+        val aimStrengthMultiplier = parseFloat(
+            "瞄准强度倍数",
+            gyroPreviewAimStrengthMultiplierInput,
+            MIN_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER,
+            MAX_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER,
+        ) ?: return
+        val aimPathFollow = parseFloat(
+            "瞄准跟随速度",
+            gyroPreviewAimPathFollowInput,
+            MIN_GYRO_PREVIEW_AIM_PATH_FOLLOW,
+            MAX_GYRO_PREVIEW_AIM_PATH_FOLLOW,
+        ) ?: return
+        val aimDeadband = parseFloat(
+            "瞄准死区",
+            gyroPreviewAimDeadbandInput,
+            MIN_GYRO_PREVIEW_AIM_DEADBAND_PX,
+            MAX_GYRO_PREVIEW_AIM_DEADBAND_PX,
+        ) ?: return
+        val aimOutputRateLimit = parseFloat(
+            "瞄准限速",
+            gyroPreviewAimOutputRateLimitInput,
+            MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+            MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+        ) ?: return
+        val zoomCompensationStrength = parseFloat(
+            "倍率补偿强度",
+            gyroPreviewZoomCompensationStrengthInput,
+            MIN_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+            MAX_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+        ) ?: return
+        val maxCompensationZoom = parseFloat(
+            "最大补偿倍率",
+            gyroPreviewMaxCompensationZoomInput,
+            MIN_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM,
+            MAX_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM,
+        ) ?: return
+        val frameTimestampOffsetMs = parseFloat(
+            "帧时间偏移",
+            gyroPreviewFrameTimestampOffsetInput,
+            MIN_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS,
+            MAX_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS,
+        ) ?: return
+        val rollStrength = parseFloat(
+            "Roll强度",
+            gyroPreviewRollStrengthInput,
+            MIN_GYRO_PREVIEW_ROLL_STRENGTH,
+            MAX_GYRO_PREVIEW_ROLL_STRENGTH,
+        ) ?: return
+        val maxRollDegrees = parseFloat(
+            "Roll最大角度",
+            gyroPreviewMaxRollDegreesInput,
+            MIN_GYRO_PREVIEW_MAX_ROLL_DEGREES,
+            MAX_GYRO_PREVIEW_MAX_ROLL_DEGREES,
+        ) ?: return
+
+        val config = GyroPreviewStabilizer.Config(
+            strength = strength,
+            pathFollowPerSecond = pathFollow,
+            outputLowPassAlpha = outputAlpha,
+            outputRateLimitPxPerSecond = outputRateLimit,
+            cropScale = cropScale,
+            maxShiftRatio = maxShift,
+            deadbandPx = deadband,
+            horizontalGain = horizontalGain,
+            verticalGain = verticalGain,
+            aimStabilizationEnabled = gyroPreviewAimStabilizationEnabledInput,
+            aimRpsThreshold = aimRpsThreshold,
+            aimStrengthMultiplier = aimStrengthMultiplier,
+            aimPathFollowPerSecond = aimPathFollow,
+            aimDeadbandPx = aimDeadband,
+            aimOutputRateLimitPxPerSecond = aimOutputRateLimit,
+            zoomCompensationEnabled = gyroPreviewZoomCompensationEnabledInput,
+            zoomCompensationStrength = zoomCompensationStrength,
+            maxCompensationZoom = maxCompensationZoom,
+            frameSyncEnabled = gyroPreviewFrameSyncEnabledInput,
+            frameTimestampOffsetMs = frameTimestampOffsetMs,
+            rollCompensationEnabled = gyroPreviewRollCompensationEnabledInput,
+            rollStrength = rollStrength,
+            maxRollDegrees = maxRollDegrees,
+            invertRoll = gyroPreviewInvertRollInput,
+            swapPitchYawAxes = gyroPreviewSwapAxesInput,
+            invertHorizontal = gyroPreviewInvertHorizontalInput,
+            invertVertical = gyroPreviewInvertVerticalInput,
+        )
+        val glRenderChanged = gyroPreviewGlRenderEnabled != gyroPreviewGlRenderEnabledInput
+
+        gyroPreviewStrength = config.strength
+        gyroPreviewPathFollow = config.pathFollowPerSecond
+        gyroPreviewOutputAlpha = config.outputLowPassAlpha
+        gyroPreviewOutputRateLimit = config.outputRateLimitPxPerSecond
+        gyroPreviewCropScale = config.cropScale
+        gyroPreviewMaxShift = config.maxShiftRatio
+        gyroPreviewDeadbandPx = config.deadbandPx
+        gyroPreviewHorizontalGain = config.horizontalGain
+        gyroPreviewVerticalGain = config.verticalGain
+        gyroPreviewAimStabilizationEnabled = config.aimStabilizationEnabled
+        gyroPreviewAimRpsThreshold = config.aimRpsThreshold
+        gyroPreviewAimStrengthMultiplier = config.aimStrengthMultiplier
+        gyroPreviewAimPathFollow = config.aimPathFollowPerSecond
+        gyroPreviewAimDeadbandPx = config.aimDeadbandPx
+        gyroPreviewAimOutputRateLimit = config.aimOutputRateLimitPxPerSecond
+        gyroPreviewZoomCompensationEnabled = config.zoomCompensationEnabled
+        gyroPreviewZoomCompensationStrength = config.zoomCompensationStrength
+        gyroPreviewMaxCompensationZoom = config.maxCompensationZoom
+        gyroPreviewFrameSyncEnabled = config.frameSyncEnabled
+        gyroPreviewFrameTimestampOffsetMs = config.frameTimestampOffsetMs
+        gyroPreviewGlRenderEnabled = gyroPreviewGlRenderEnabledInput
+        gyroPreviewDiagnosticsEnabled = gyroPreviewDiagnosticsEnabledInput
+        gyroStabilizationCalibrationFineSampleEnabled = gyroStabilizationCalibrationFineSampleInput
+        gyroPreviewRollCompensationEnabled = config.rollCompensationEnabled
+        gyroPreviewRollStrength = config.rollStrength
+        gyroPreviewMaxRollDegrees = config.maxRollDegrees
+        gyroPreviewInvertRoll = config.invertRoll
+        gyroPreviewSwapAxes = config.swapPitchYawAxes
+        gyroPreviewInvertHorizontal = config.invertHorizontal
+        gyroPreviewInvertVertical = config.invertVertical
+
+        cameraPrefs.edit()
+            .putInt(KEY_GYRO_PREVIEW_CONFIG_VERSION, GYRO_PREVIEW_CONFIG_VERSION)
+            .putFloat(KEY_GYRO_PREVIEW_STRENGTH, config.strength)
+            .putFloat(KEY_GYRO_PREVIEW_PATH_FOLLOW, config.pathFollowPerSecond)
+            .putFloat(KEY_GYRO_PREVIEW_OUTPUT_ALPHA, config.outputLowPassAlpha)
+            .putFloat(KEY_GYRO_PREVIEW_OUTPUT_RATE_LIMIT, config.outputRateLimitPxPerSecond)
+            .putFloat(KEY_GYRO_PREVIEW_CROP_SCALE, config.cropScale)
+            .putFloat(KEY_GYRO_PREVIEW_MAX_SHIFT, config.maxShiftRatio)
+            .putFloat(KEY_GYRO_PREVIEW_DEADBAND_PX, config.deadbandPx)
+            .putFloat(KEY_GYRO_PREVIEW_HORIZONTAL_GAIN, config.horizontalGain)
+            .putFloat(KEY_GYRO_PREVIEW_VERTICAL_GAIN, config.verticalGain)
+            .putBoolean(KEY_GYRO_PREVIEW_AIM_STABILIZATION_ENABLED, config.aimStabilizationEnabled)
+            .putFloat(KEY_GYRO_PREVIEW_AIM_RPS_THRESHOLD, config.aimRpsThreshold)
+            .putFloat(KEY_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER, config.aimStrengthMultiplier)
+            .putFloat(KEY_GYRO_PREVIEW_AIM_PATH_FOLLOW, config.aimPathFollowPerSecond)
+            .putFloat(KEY_GYRO_PREVIEW_AIM_DEADBAND_PX, config.aimDeadbandPx)
+            .putFloat(KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT, config.aimOutputRateLimitPxPerSecond)
+            .putBoolean(KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_ENABLED, config.zoomCompensationEnabled)
+            .putFloat(KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH, config.zoomCompensationStrength)
+            .putFloat(KEY_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM, config.maxCompensationZoom)
+            .putBoolean(KEY_GYRO_PREVIEW_FRAME_SYNC_ENABLED, config.frameSyncEnabled)
+            .putFloat(KEY_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS, config.frameTimestampOffsetMs)
+            .putBoolean(KEY_GYRO_PREVIEW_GL_RENDER_ENABLED, gyroPreviewGlRenderEnabledInput)
+            .putBoolean(KEY_GYRO_PREVIEW_DIAGNOSTICS_ENABLED, gyroPreviewDiagnosticsEnabledInput)
+            .putBoolean(KEY_GYRO_STABILIZATION_CALIBRATION_FINE_SAMPLE_ENABLED, gyroStabilizationCalibrationFineSampleInput)
+            .putBoolean(KEY_GYRO_PREVIEW_ROLL_COMPENSATION_ENABLED, config.rollCompensationEnabled)
+            .putFloat(KEY_GYRO_PREVIEW_ROLL_STRENGTH, config.rollStrength)
+            .putFloat(KEY_GYRO_PREVIEW_MAX_ROLL_DEGREES, config.maxRollDegrees)
+            .putBoolean(KEY_GYRO_PREVIEW_INVERT_ROLL, config.invertRoll)
+            .putBoolean(KEY_GYRO_PREVIEW_SWAP_AXES, config.swapPitchYawAxes)
+            .putBoolean(KEY_GYRO_PREVIEW_INVERT_HORIZONTAL, config.invertHorizontal)
+            .putBoolean(KEY_GYRO_PREVIEW_INVERT_VERTICAL, config.invertVertical)
+            .apply()
+
+        gyroPreviewStabilizer.updateConfig(config)
+        gyroStabilizationCalibrationFrame = null
+        gyroStabilizationCalibrationHints.clear()
+        if (gyroPreviewGlRenderEnabledInput) {
+            detectionEnabled = false
+            detectionBoxes = emptyList()
+            detectionPerfText = ""
+            showMeasurePrompt = false
+            measureTrigger = false
+            wasTargetInArea = false
+            statMeasuring = false
+            showCalPanel = false
+            showDualCalPanel = false
+            laserCompareEnabled = false
+            showLaserComparePanel = false
+            laserCompareText = "GL逐帧预览实验已开启，绿光识别已暂停"
+        }
+        if (glRenderChanged) {
+            cameraController.closeCamera()
+            isCameraReady = false
+            surfaceAvailable = false
+            previewSurfaceTextureRef = null
+            textureViewRef = null
+            glPreviewViewRef = null
+        }
+        gyroPreviewStabilizer.reset()
+        gyroPreviewTransform = GyroPreviewStabilizer.Transform.Identity
+        gyroPreviewLastMatrixUpdateMs = 0L
+        gyroPreviewLastOverlayUpdateMs = 0L
+        gyroPreviewLastHudUpdateMs = 0L
+        gyroPreviewLastModelLogMs = 0L
+        if (!gyroPreviewStabilizationEnabled) {
+            gyroPreviewText = ""
+        }
+        showGyroPreviewSettingsDialog = false
+        val renderText = if (gyroPreviewGlRenderEnabledInput) "GL逐帧预览" else "TextureView矩阵"
+        val calibMode = stabilizationCalibrationSampleMode()
+        statusText = "自研EIS参数已保存：${gyroPreviewAxisText()} ${if (config.frameSyncEnabled) "帧同步" else "陀螺实时"} $renderText 标定${calibMode.label}"
+        Log.i("CameraScreen", "gyro-preview-config: $config")
+    }
+
+    fun resetGyroPreviewSettingInputsToDefault() {
+        fillGyroPreviewSettingInputs(DEFAULT_GYRO_PREVIEW_CONFIG)
+        gyroPreviewGlRenderEnabledInput = false
+        gyroPreviewDiagnosticsEnabledInput = false
+        gyroStabilizationCalibrationFineSampleInput = false
+    }
+
+    fun resetGyroPreviewStabilization() {
+        gyroPreviewStabilizer.reset()
+        gyroPreviewTransform = GyroPreviewStabilizer.Transform.Identity
+        gyroPreviewLastMatrixUpdateMs = 0L
+        gyroPreviewLastOverlayUpdateMs = 0L
+        gyroPreviewLastHudUpdateMs = 0L
+        gyroPreviewLastModelLogMs = 0L
+        if (!gyroPreviewStabilizationEnabled) {
+            gyroPreviewText = ""
+        }
+    }
+
+    fun toggleGyroPreviewStabilization() {
+        val next = !gyroPreviewStabilizationEnabled
+        if (next && gyroscopeSensor == null) {
+            statusText = "当前设备没有陀螺仪，无法开启自研EIS"
+            Log.w("CameraScreen", "gyro-preview-stab: no TYPE_GYROSCOPE")
+            return
+        }
+        gyroPreviewStabilizationEnabled = next
+        cameraPrefs.edit()
+            .putBoolean(KEY_GYRO_PREVIEW_STABILIZATION_ENABLED, next)
+            .apply()
+        resetGyroPreviewStabilization()
+        statusText = if (next) {
+            val syncText = if (gyroPreviewFrameSyncEnabled) "帧同步轨迹" else "陀螺实时轨迹"
+            val renderText = if (gyroPreviewGlRenderEnabled) "GL逐帧预览" else "TextureView矩阵"
+            "自研EIS已开启：$renderText + $syncText"
+        } else {
+            "自研EIS已关闭"
+        }
+        Log.i("CameraScreen", "gyro-preview-stab: enabled=$next")
+    }
+
+    fun toggleGyroStabilizationCalibration() {
+        val next = !gyroStabilizationCalibrationEnabled
+        if (next && gyroPreviewGlRenderEnabled) {
+            statusText = "防抖标定暂只支持 TextureView 预览，先关闭 GL逐帧预览"
+            return
+        }
+        val tv = textureViewRef
+        if (next && (tv == null || !tv.isAvailable)) {
+            statusText = "防抖标定：预览未就绪"
+            return
+        }
+        gyroStabilizationCalibrationEnabled = next
+        cameraPrefs.edit()
+            .putBoolean(KEY_GYRO_STABILIZATION_CALIBRATION_ENABLED, next)
+            .apply()
+        gyroStabilizationCalibrationFrame = null
+        gyroStabilizationCalibrationHints.clear()
+        gyroStabilizationCalibrationText = if (next) "防抖标定: 等待预览采样" else ""
+        statusText = if (next) {
+            val mode = stabilizationCalibrationSampleMode()
+            "防抖标定已开启：${mode.label} ${mode.sampleWidth}px"
+        } else {
+            "防抖标定已关闭"
+        }
+        Log.i("CameraScreen", "gyro-calib: enabled=$next")
+    }
+
     fun formatLaserCompareResult(result: LaserResult?): String {
         return result?.let { "(${it.cx.toInt()},${it.cy.toInt()}) c=${"%.2f".format(it.confidence)}" } ?: "未命中"
     }
@@ -361,6 +1497,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     suspend fun captureLaserFrameForCalibration(): LaserFrameCapture {
         return when (yoloFrameSource) {
             YoloFrameSource.PREVIEW_BITMAP -> {
+                if (gyroPreviewGlRenderEnabled) {
+                    throw IllegalStateException("GL逐帧预览实验不提供 TextureView 截图校准")
+                }
                 val tv = textureViewRef ?: throw IllegalStateException("预览未就绪")
                 if (!tv.isAvailable) throw IllegalStateException("预览未就绪")
                 var snapshot: Bitmap? = null
@@ -432,6 +1571,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun toggleLaserComparePanel() {
+        if (gyroPreviewGlRenderEnabled) {
+            laserCompareEnabled = false
+            showLaserComparePanel = false
+            laserCompareText = "GL逐帧预览实验下不运行绿光识别"
+            statusText = "GL逐帧预览实验已开启：绿光识别不可用"
+            return
+        }
         val nextVisible = !showLaserComparePanel
         showLaserComparePanel = nextVisible
         if (nextVisible) {
@@ -445,6 +1591,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun runLaserCompareRecognition() {
+        if (gyroPreviewGlRenderEnabled) {
+            laserCompareEnabled = false
+            laserCompareText = "GL逐帧预览实验下不运行绿光识别"
+            statusText = "GL逐帧预览实验已开启：绿光识别不可用"
+            return
+        }
         if (laserCompareEnabled) return
         val tv = textureViewRef
         if (tv == null || !tv.isAvailable) {
@@ -738,16 +1890,19 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         translationY: Float,
         pivotX: Float,
         pivotY: Float,
+        rotationDegrees: Float = 0f,
     ) {
         val tv = textureView ?: return
         val matrix = Matrix()
-        if (scale != 1f || translationX != 0f || translationY != 0f) {
+        if (scale != 1f || translationX != 0f || translationY != 0f || rotationDegrees != 0f) {
             // Matrix 坐标映射：
             // 1. 先以屏幕中心 pivot 做缩放：p1 = pivot + (p0 - pivot) * scale。
-            // 2. 再追加平移：p2 = p1 + translation。
+            // 2. 如开启 Roll 补偿，再围绕屏幕中心做小角度反向旋转。
+            // 3. 再追加平移：p3 = p2 + translation。
             // 当需要把绿光/校准点 focus 移到屏幕中心时，
-            // translation = (center - focus) * scale，可让 p2(focus) = center。
+            // translation = (center - focus) * scale，可让 p3(focus) 接近 center。
             matrix.setScale(scale, scale, pivotX, pivotY)
+            matrix.postRotate(rotationDegrees, pivotX, pivotY)
             matrix.postTranslate(translationX, translationY)
         }
         tv.setTransform(matrix)
@@ -755,6 +1910,95 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     fun resetTextureMatrixZoom(textureView: TextureView?) {
         textureView?.setTransform(Matrix())
+    }
+
+    fun resetPreviewRenderTransform() {
+        resetTextureMatrixZoom(textureViewRef)
+        glPreviewViewRef?.resetPreviewTransform()
+    }
+
+    fun mapPreviewPointToScreen(
+        x: Float,
+        y: Float,
+        centerX: Float,
+        centerY: Float,
+        scale: Float,
+        rotationDegrees: Float,
+        translationX: Float,
+        translationY: Float,
+    ): Pair<Float, Float> {
+        val scaledX = (x - centerX) * scale
+        val scaledY = (y - centerY) * scale
+        if (rotationDegrees == 0f) {
+            return Pair(centerX + scaledX + translationX, centerY + scaledY + translationY)
+        }
+        val rad = Math.toRadians(rotationDegrees.toDouble())
+        val cosValue = kotlin.math.cos(rad).toFloat()
+        val sinValue = kotlin.math.sin(rad).toFloat()
+        val rotatedX = scaledX * cosValue - scaledY * sinValue
+        val rotatedY = scaledX * sinValue + scaledY * cosValue
+        return Pair(centerX + rotatedX + translationX, centerY + rotatedY + translationY)
+    }
+
+    fun applyPreviewTextureTransform(
+        stabilization: GyroPreviewStabilizer.Transform = gyroPreviewTransform,
+        syncOverlay: Boolean = true,
+    ) {
+        val wrapper = wrapperRef ?: return
+        val viewWidth = wrapper.width.toFloat()
+        val viewHeight = wrapper.height.toFloat()
+        if (viewWidth <= 0f || viewHeight <= 0f) return
+
+        val stabilizationAllowed = gyroPreviewStabilizationEnabled &&
+            !showCalPanel &&
+            !showDualCalPanel &&
+            (!isDualCalibMode || anchorActive)
+        val activeStabilization = if (stabilizationAllowed) {
+            stabilization
+        } else {
+            GyroPreviewStabilizer.Transform.Identity
+        }
+        val baseScale = textureBaseScale.coerceAtLeast(1f)
+        val stabilizationScale = activeStabilization.scale.coerceAtLeast(1f)
+        val scale = max(baseScale, stabilizationScale)
+        val baseTranslationScale = scale / baseScale
+        val tx = textureBaseTx * baseTranslationScale + activeStabilization.translationX
+        val ty = textureBaseTy * baseTranslationScale + activeStabilization.translationY
+        if (gyroPreviewGlRenderEnabled) {
+            resetTextureMatrixZoom(textureViewRef)
+            glPreviewViewRef?.setPreviewTransform(
+                scale = scale,
+                translationX = tx,
+                translationY = ty,
+                rotationDegrees = activeStabilization.rotationDegrees,
+                viewWidth = viewWidth,
+                viewHeight = viewHeight,
+            )
+        } else {
+            glPreviewViewRef?.resetPreviewTransform()
+            applyTextureMatrixZoom(
+                textureViewRef,
+                scale,
+                tx,
+                ty,
+                viewWidth / 2f,
+                viewHeight / 2f,
+                rotationDegrees = activeStabilization.rotationDegrees,
+            )
+        }
+        if (syncOverlay) {
+            wrapperTx = tx
+            wrapperTy = ty
+            wrapperScale = scale
+            wrapperRotation = activeStabilization.rotationDegrees
+        }
+    }
+
+    fun canApplyGyroPreviewStabilization(): Boolean {
+        return gyroPreviewStabilizationEnabled &&
+            !showCalPanel &&
+            !showDualCalPanel &&
+            (!isDualCalibMode || anchorActive)
     }
 
     fun uiCameraBaseZoomForLens(lens: LensCandidate? = selectedLens): Float {
@@ -786,6 +2030,271 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         cameraController.setZoomRatio(cameraZoomForMode(equivRatio))
     }
 
+    fun gyroPreviewDigitalZoomRatio(): Float {
+        val opticalBase = opticalBaseForLens().coerceAtLeast(1f)
+        val actualZoom = currentEquivRatio.coerceAtLeast(opticalBase)
+        return (actualZoom / opticalBase).coerceAtLeast(1f)
+    }
+
+    fun gyroPreviewLensProjection(
+        viewWidth: Float,
+        viewHeight: Float,
+        digitalZoomRatio: Float = 1f,
+    ): GyroLensProjection {
+        val lens = selectedLens ?: return GyroLensProjection()
+        val focalMm = lens.focalLength.takeIf { it > 0f } ?: return GyroLensProjection()
+        val sensorWidthMm = lens.sensorWidth.takeIf { it > 0f } ?: return GyroLensProjection()
+        val sensorHeightMm = lens.sensorHeight.takeIf { it > 0f } ?: return GyroLensProjection()
+        val displayDigitalRatio = digitalZoomRatio.coerceAtLeast(1f)
+        val visibleSensorWidthMm = sensorWidthMm / displayDigitalRatio
+        val visibleSensorHeightMm = sensorHeightMm / displayDigitalRatio
+        val fovX = Math.toDegrees(
+            2.0 * Math.atan((visibleSensorWidthMm / (2f * focalMm)).toDouble()),
+        ).toFloat()
+        val fovY = Math.toDegrees(
+            2.0 * Math.atan((visibleSensorHeightMm / (2f * focalMm)).toDouble()),
+        ).toFloat()
+        return GyroLensProjection(
+            focalPxX = viewWidth * focalMm / visibleSensorWidthMm,
+            focalPxY = viewHeight * focalMm / visibleSensorHeightMm,
+            fovXDegrees = fovX,
+            fovYDegrees = fovY,
+        )
+    }
+
+    fun gyroPreviewAxisFlag(x: Boolean, y: Boolean): String = when {
+        x && y -> "XY"
+        x -> "X"
+        y -> "Y"
+        else -> "-"
+    }
+
+    fun gyroPreviewLensFovText(transform: GyroPreviewStabilizer.Transform): String {
+        val projection = gyroPreviewLensProjection(
+            viewWidth = 1f,
+            viewHeight = 1f,
+            digitalZoomRatio = transform.digitalZoomRatio,
+        )
+        return if (projection.fovXDegrees > 0f && projection.fovYDegrees > 0f) {
+            String.format(Locale.US, "%.1f/%.1f", projection.fovXDegrees, projection.fovYDegrees)
+        } else if (transform.lensFocalPxX > 0f || transform.lensFocalPxY > 0f) {
+            "unknown"
+        } else {
+            "-"
+        }
+    }
+
+    fun gyroPreviewSummaryText(transform: GyroPreviewStabilizer.Transform): String {
+        val syncMode = when {
+            gyroPreviewGlRenderEnabled && transform.frameSyncEnabled -> "GL帧"
+            gyroPreviewGlRenderEnabled -> "GL陀"
+            transform.frameSyncEnabled -> "帧"
+            else -> "陀"
+        }
+        return String.format(
+            Locale.US,
+            "自研EIS[%s]: dx=%.1f dy=%.1f rot=%.2f crop=%.2f z=%.1f(o%.1f*d%.1f) rps=%.3f aim=%.0f%% g=%.2f/%.2f lim=%.0f %s",
+            syncMode,
+            transform.translationX,
+            transform.translationY,
+            transform.rotationDegrees,
+            transform.scale,
+            transform.effectiveZoom,
+            transform.opticalZoomBase,
+            transform.digitalZoomRatio,
+            transform.rps,
+            transform.aimBlend * 100f,
+            gyroPreviewHorizontalGain,
+            gyroPreviewVerticalGain,
+            transform.outputRateLimitPxPerSecond,
+            gyroPreviewAxisText(),
+        )
+    }
+
+    fun gyroPreviewDiagnosticsText(transform: GyroPreviewStabilizer.Transform): String {
+        return String.format(
+            Locale.US,
+            "\n诊断: gx=%.3f gy=%.3f gz=%.3f pitchSrc=%.3f yawSrc=%.3f rollSrc=%.3f frame=%s samples=%d dt=%.1fms lag=%.1fms" +
+                "\n模型: raw=%.1f/%.1f target=%.1f/%.1f out=%.1f/%.1f max=%.0f/%.0f step=%.1f lim=%s clamp=%s focal=%.0f/%.0f lens=%.0f/%.0f fov=%s exp=%.2fms skew=%.2fms off=%.2fms",
+            transform.gyroXRadPerSec,
+            transform.gyroYRadPerSec,
+            transform.gyroZRadPerSec,
+            transform.sourcePitchRate,
+            transform.sourceYawRate,
+            transform.sourceRollRate,
+            if (transform.frameSyncEnabled) "on" else "off",
+            transform.frameSamples,
+            transform.frameDeltaMs,
+            transform.frameLagMs,
+            transform.rawTranslationX,
+            transform.rawTranslationY,
+            transform.targetTranslationX,
+            transform.targetTranslationY,
+            transform.translationX,
+            transform.translationY,
+            transform.maxTranslationX,
+            transform.maxTranslationY,
+            transform.maxOutputStepPx,
+            gyroPreviewAxisFlag(transform.outputLimitedX, transform.outputLimitedY),
+            gyroPreviewAxisFlag(transform.translationClampedX, transform.translationClampedY),
+            transform.modelFocalPxX,
+            transform.modelFocalPxY,
+            transform.lensFocalPxX,
+            transform.lensFocalPxY,
+            gyroPreviewLensFovText(transform),
+            transform.exposureTimeMs,
+            transform.rollingShutterSkewMs,
+            transform.frameTargetOffsetMs,
+        )
+    }
+
+    fun gyroPreviewModelLogText(transform: GyroPreviewStabilizer.Transform): String {
+        val lens = selectedLens
+        return String.format(
+            Locale.US,
+            "gyro-preview-model: lens=%s/%s out=%.1f/%.1f raw=%.1f/%.1f target=%.1f/%.1f " +
+                "max=%.0f/%.0f step=%.1f limited=%s clamped=%s modelFocal=%.0f/%.0f " +
+                "lensFocal=%.0f/%.0f fov=%s exp=%.2fms rolling=%.2fms targetOffset=%.2fms " +
+                "samples=%d dt=%.1fms lag=%.1fms zoom=%.2f(o%.2f*d%.2f)",
+            lens?.cameraId ?: "unknown",
+            lens?.physicalId ?: "logical",
+            transform.translationX,
+            transform.translationY,
+            transform.rawTranslationX,
+            transform.rawTranslationY,
+            transform.targetTranslationX,
+            transform.targetTranslationY,
+            transform.maxTranslationX,
+            transform.maxTranslationY,
+            transform.maxOutputStepPx,
+            gyroPreviewAxisFlag(transform.outputLimitedX, transform.outputLimitedY),
+            gyroPreviewAxisFlag(transform.translationClampedX, transform.translationClampedY),
+            transform.modelFocalPxX,
+            transform.modelFocalPxY,
+            transform.lensFocalPxX,
+            transform.lensFocalPxY,
+            gyroPreviewLensFovText(transform),
+            transform.exposureTimeMs,
+            transform.rollingShutterSkewMs,
+            transform.frameTargetOffsetMs,
+            transform.frameSamples,
+            transform.frameDeltaMs,
+            transform.frameLagMs,
+            transform.effectiveZoom,
+            transform.opticalZoomBase,
+            transform.digitalZoomRatio,
+        )
+    }
+
+    fun gyroCalibrationAxisHint(rawEstimatePx: Float, gyroPredPx: Float): String {
+        val minSignalPx = GYRO_STABILIZATION_CALIBRATION_HINT_MIN_SIGNAL_PX
+        if (abs(rawEstimatePx) < minSignalPx || abs(gyroPredPx) < minSignalPx) return "弱"
+        if (rawEstimatePx * gyroPredPx < 0f) return "反"
+        val ratio = abs(gyroPredPx) / abs(rawEstimatePx).coerceAtLeast(1f)
+        return when {
+            ratio < 0.75f -> "少"
+            ratio > 1.35f -> "多"
+            else -> "准"
+        }
+    }
+
+    fun gyroCalibrationDominantHint(
+        samples: List<StabilizationCalibrationHintSample>,
+        selector: (StabilizationCalibrationHintSample) -> String,
+    ): String {
+        if (samples.isEmpty()) return "等待"
+        val order = listOf("反", "少", "多", "准", "弱")
+        var bestHint = "弱"
+        var bestCount = 0
+        for (hint in order) {
+            val count = samples.count { selector(it) == hint }
+            if (count > bestCount) {
+                bestHint = hint
+                bestCount = count
+            }
+        }
+        return "$bestHint$bestCount/${samples.size}"
+    }
+
+    fun gyroCalibrationWindowText(samples: List<StabilizationCalibrationHintSample>): String {
+        return "1.2s: X=${gyroCalibrationDominantHint(samples) { it.xHint }} " +
+            "Y=${gyroCalibrationDominantHint(samples) { it.yHint }}"
+    }
+
+    fun gyroCalibrationPanelText(
+        actualDxPx: Float,
+        actualDyPx: Float,
+        rawEstimateX: Float,
+        rawEstimateY: Float,
+        gyroPredX: Float,
+        gyroPredY: Float,
+        compDeltaX: Float,
+        compDeltaY: Float,
+        score: Float,
+        rps: Float,
+        effectiveZoom: Float,
+        xHint: String,
+        yHint: String,
+        windowText: String,
+        sampleModeLabel: String,
+        sampleWidth: Int,
+        sampleHeight: Int,
+        viewWidth: Int,
+        viewHeight: Int,
+    ): String {
+        val stepX = viewWidth.toFloat() / sampleWidth.coerceAtLeast(1)
+        val stepY = viewHeight.toFloat() / sampleHeight.coerceAtLeast(1)
+        return String.format(
+            Locale.US,
+            "防抖标定[%s]: A=%.1f/%.1f R=%.1f/%.1f P=%.1f/%.1f\n" +
+                "图=%dx%d view=%dx%d step=%.1f/%.1f score=%.2f\n" +
+                "调参: X=%s Y=%s; %s C=%.1f/%.1f r=%.3f z=%.1f",
+            sampleModeLabel,
+            actualDxPx,
+            actualDyPx,
+            rawEstimateX,
+            rawEstimateY,
+            gyroPredX,
+            gyroPredY,
+            sampleWidth,
+            sampleHeight,
+            viewWidth,
+            viewHeight,
+            stepX,
+            stepY,
+            score,
+            xHint,
+            yHint,
+            windowText,
+            compDeltaX,
+            compDeltaY,
+            rps,
+            effectiveZoom,
+        )
+    }
+
+    fun handleGyroPreviewTransform(transform: GyroPreviewStabilizer.Transform, nowMs: Long) {
+        gyroPreviewTransform = transform
+        val shouldUpdateMatrix = nowMs - gyroPreviewLastMatrixUpdateMs >= GYRO_PREVIEW_MATRIX_UPDATE_INTERVAL_MS
+        val shouldSyncOverlay = nowMs - gyroPreviewLastOverlayUpdateMs >= GYRO_PREVIEW_OVERLAY_UPDATE_INTERVAL_MS
+        if (shouldUpdateMatrix) {
+            applyPreviewTextureTransform(transform, syncOverlay = shouldSyncOverlay)
+            gyroPreviewLastMatrixUpdateMs = nowMs
+            if (shouldSyncOverlay) gyroPreviewLastOverlayUpdateMs = nowMs
+        }
+        if (nowMs - gyroPreviewLastHudUpdateMs >= GYRO_PREVIEW_HUD_UPDATE_INTERVAL_MS) {
+            gyroPreviewText = buildString {
+                append(gyroPreviewSummaryText(transform))
+                if (gyroPreviewDiagnosticsEnabled) append(gyroPreviewDiagnosticsText(transform))
+            }
+            gyroPreviewLastHudUpdateMs = nowMs
+        }
+        if (gyroPreviewDiagnosticsEnabled && nowMs - gyroPreviewLastModelLogMs >= GYRO_PREVIEW_MODEL_LOG_INTERVAL_MS) {
+            Log.i("CameraScreen", gyroPreviewModelLogText(transform))
+            gyroPreviewLastModelLogMs = nowMs
+        }
+    }
+
     fun calibrationSampleZoom(equivRatio: Float = currentEquivRatio): Double {
         return if (isUiZoomActive()) {
             uiCameraBaseZoomForLens(selectedLens).toDouble()
@@ -795,7 +2304,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun visualZoomDisplayRatio(): Float {
-        val uiScale = wrapperScale.coerceAtLeast(1f)
+        val uiScale = textureBaseScale.coerceAtLeast(1f)
         val baseZoom = if (isUiZoomActive()) {
             uiCameraBaseZoomForLens(selectedLens)
         } else {
@@ -805,7 +2314,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun visualZoomLabelSuffix(baseSuffix: String = ""): String {
-        val hasUiScale = anchorActive && wrapperScale > 1.01f
+        val hasUiScale = anchorActive && textureBaseScale > 1.01f
         return when {
             !hasUiScale -> baseSuffix
             baseSuffix.isBlank() -> "视觉"
@@ -1047,6 +2556,294 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 Log.i("CameraScreen", "active-physical-camera: ${cameraId ?: "not reported"}")
             }
         }
+        cameraController.onFrameTimingChanged = { timing ->
+            mainHandler.post {
+                if (!canApplyGyroPreviewStabilization() || !gyroPreviewFrameSyncEnabled) return@post
+                val wrapper = wrapperRef ?: return@post
+                if (wrapper.width <= 0 || wrapper.height <= 0) return@post
+                val digitalZoomRatio = gyroPreviewDigitalZoomRatio()
+                val lensProjection = gyroPreviewLensProjection(
+                    wrapper.width.toFloat(),
+                    wrapper.height.toFloat(),
+                    digitalZoomRatio,
+                )
+                val transform = gyroPreviewStabilizer.updateForFrame(
+                    frameTimestampNs = timing.sensorTimestampNs,
+                    exposureTimeNs = timing.exposureTimeNs,
+                    rollingShutterSkewNs = timing.rollingShutterSkewNs,
+                    nowElapsedRealtimeNs = android.os.SystemClock.elapsedRealtimeNanos(),
+                    viewWidth = wrapper.width.toFloat(),
+                    viewHeight = wrapper.height.toFloat(),
+                    opticalZoomBase = opticalBaseForLens(),
+                    digitalZoomRatio = digitalZoomRatio,
+                    lensFocalPxX = lensProjection.focalPxX,
+                    lensFocalPxY = lensProjection.focalPxY,
+                )
+                handleGyroPreviewTransform(transform, android.os.SystemClock.elapsedRealtime())
+            }
+        }
+    }
+
+    LaunchedEffect(
+        gyroPreviewStrength,
+        gyroPreviewPathFollow,
+        gyroPreviewOutputAlpha,
+        gyroPreviewOutputRateLimit,
+        gyroPreviewCropScale,
+        gyroPreviewMaxShift,
+        gyroPreviewDeadbandPx,
+        gyroPreviewHorizontalGain,
+        gyroPreviewVerticalGain,
+        gyroPreviewAimStabilizationEnabled,
+        gyroPreviewAimRpsThreshold,
+        gyroPreviewAimStrengthMultiplier,
+        gyroPreviewAimPathFollow,
+        gyroPreviewAimDeadbandPx,
+        gyroPreviewAimOutputRateLimit,
+        gyroPreviewZoomCompensationEnabled,
+        gyroPreviewZoomCompensationStrength,
+        gyroPreviewMaxCompensationZoom,
+        gyroPreviewFrameSyncEnabled,
+        gyroPreviewFrameTimestampOffsetMs,
+        gyroPreviewRollCompensationEnabled,
+        gyroPreviewRollStrength,
+        gyroPreviewMaxRollDegrees,
+        gyroPreviewInvertRoll,
+        gyroPreviewSwapAxes,
+        gyroPreviewInvertHorizontal,
+        gyroPreviewInvertVertical,
+    ) {
+        gyroPreviewStabilizer.updateConfig(currentGyroPreviewConfig())
+        resetGyroPreviewStabilization()
+    }
+
+    DisposableEffect(gyroPreviewStabilizationEnabled, gyroPreviewFrameSyncEnabled, gyroscopeSensor) {
+        val sensor = gyroscopeSensor
+        if (!gyroPreviewStabilizationEnabled || sensor == null) {
+            if (gyroPreviewStabilizationEnabled && sensor == null) {
+                gyroPreviewStabilizationEnabled = false
+                cameraPrefs.edit()
+                    .putBoolean(KEY_GYRO_PREVIEW_STABILIZATION_ENABLED, false)
+                    .apply()
+                gyroPreviewText = "自研EIS: 无陀螺仪"
+                statusText = "当前设备没有陀螺仪，无法开启自研EIS"
+            }
+            resetGyroPreviewStabilization()
+            onDispose { }
+        } else {
+            val listener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    if (event.sensor.type != Sensor.TYPE_GYROSCOPE || event.values.size < 3) return
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    val z = event.values[2]
+                    gyroPreviewStabilizer.recordGyroSample(
+                        timestampNs = event.timestamp,
+                        gyroXRadPerSec = x,
+                        gyroYRadPerSec = y,
+                        gyroZRadPerSec = z,
+                    )
+
+                    if (canApplyGyroPreviewStabilization() && !gyroPreviewFrameSyncEnabled) {
+                        val wrapper = wrapperRef
+                        if (wrapper != null && wrapper.width > 0 && wrapper.height > 0) {
+                            val digitalZoomRatio = gyroPreviewDigitalZoomRatio()
+                            val lensProjection = gyroPreviewLensProjection(
+                                wrapper.width.toFloat(),
+                                wrapper.height.toFloat(),
+                                digitalZoomRatio,
+                            )
+                            val transform = gyroPreviewStabilizer.update(
+                                timestampNs = event.timestamp,
+                                gyroXRadPerSec = x,
+                                gyroYRadPerSec = y,
+                                gyroZRadPerSec = z,
+                                viewWidth = wrapper.width.toFloat(),
+                                viewHeight = wrapper.height.toFloat(),
+                                opticalZoomBase = opticalBaseForLens(),
+                                digitalZoomRatio = digitalZoomRatio,
+                                lensFocalPxX = lensProjection.focalPxX,
+                                lensFocalPxY = lensProjection.focalPxY,
+                            )
+                            handleGyroPreviewTransform(transform, android.os.SystemClock.elapsedRealtime())
+                        }
+                    }
+                }
+
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+            }
+            resetGyroPreviewStabilization()
+            gyroPreviewText = "自研EIS: 等待陀螺仪"
+            val listenerRegistered = try {
+                sensorManager.registerListener(
+                    listener,
+                    sensor,
+                    GYRO_PREVIEW_STABILIZATION_SENSOR_DELAY_US,
+                )
+            } catch (e: SecurityException) {
+                Log.e("CameraScreen", "gyro-preview listener start failed: sensor=${sensor.name}", e)
+                gyroPreviewStabilizationEnabled = false
+                cameraPrefs.edit()
+                    .putBoolean(KEY_GYRO_PREVIEW_STABILIZATION_ENABLED, false)
+                    .apply()
+                resetGyroPreviewStabilization()
+                gyroPreviewText = "自研EIS: 传感器权限不足"
+                statusText = "自研EIS启动失败：缺少 HIGH_SAMPLING_RATE_SENSORS 权限"
+                false
+            } catch (e: RuntimeException) {
+                Log.e("CameraScreen", "gyro-preview listener start failed: sensor=${sensor.name}", e)
+                gyroPreviewStabilizationEnabled = false
+                cameraPrefs.edit()
+                    .putBoolean(KEY_GYRO_PREVIEW_STABILIZATION_ENABLED, false)
+                    .apply()
+                resetGyroPreviewStabilization()
+                gyroPreviewText = "自研EIS: 启动失败"
+                statusText = "自研EIS启动失败：${e.message ?: "传感器注册异常"}"
+                false
+            }
+            Log.d(
+                "CameraScreen",
+                "gyro-preview listener ${if (listenerRegistered) "started" else "not-started"}: " +
+                    "sensor=${sensor.name}, frameSync=$gyroPreviewFrameSyncEnabled",
+            )
+            onDispose {
+                if (listenerRegistered) {
+                    sensorManager.unregisterListener(listener)
+                }
+                if (gyroPreviewStabilizationEnabled) {
+                    gyroPreviewStabilizer.reset()
+                }
+                Log.d("CameraScreen", "gyro-preview listener stopped")
+            }
+        }
+    }
+
+    LaunchedEffect(
+        gyroStabilizationCalibrationEnabled,
+        gyroPreviewGlRenderEnabled,
+        gyroStabilizationCalibrationFineSampleEnabled,
+        surfaceAvailable,
+    ) {
+        if (!gyroStabilizationCalibrationEnabled) return@LaunchedEffect
+        if (gyroPreviewGlRenderEnabled) {
+            gyroStabilizationCalibrationEnabled = false
+            gyroStabilizationCalibrationFrame = null
+            gyroStabilizationCalibrationHints.clear()
+            gyroStabilizationCalibrationText = ""
+            cameraPrefs.edit()
+                .putBoolean(KEY_GYRO_STABILIZATION_CALIBRATION_ENABLED, false)
+                .apply()
+            statusText = "防抖标定暂只支持 TextureView 预览，已自动关闭"
+            return@LaunchedEffect
+        }
+
+        gyroStabilizationCalibrationFrame = null
+        gyroStabilizationCalibrationHints.clear()
+        gyroStabilizationCalibrationText = "防抖标定: 等待预览采样"
+        while (true) {
+            val loopStartMs = android.os.SystemClock.elapsedRealtime()
+            val textureView = textureViewRef
+            if (textureView == null || !textureView.isAvailable) {
+                gyroStabilizationCalibrationFrame = null
+                gyroStabilizationCalibrationHints.clear()
+                gyroStabilizationCalibrationText = "防抖标定: 预览未就绪"
+                delay(GYRO_STABILIZATION_CALIBRATION_INTERVAL_MS)
+                continue
+            }
+
+            val frame = captureStabilizationCalibrationFrame(
+                textureView,
+                gyroPreviewTransform,
+                stabilizationCalibrationSampleMode(),
+            )
+            val previous = gyroStabilizationCalibrationFrame
+            var matchCostMs: Long? = null
+            var matchScore: Float? = null
+            if (frame != null && previous != null) {
+                val (result, costMs) = withContext(Dispatchers.Default) {
+                    val matchStartMs = android.os.SystemClock.elapsedRealtime()
+                    val matchResult = estimateStabilizationCalibrationShift(previous, frame)
+                    matchResult to (android.os.SystemClock.elapsedRealtime() - matchStartMs)
+                }
+                matchCostMs = costMs
+                if (result != null) {
+                    matchScore = result.score
+                    val compDeltaX = frame.compensationX - previous.compensationX
+                    val compDeltaY = frame.compensationY - previous.compensationY
+                    val rawEstimateX = result.actualDxPx - compDeltaX
+                    val rawEstimateY = result.actualDyPx - compDeltaY
+                    val gyroPredX = -compDeltaX
+                    val gyroPredY = -compDeltaY
+                    val intervalMs = frame.timestampMs - previous.timestampMs
+                    val xHint = gyroCalibrationAxisHint(rawEstimateX, gyroPredX)
+                    val yHint = gyroCalibrationAxisHint(rawEstimateY, gyroPredY)
+                    val cutoffMs = frame.timestampMs - GYRO_STABILIZATION_CALIBRATION_HINT_WINDOW_MS
+                    gyroStabilizationCalibrationHints.add(
+                        StabilizationCalibrationHintSample(
+                            timestampMs = frame.timestampMs,
+                            xHint = xHint,
+                            yHint = yHint,
+                        ),
+                    )
+                    gyroStabilizationCalibrationHints.removeAll { it.timestampMs < cutoffMs }
+                    val windowText = gyroCalibrationWindowText(gyroStabilizationCalibrationHints)
+                    gyroStabilizationCalibrationText = gyroCalibrationPanelText(
+                        result.actualDxPx,
+                        result.actualDyPx,
+                        rawEstimateX,
+                        rawEstimateY,
+                        gyroPredX,
+                        gyroPredY,
+                        compDeltaX,
+                        compDeltaY,
+                        result.score,
+                        frame.rps,
+                        frame.effectiveZoom,
+                        xHint,
+                        yHint,
+                        windowText,
+                        frame.sampleModeLabel,
+                        frame.width,
+                        frame.height,
+                        frame.viewWidth,
+                        frame.viewHeight,
+                    )
+                    val stepX = frame.viewWidth.toFloat() / frame.width.coerceAtLeast(1)
+                    val stepY = frame.viewHeight.toFloat() / frame.height.coerceAtLeast(1)
+                    Log.i(
+                        "CameraScreen",
+                        "gyro-calib: interval=${intervalMs}ms sample=(${result.sampleDx},${result.sampleDy}) " +
+                            "actual=(${result.actualDxPx},${result.actualDyPx}) rawEst=($rawEstimateX,$rawEstimateY) " +
+                            "gyroPred=($gyroPredX,$gyroPredY) compDelta=($compDeltaX,$compDeltaY) " +
+                            "score=${result.score} rps=${frame.rps} zoom=${frame.effectiveZoom} rot=${frame.rotationDegrees} " +
+                            "hint=($xHint,$yHint) window=$windowText mode=${frame.sampleModeLabel} " +
+                            "bitmap=${frame.width}x${frame.height} view=${frame.viewWidth}x${frame.viewHeight} " +
+                            "step=($stepX,$stepY)",
+                    )
+                } else {
+                    gyroStabilizationCalibrationHints.clear()
+                    gyroStabilizationCalibrationText = "防抖标定: 中心纹理不足或匹配失败"
+                }
+            } else if (frame == null) {
+                gyroStabilizationCalibrationHints.clear()
+                gyroStabilizationCalibrationText = "防抖标定: 截取预览失败"
+            }
+            frame?.let { currentFrame ->
+                val loopCostMs = android.os.SystemClock.elapsedRealtime() - loopStartMs
+                val intervalText = previous?.let { (currentFrame.timestampMs - it.timestampMs).toString() } ?: "first"
+                Log.i(
+                    "CameraScreen",
+                    "gyro-calib-cost: interval=${intervalText}ms capture=${currentFrame.captureCostMs}ms " +
+                        "luma=${currentFrame.lumaCostMs}ms frameBuild=${currentFrame.frameBuildCostMs}ms " +
+                        "match=${matchCostMs ?: -1}ms loop=${loopCostMs}ms " +
+                        "delay=${GYRO_STABILIZATION_CALIBRATION_INTERVAL_MS}ms score=${matchScore ?: -1f} " +
+                        "mode=${currentFrame.sampleModeLabel} bitmap=${currentFrame.width}x${currentFrame.height} " +
+                        "view=${currentFrame.viewWidth}x${currentFrame.viewHeight}",
+                )
+            }
+            gyroStabilizationCalibrationFrame = frame
+            delay(GYRO_STABILIZATION_CALIBRATION_INTERVAL_MS)
+        }
     }
 
     // BLE 距离回调：只显示 flag=1 的数据
@@ -1077,19 +2874,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     // 生命周期监听
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasPaused by remember { mutableStateOf(false) }
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, gyroPreviewGlRenderEnabled) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
+                    glPreviewViewRef?.onPause()
                     hasPaused = true; cameraController.closeCamera(); isCameraReady = false
                 }
                 Lifecycle.Event.ON_RESUME -> {
+                    glPreviewViewRef?.onResume()
                     if (hasPaused) {
                         hasPaused = false
-                        val lens = selectedLens; val tv = textureViewRef
-                        if (lens != null && tv != null && tv.isAvailable) {
-                            // 重新设置 buffer 尺寸，避免拉伸
-                            val st = tv.surfaceTexture!!
+                        val lens = selectedLens
+                        val st = previewSurfaceTextureRef
+                        if (lens != null && st != null && surfaceAvailable) {
                             cameraController.setSurfaceTexture(st)
                             val resumeZoom = if (isDualCalibMode && isUsingDualTele) {
                                 1f
@@ -1101,7 +2899,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             cameraController.setZoomRatio(resumeZoom)
                             cameraController.openCamera(
                                 lens,
-                                android.view.Surface(st),
+                                Surface(st),
                                 strictPhysical = isDualCalibMode && lens.physicalId != null,
                             )
                         }
@@ -1130,11 +2928,21 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     // 统一相机打开
-    LaunchedEffect(selectedLens, surfaceAvailable, isDualCalibMode, isUsingDualTele, uiZoomOnlyEnabled) {
+    LaunchedEffect(
+        selectedLens,
+        surfaceAvailable,
+        isDualCalibMode,
+        isUsingDualTele,
+        uiZoomOnlyEnabled,
+        gyroPreviewGlRenderEnabled,
+    ) {
         val lens = selectedLens ?: return@LaunchedEffect
         if (!surfaceAvailable) return@LaunchedEffect
-        val tv = textureViewRef ?: return@LaunchedEffect
-        if (!tv.isAvailable) return@LaunchedEffect
+        if (!gyroPreviewGlRenderEnabled) {
+            val tv = textureViewRef ?: return@LaunchedEffect
+            if (!tv.isAvailable) return@LaunchedEffect
+        }
+        val surfaceTexture = previewSurfaceTextureRef ?: return@LaunchedEffect
         val initialZoom = if (isDualCalibMode && isUsingDualTele) {
             1f
         } else if (isDualCalibMode) {
@@ -1146,7 +2954,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         cameraController.closeCamera()
         cameraController.openCamera(
             lens,
-            android.view.Surface(tv.surfaceTexture!!),
+            Surface(surfaceTexture),
             strictPhysical = isDualCalibMode && lens.physicalId != null,
         )
     }
@@ -1210,7 +3018,21 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     // 变换效果：默认倍率放大交给 Camera2；纯 UI 放大实验模式下由 TextureView Matrix 承担显示 zoom。
-    LaunchedEffect(currentCenterPx, anchorCenter1x, anchorZoom, anchorActive, currentEquivRatio, isCameraReady, isDualCalibMode, isUsingDualTele, uiZoomOnlyEnabled) {
+    LaunchedEffect(
+        currentCenterPx,
+        anchorCenter1x,
+        anchorZoom,
+        anchorActive,
+        currentEquivRatio,
+        isCameraReady,
+        isDualCalibMode,
+        isUsingDualTele,
+        uiZoomOnlyEnabled,
+        gyroPreviewStabilizationEnabled,
+        gyroPreviewGlRenderEnabled,
+        showCalPanel,
+        showDualCalPanel,
+    ) {
         val wrapper = wrapperRef ?: return@LaunchedEffect
         if (!isCameraReady) return@LaunchedEffect
         val point = if (isUiZoomActive()) {
@@ -1232,58 +3054,36 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             val screenCY = h / 2f
             val displayScale = uiZoomDisplayScale()
 
-            if (isUiZoomActive()) {
-                var scale = displayScale
-                var tx = 0f
-                var ty = 0f
-                if (anchorActive && point != null) {
-                    val focusX = (point.x / ImageUtils.OUT_W.toDouble() * w).toFloat()
-                    val focusY = (point.y / ImageUtils.OUT_H.toDouble() * h).toFloat()
-                    val coverScale = minCoverScaleForFocus(focusX, focusY, w, h)
-                    scale = max(coverScale, displayScale)
-                    tx = (screenCX - focusX) * scale
-                    ty = (screenCY - focusY) * scale
-                }
-
-                wrapper.pivotX = screenCX
-                wrapper.pivotY = screenCY
-                wrapper.translationX = 0f
-                wrapper.translationY = 0f
-                wrapper.scaleX = 1f
-                wrapper.scaleY = 1f
-                applyTextureMatrixZoom(
-                    textureViewRef,
-                    scale,
-                    tx,
-                    ty,
-                    screenCX,
-                    screenCY,
-                )
-                wrapperTx = tx
-                wrapperTy = ty
-                wrapperScale = scale
-                return@post
-            }
-
             if (anchorActive && point != null) {
                 val focusX = (point.x / ImageUtils.OUT_W.toDouble() * w).toFloat()
                 val focusY = (point.y / ImageUtils.OUT_H.toDouble() * h).toFloat()
                 val coverScale = minCoverScaleForFocus(focusX, focusY, w, h)
-                val scale = coverScale
+                val scale = if (isUiZoomActive()) max(coverScale, displayScale) else coverScale
 
                 // 1080x1920 归一化坐标先映射到实际预览容器，再用中心 pivot 变换。
                 // 以中心为 pivot 时：screen = (focus - center) * scale + center + translation。
                 // 令 screen = center，可得 translation = (center - focus) * scale。
                 wrapper.pivotX = screenCX
                 wrapper.pivotY = screenCY
-                wrapper.translationX = (screenCX - focusX) * scale
-                wrapper.translationY = (screenCY - focusY) * scale
-                wrapper.scaleX = scale
-                wrapper.scaleY = scale
-                wrapperTx = wrapper.translationX
-                wrapperTy = wrapper.translationY
-                wrapperScale = scale
-                resetTextureMatrixZoom(textureViewRef)
+                wrapper.translationX = 0f
+                wrapper.translationY = 0f
+                wrapper.scaleX = 1f
+                wrapper.scaleY = 1f
+                textureBaseScale = scale
+                textureBaseTx = (screenCX - focusX) * scale
+                textureBaseTy = (screenCY - focusY) * scale
+                applyPreviewTextureTransform()
+            } else if (isUiZoomActive() && displayScale > 1f) {
+                wrapper.pivotX = screenCX
+                wrapper.pivotY = screenCY
+                wrapper.translationX = 0f
+                wrapper.translationY = 0f
+                wrapper.scaleX = 1f
+                wrapper.scaleY = 1f
+                textureBaseScale = displayScale
+                textureBaseTx = 0f
+                textureBaseTy = 0f
+                applyPreviewTextureTransform()
             } else if (isDualCalibMode) {
                 wrapper.pivotX = screenCX
                 wrapper.pivotY = screenCY
@@ -1291,10 +3091,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 wrapper.translationY = 0f
                 wrapper.scaleX = 1f
                 wrapper.scaleY = 1f
-                wrapperTx = 0f
-                wrapperTy = 0f
-                wrapperScale = 1f
-                resetTextureMatrixZoom(textureViewRef)
+                textureBaseScale = 1f
+                textureBaseTx = 0f
+                textureBaseTy = 0f
+                applyPreviewTextureTransform()
+                if (gyroPreviewStabilizationEnabled && !anchorActive) {
+                    gyroPreviewText = "自研EIS: 双摄校准时暂停"
+                }
             } else {
                 wrapper.pivotX = screenCX
                 wrapper.pivotY = screenCY
@@ -1302,10 +3105,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 wrapper.translationY = 0f
                 wrapper.scaleX = 1f
                 wrapper.scaleY = 1f
-                wrapperTx = 0f
-                wrapperTy = 0f
-                wrapperScale = 1f
-                resetTextureMatrixZoom(textureViewRef)
+                textureBaseScale = 1f
+                textureBaseTx = 0f
+                textureBaseTy = 0f
+                applyPreviewTextureTransform()
             }
         }
     }
@@ -1428,14 +3231,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 val screenCY = viewH / 2f
                                 val areaHalfW = areaWidthPx / 2f
                                 val areaHalfH = areaHeightPx / 2f
-                                val tx = wrapperTx; val ty = wrapperTy; val s = wrapperScale
+                                val tx = wrapperTx; val ty = wrapperTy; val s = wrapperScale; val rot = wrapperRotation
                                 val pts = checkPoints
                                 val hasTargetInArea = mapped.any { (box, _) ->
                                     fun isPointInside(pctW: Float, pctH: Float): Boolean {
                                         val px = box.left + box.width() * pctW
                                         val py = box.top + box.height() * pctH
-                                        val cx = (px - screenCX) * s + screenCX + tx
-                                        val cy = (py - screenCY) * s + screenCY + ty
+                                        val (cx, cy) = mapPreviewPointToScreen(
+                                            x = px,
+                                            y = py,
+                                            centerX = screenCX,
+                                            centerY = screenCY,
+                                            scale = s,
+                                            rotationDegrees = rot,
+                                            translationX = tx,
+                                            translationY = ty,
+                                        )
                                         return cx in (screenCX - areaHalfW)..(screenCX + areaHalfW) &&
                                                 cy in (screenCY - areaHalfH)..(screenCY + areaHalfH)
                                     }
@@ -1483,32 +3294,69 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         // 预览区域：FrameLayout 包裹 TextureView，变换应用在 FrameLayout 上
         Box(modifier = Modifier.fillMaxHeight().aspectRatio(9f / 16f)) {
-            AndroidView(
-                factory = { ctx ->
-                    val wrapper = FrameLayout(ctx)
-                    val tv = TextureView(ctx).apply {
-                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                                surfaceAvailable = true; cameraController.setSurfaceTexture(st)
+            key(gyroPreviewGlRenderEnabled) {
+                AndroidView(
+                    factory = { ctx ->
+                        val wrapper = FrameLayout(ctx)
+                        if (gyroPreviewGlRenderEnabled) {
+                            val glView = GlStabilizedPreviewView(ctx).apply {
+                                onCameraSurfaceTextureAvailable = { st ->
+                                    previewSurfaceTextureRef = st
+                                    surfaceAvailable = true
+                                    cameraController.setSurfaceTexture(st)
+                                }
+                                onCameraSurfaceTextureDestroyed = { st ->
+                                    if (previewSurfaceTextureRef === st) previewSurfaceTextureRef = null
+                                    surfaceAvailable = false
+                                    cameraController.closeCamera()
+                                    isCameraReady = false
+                                }
                             }
-                            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
-                            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                                surfaceAvailable = false; cameraController.closeCamera(); isCameraReady = false; return true
+                            wrapper.addView(
+                                glView,
+                                FrameLayout.LayoutParams(
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                ),
+                            )
+                            glPreviewViewRef = glView
+                            textureViewRef = null
+                        } else {
+                            val tv = TextureView(ctx).apply {
+                                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                        previewSurfaceTextureRef = st
+                                        surfaceAvailable = true
+                                        cameraController.setSurfaceTexture(st)
+                                    }
+                                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                        if (previewSurfaceTextureRef === st) previewSurfaceTextureRef = null
+                                        surfaceAvailable = false
+                                        cameraController.closeCamera()
+                                        isCameraReady = false
+                                        return true
+                                    }
+                                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                                }
                             }
-                            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                            // TextureView 填满容器；纯 UI 放大时通过 setTransform(Matrix) 做显示层变换。
+                            wrapper.addView(
+                                tv,
+                                FrameLayout.LayoutParams(
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                ),
+                            )
+                            textureViewRef = tv
+                            glPreviewViewRef = null
                         }
-                    }
-                    // TextureView 填满容器；纯 UI 放大时通过 setTransform(Matrix) 做显示层变换。
-                    wrapper.addView(tv, FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    ))
-                    textureViewRef = tv
-                    wrapperRef = wrapper
-                    wrapper
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                        wrapperRef = wrapper
+                        wrapper
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             CrosshairOverlay(modifier = Modifier.fillMaxSize())
             // 检测框跟随 wrapper 变换（与预览内容一致）
             DetectionOverlay(
@@ -1516,6 +3364,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize().graphicsLayer {
                     translationX = wrapperTx; translationY = wrapperTy
                     scaleX = wrapperScale; scaleY = wrapperScale
+                    rotationZ = wrapperRotation
                 },
             )
             // 识别区域固定在屏幕中心（校准后屏幕中心就是 100m 坐标位置）
@@ -1556,13 +3405,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     TopActionButton(
                         text = if (detectionEnabled) "识别中" else "识别",
                         active = detectionEnabled,
-                        enabled = yoloDetector != null,
+                        enabled = !gyroPreviewGlRenderEnabled && yoloDetector != null,
                         accent = Color(0xFFFF9800),
                         onClick = { detectionEnabled = !detectionEnabled },
                     )
                     TopActionButton(
                         text = if (isDualCalibMode) "双摄" else if (showCalPanel) "校准中" else "校准",
                         active = showCalPanel || showDualCalPanel || isDualCalibMode,
+                        enabled = !gyroPreviewGlRenderEnabled,
                         onClick = {
                             when {
                                 isDualCalibMode && dualCalManager.state == DualCalibrationManager.State.IDLE && dualTargetPrediction != null -> {
@@ -1583,6 +3433,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         TopActionButton(
                             text = if (laserCompareEnabled) "对比中" else "绿光对比",
                             active = showLaserComparePanel || laserCompareEnabled,
+                            enabled = !gyroPreviewGlRenderEnabled,
                             accent = Color(0xFF00C853),
                             onClick = { toggleLaserComparePanel() },
                         )
@@ -1596,6 +3447,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             wideLensActive ||
                             oisEnabled ||
                             eisMode != Camera2Controller.getDefaultVideoStabilizationMode() ||
+                            gyroPreviewStabilizationEnabled ||
+                            gyroPreviewGlRenderEnabled ||
+                            gyroStabilizationCalibrationEnabled ||
+                            gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             isVoiceListening ||
                             yoloCaptureMode == YoloCaptureMode.UHD4K ||
@@ -1689,6 +3544,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         ToolMenuItem(
                             text = "图源 ${yoloCaptureMode.label}",
                             active = yoloCaptureMode == YoloCaptureMode.UHD4K,
+                            enabled = !gyroPreviewGlRenderEnabled,
                             onClick = {
                                 toolsMenuExpanded = false
                                 val nextMode = yoloCaptureMode.next()
@@ -1699,6 +3555,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         ToolMenuItem(
                             text = "YOLO源 ${yoloFrameSource.label}",
                             active = yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV,
+                            enabled = !gyroPreviewGlRenderEnabled,
                             accent = Color(0xFF03A9F4),
                             onClick = {
                                 toolsMenuExpanded = false
@@ -1713,10 +3570,39 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 statusText = "YOLO数据源: ${nextSource.label}"
                             },
                         )
+                        ToolMenuItem(
+                            text = if (gyroPreviewStabilizationEnabled) "自研EIS 开" else "自研EIS",
+                            active = gyroPreviewStabilizationEnabled,
+                            accent = Color(0xFF00ACC1),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                toggleGyroPreviewStabilization()
+                            },
+                        )
+                        ToolMenuItem(
+                            text = "自研EIS参数 ${if (gyroPreviewGlRenderEnabled) "GL " else ""}${gyroPreviewAxisText()}",
+                            active = gyroPreviewSettingsChanged(),
+                            accent = Color(0xFF00ACC1),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                openGyroPreviewSettingsDialog()
+                            },
+                        )
+                        ToolMenuItem(
+                            text = if (gyroStabilizationCalibrationEnabled) "防抖标定 开" else "防抖标定",
+                            active = gyroStabilizationCalibrationEnabled,
+                            enabled = !gyroPreviewGlRenderEnabled,
+                            accent = Color(0xFFFFD54F),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                toggleGyroStabilizationCalibration()
+                            },
+                        )
                         if (!isLaserCompareApp) {
                             ToolMenuItem(
                                 text = if (laserCompareEnabled) "绿光识别中" else "绿光识别",
                                 active = showLaserComparePanel || laserCompareEnabled,
+                                enabled = !gyroPreviewGlRenderEnabled,
                                 accent = Color(0xFF00C853),
                                 onClick = {
                                     toolsMenuExpanded = false
@@ -1783,8 +3669,18 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.Top,
             ) {
                 val leftMs = (statEndMs - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                val gyroPreviewHudText = if (gyroPreviewStabilizationEnabled) gyroPreviewText else ""
+                val gyroCalibrationHudText = if (gyroStabilizationCalibrationEnabled) {
+                    gyroStabilizationCalibrationText
+                } else {
+                    ""
+                }
+                val gyroHudText = listOf(gyroPreviewHudText, gyroCalibrationHudText)
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n")
                 StatusHud(
                     statusText = statusText,
+                    gyroText = gyroHudText,
                     modelText = when {
                         yoloDetector == null -> "模型: $modelLoadStatus"
                         detectionEnabled -> detectionPerfText
@@ -2498,6 +4394,292 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        if (showGyroPreviewSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showGyroPreviewSettingsDialog = false },
+                title = { Text("自研EIS参数") },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 520.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            text = "先用方向开关找最稳组合；如果开启后更抖，优先切换反向或互换轴，再调整强度。",
+                            color = Color.White.copy(alpha = 0.76f),
+                            fontSize = 12.sp,
+                            lineHeight = 15.sp,
+                        )
+                        Text(
+                            text = "参数预设",
+                            color = Color.White.copy(alpha = 0.86f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            GYRO_PREVIEW_PARAMETER_PRESETS.forEach { preset ->
+                                Button(
+                                    onClick = { applyGyroPreviewParameterPreset(preset) },
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.White.copy(alpha = 0.12f),
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(34.dp),
+                                ) {
+                                    Text(
+                                        text = preset.label,
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+
+                        GyroSettingSwitchRow(
+                            text = "X/Y互换",
+                            checked = gyroPreviewSwapAxesInput,
+                            onCheckedChange = { gyroPreviewSwapAxesInput = it; gyroPreviewSettingsError = null },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "横向反向",
+                            checked = gyroPreviewInvertHorizontalInput,
+                            onCheckedChange = { gyroPreviewInvertHorizontalInput = it; gyroPreviewSettingsError = null },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "纵向反向",
+                            checked = gyroPreviewInvertVerticalInput,
+                            onCheckedChange = { gyroPreviewInvertVerticalInput = it; gyroPreviewSettingsError = null },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "帧同步",
+                            checked = gyroPreviewFrameSyncEnabledInput,
+                            onCheckedChange = { gyroPreviewFrameSyncEnabledInput = it; gyroPreviewSettingsError = null },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "诊断日志",
+                            checked = gyroPreviewDiagnosticsEnabledInput,
+                            onCheckedChange = { gyroPreviewDiagnosticsEnabledInput = it; gyroPreviewSettingsError = null },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "GL逐帧预览实验",
+                            checked = gyroPreviewGlRenderEnabledInput,
+                            onCheckedChange = { gyroPreviewGlRenderEnabledInput = it; gyroPreviewSettingsError = null },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "防抖标定精细采样",
+                            checked = gyroStabilizationCalibrationFineSampleInput,
+                            onCheckedChange = {
+                                gyroStabilizationCalibrationFineSampleInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "倍率补偿",
+                            checked = gyroPreviewZoomCompensationEnabledInput,
+                            onCheckedChange = {
+                                gyroPreviewZoomCompensationEnabledInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "瞄准稳定",
+                            checked = gyroPreviewAimStabilizationEnabledInput,
+                            onCheckedChange = {
+                                gyroPreviewAimStabilizationEnabledInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "Roll补偿",
+                            checked = gyroPreviewRollCompensationEnabledInput,
+                            onCheckedChange = {
+                                gyroPreviewRollCompensationEnabledInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "Roll反向",
+                            checked = gyroPreviewInvertRollInput,
+                            enabled = gyroPreviewRollCompensationEnabledInput,
+                            onCheckedChange = {
+                                gyroPreviewInvertRollInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+
+                        Text("基础", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "强度",
+                                gyroPreviewStrengthInput,
+                                { gyroPreviewStrengthInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                            GyroSettingTextField(
+                                "裁切",
+                                gyroPreviewCropScaleInput,
+                                { gyroPreviewCropScaleInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "跟随",
+                                gyroPreviewPathFollowInput,
+                                { gyroPreviewPathFollowInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                            GyroSettingTextField(
+                                "低通",
+                                gyroPreviewOutputAlphaInput,
+                                { gyroPreviewOutputAlphaInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "限速",
+                                gyroPreviewOutputRateLimitInput,
+                                { gyroPreviewOutputRateLimitInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                            GyroSettingTextField(
+                                "最大平移",
+                                gyroPreviewMaxShiftInput,
+                                { gyroPreviewMaxShiftInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "死区px",
+                                gyroPreviewDeadbandInput,
+                                { gyroPreviewDeadbandInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                            GyroSettingTextField(
+                                "帧偏移ms",
+                                gyroPreviewFrameTimestampOffsetInput,
+                                { gyroPreviewFrameTimestampOffsetInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "横向增益",
+                                gyroPreviewHorizontalGainInput,
+                                { gyroPreviewHorizontalGainInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                            GyroSettingTextField(
+                                "纵向增益",
+                                gyroPreviewVerticalGainInput,
+                                { gyroPreviewVerticalGainInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                            )
+                        }
+
+                        Text("倍率/瞄准", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "补偿强度",
+                                gyroPreviewZoomCompensationStrengthInput,
+                                { gyroPreviewZoomCompensationStrengthInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewZoomCompensationEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "补偿上限",
+                                gyroPreviewMaxCompensationZoomInput,
+                                { gyroPreviewMaxCompensationZoomInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewZoomCompensationEnabledInput,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "瞄准阈值",
+                                gyroPreviewAimRpsThresholdInput,
+                                { gyroPreviewAimRpsThresholdInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewAimStabilizationEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "瞄准强度",
+                                gyroPreviewAimStrengthMultiplierInput,
+                                { gyroPreviewAimStrengthMultiplierInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewAimStabilizationEnabledInput,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "瞄准跟随",
+                                gyroPreviewAimPathFollowInput,
+                                { gyroPreviewAimPathFollowInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewAimStabilizationEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "瞄准死区",
+                                gyroPreviewAimDeadbandInput,
+                                { gyroPreviewAimDeadbandInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewAimStabilizationEnabledInput,
+                            )
+                        }
+                        GyroSettingTextField(
+                            "瞄准限速",
+                            gyroPreviewAimOutputRateLimitInput,
+                            { gyroPreviewAimOutputRateLimitInput = it; gyroPreviewSettingsError = null },
+                            enabled = gyroPreviewAimStabilizationEnabledInput,
+                        )
+
+                        Text("Roll", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "Roll强度",
+                                gyroPreviewRollStrengthInput,
+                                { gyroPreviewRollStrengthInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewRollCompensationEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "Roll最大角度",
+                                gyroPreviewMaxRollDegreesInput,
+                                { gyroPreviewMaxRollDegreesInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewRollCompensationEnabledInput,
+                            )
+                        }
+
+                        gyroPreviewSettingsError?.let { error ->
+                            Text(error, color = Color(0xFFFF5252), fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { saveGyroPreviewSettings() }) { Text("保存") }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { resetGyroPreviewSettingInputsToDefault() }) { Text("默认") }
+                        TextButton(onClick = { showGyroPreviewSettingsDialog = false }) { Text("取消") }
+                    }
+                },
+            )
+        }
+
         if (voiceDownloadDialogVisible) {
             val downloadState = voiceDownloadState
             AlertDialog(
@@ -2773,6 +4955,199 @@ private fun LaserComparePanel(
     }
 }
 
+private fun captureStabilizationCalibrationFrame(
+    textureView: TextureView,
+    transform: GyroPreviewStabilizer.Transform,
+    sampleMode: StabilizationCalibrationSampleMode,
+): StabilizationCalibrationFrame? {
+    if (!textureView.isAvailable || textureView.width <= 0 || textureView.height <= 0) {
+        return null
+    }
+    val viewWidth = textureView.width
+    val viewHeight = textureView.height
+    val sampleWidth = sampleMode.sampleWidth
+    val sampleHeight = ((sampleWidth.toFloat() * viewHeight) / viewWidth)
+        .roundToInt()
+        .coerceIn(90, sampleMode.maxSampleHeight)
+    val frameBuildStartMs = android.os.SystemClock.elapsedRealtime()
+    val bitmap = try {
+        textureView.getBitmap(sampleWidth, sampleHeight)
+    } catch (e: RuntimeException) {
+        Log.w("CameraScreen", "gyro-calib: capture failed: ${e.message}")
+        null
+    } ?: return null
+    val bitmapCapturedMs = android.os.SystemClock.elapsedRealtime()
+
+    return try {
+        val lumaStartMs = android.os.SystemClock.elapsedRealtime()
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        val luma = IntArray(pixels.size)
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val red = pixel shr 16 and 0xFF
+            val green = pixel shr 8 and 0xFF
+            val blue = pixel and 0xFF
+            luma[i] = (red * 77 + green * 150 + blue * 29) shr 8
+        }
+        val frameReadyMs = android.os.SystemClock.elapsedRealtime()
+        StabilizationCalibrationFrame(
+            timestampMs = frameReadyMs,
+            width = bitmap.width,
+            height = bitmap.height,
+            viewWidth = viewWidth,
+            viewHeight = viewHeight,
+            sampleModeLabel = sampleMode.label,
+            templateSize = sampleMode.templateSize,
+            searchRadius = sampleMode.searchRadius,
+            luma = luma,
+            captureCostMs = bitmapCapturedMs - frameBuildStartMs,
+            lumaCostMs = frameReadyMs - lumaStartMs,
+            frameBuildCostMs = frameReadyMs - frameBuildStartMs,
+            compensationX = transform.translationX,
+            compensationY = transform.translationY,
+            rotationDegrees = transform.rotationDegrees,
+            rps = transform.rps,
+            effectiveZoom = transform.effectiveZoom,
+        )
+    } finally {
+        bitmap.recycle()
+    }
+}
+
+private fun estimateStabilizationCalibrationShift(
+    previous: StabilizationCalibrationFrame,
+    current: StabilizationCalibrationFrame,
+): StabilizationCalibrationResult? {
+    if (previous.width != current.width || previous.height != current.height) return null
+    val width = current.width
+    val height = current.height
+    val radius = current.searchRadius
+    val templateSize = min(
+        current.templateSize,
+        min(width, height) - radius * 2 - 4,
+    )
+    if (templateSize < 24) return null
+
+    val templateLeft = width / 2 - templateSize / 2
+    val templateTop = height / 2 - templateSize / 2
+    var bestSad = Long.MAX_VALUE
+    var bestDx = 0
+    var bestDy = 0
+    var sampleCount = 0
+    var sum = 0L
+    var sumSquares = 0L
+
+    for (dy in -radius..radius) {
+        val currentTop = templateTop + dy
+        if (currentTop < 0 || currentTop + templateSize >= height) continue
+        for (dx in -radius..radius) {
+            val currentLeft = templateLeft + dx
+            if (currentLeft < 0 || currentLeft + templateSize >= width) continue
+
+            var sad = 0L
+            var localCount = 0
+            var localSum = 0L
+            var localSumSquares = 0L
+            var y = 0
+            while (y < templateSize) {
+                val previousRow = (templateTop + y) * width + templateLeft
+                val currentRow = (currentTop + y) * width + currentLeft
+                var x = 0
+                while (x < templateSize) {
+                    val previousLuma = previous.luma[previousRow + x]
+                    val currentLuma = current.luma[currentRow + x]
+                    sad += abs(previousLuma - currentLuma).toLong()
+                    localSum += previousLuma.toLong()
+                    localSumSquares += previousLuma.toLong() * previousLuma.toLong()
+                    localCount++
+                    x += 2
+                }
+                y += 2
+            }
+
+            if (sad < bestSad) {
+                bestSad = sad
+                bestDx = dx
+                bestDy = dy
+                sampleCount = localCount
+                sum = localSum
+                sumSquares = localSumSquares
+            }
+        }
+    }
+
+    if (sampleCount <= 0 || bestSad == Long.MAX_VALUE) return null
+    val mean = sum.toFloat() / sampleCount
+    val variance = (sumSquares.toFloat() / sampleCount - mean * mean).coerceAtLeast(0f)
+    val textureScore = (variance / 900f).coerceIn(0f, 1f)
+    val normalizedSad = (bestSad.toFloat() / (sampleCount * 255f)).coerceIn(0f, 1f)
+    val score = ((1f - normalizedSad) * textureScore).coerceIn(0f, 1f)
+    if (score < GYRO_STABILIZATION_CALIBRATION_MIN_SCORE) return null
+
+    val actualDxPx = bestDx * current.viewWidth.toFloat() / width
+    val actualDyPx = bestDy * current.viewHeight.toFloat() / height
+    return StabilizationCalibrationResult(
+        actualDxPx = actualDxPx,
+        actualDyPx = actualDyPx,
+        score = score,
+        sampleDx = bestDx,
+        sampleDy = bestDy,
+    )
+}
+
+private fun formatGyroRps(value: Float): String = String.format(Locale.US, "%.3f", value)
+
+private fun formatFloatSetting(value: Float): String = String.format(Locale.US, "%.2f", value)
+
+@Composable
+private fun GyroSettingSwitchRow(
+    text: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) Color.White else Color.White.copy(alpha = 0.42f),
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
+    }
+}
+
+@Composable
+private fun GyroSettingTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        enabled = enabled,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        modifier = modifier,
+    )
+}
+
 @Composable
 private fun TopActionButton(
     text: String,
@@ -2834,6 +5209,7 @@ private fun ToolMenuItem(
 @Composable
 private fun StatusHud(
     statusText: String,
+    gyroText: String,
     modelText: String,
     statText: String,
     lensText: String,
@@ -2841,7 +5217,7 @@ private fun StatusHud(
     anchorText: String,
     modifier: Modifier = Modifier,
 ) {
-    val lines = listOf(statusText, lensText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
+    val lines = listOf(statusText, lensText, gyroText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
     if (lines.isEmpty()) return
 
     Column(
@@ -2851,12 +5227,13 @@ private fun StatusHud(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        lines.take(5).forEachIndexed { index, text ->
+        lines.take(6).forEachIndexed { index, text ->
             Text(
                 text = text,
                 color = when {
                     index == 0 -> Color.White.copy(alpha = 0.9f)
                     text.startsWith("画面镜头") -> Color(0xFFA5D6A7)
+                    text.startsWith("自研EIS") || text.startsWith("防抖标定") -> Color(0xFF80DEEA)
                     text.startsWith("模型") -> Color(0xFFFF7043)
                     text.startsWith("统计") -> Color(0xFF64B5F6)
                     text.startsWith("zoom") -> Color(0xFF90CAF9)

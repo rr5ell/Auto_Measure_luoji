@@ -5,6 +5,10 @@
 - 修改相机、校准、检测、语音等核心流程前，先查阅 `docs/code-library/INDEX.md`。
 - 优先增量修改已有类和函数，避免重新设计同类流程。
 - Android Camera2 EIS 默认必须保持 OFF；只有用户明确要求或在防抖弹窗中显式选择 ON/PREVIEW 时才允许写入 `CONTROL_VIDEO_STABILIZATION_MODE`，并需实机验证坐标漂移。
+- 自研 EIS 只能作为应用层显示矩阵防抖使用，不得把 `GyroPreviewStabilizer` 的集成改成默认开启 Camera2 系统 EIS。
+- 自研 EIS 不得改变普通预览的父逻辑相机 Session；普通预览继续禁止 `OutputConfiguration.setPhysicalCameraId()`，双摄校准 `strictPhysical=true` 例外不变。
+- 普通校准、双摄校准和绿光采集期间必须暂停或绕过自研 EIS 补偿，避免显示层坐标和采集坐标漂移。
+- GL 逐帧预览实验开启时必须禁用 YOLO、绿光识别和 `TextureView.getBitmap()` 截图校准入口，避免预览源、识别源、矩阵坐标不一致。
 - 大体积模型、缓存、构建产物、密钥和真实用户隐私数据不得登记到代码资产库。
 - 绿光识别校准链路优先传入归一化图片 bytes：预览帧先缩放到 `1080x1920`，再编码为 PNG/JPEG 等完整图片格式，禁止把无宽高/stride 元数据的裸帧直接传入 bytes 入口。
 - 绿光新旧算法对比识别只做调试验证入口，默认单次触发并保存两组图片，禁止改成无节流连续保存；对比必须使用同一帧输入。

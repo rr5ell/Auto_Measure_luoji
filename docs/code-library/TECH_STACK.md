@@ -11,7 +11,8 @@
 | targetSdk | `36` | `app/build.gradle.kts` |
 | Jetpack Compose BOM | `2024.09.00` | `gradle/libs.versions.toml` |
 | UI | Jetpack Compose Material3 | `app/build.gradle.kts` |
-| Camera | Android Camera2 API | `feature/camera/domain/Camera2Controller.kt` |
+| Camera | Android Camera2 API + TextureView/GL 预览 | `feature/camera/domain/Camera2Controller.kt`; `feature/camera/ui/CameraScreen.kt`; `feature/camera/ui/GlStabilizedPreviewView.kt` |
+| 应用层预览防抖 | Android SensorManager gyroscope + TextureView matrix / OpenGL OES texture | `feature/camera/domain/GyroPreviewStabilizer.kt`; `feature/camera/ui/CameraScreen.kt`; `feature/camera/ui/GlStabilizedPreviewView.kt` |
 | BLE | Android BLE API | `feature/bluetooth/domain/BleConnectionManager.kt` |
 | YOLO 推理 | LiteRT 1.4.2 + GMS TFLite fallback | `app/build.gradle.kts` |
 | 语音热词 | Sherpa-ONNX SenseVoice + Silero VAD 优先，Android `SpeechRecognizer` fallback | `feature/voice/domain/ChineseVoiceHotwordRecognizer.kt`; `feature/voice/domain/SherpaOnnxHotwordRecognizer.kt` |
@@ -32,4 +33,5 @@
 - 当前项目随包携带 Sherpa-ONNX native 推理库，但不把 SenseVoice / Silero VAD 模型权重打进 APK；模型仍由 `ThirdPartyVoiceModelDownloader` 下载到应用私有目录。
 - YOLO 可在 `TextureView.getBitmap()` 预览截图源与 Camera2 `ImageReader` 的 `YUV_420_888` 数据源之间切换；YUV 实时识别复用 native `yuv_preprocess` 预处理链路。
 - Camera2 EIS 默认保持 OFF；用户显式选择实验模式 ON/PREVIEW 时允许写入 `CONTROL_VIDEO_STABILIZATION_MODE`，校准时必须记录模式并验证坐标漂移。
+- 自研 EIS 是应用层显示矩阵防抖，依赖 `HIGH_SAMPLING_RATE_SENSORS`、陀螺仪采样和 `CameraFrameTiming`；普通预览不绑定物理输出 Surface。
 - Camera2 zoom 后端以 `zoom: backend=...` 形式输出到 Logcat 和主界面状态区。

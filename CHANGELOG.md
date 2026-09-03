@@ -5,6 +5,21 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [camera-gyro-preview-stabilization-2026-09-03] - 2026-09-03
+
+### Added
+- 按 `E:\StudioProjects\Auto_measure` 集成应用层自研 EIS：新增 `GyroPreviewStabilizer`、`GlStabilizedPreviewView` 和高采样率陀螺仪权限。
+- `更多` 菜单新增 `自研EIS`、`自研EIS参数`、`防抖标定` 入口；参数支持方向反转、X/Y 互换、帧同步、倍率补偿、瞄准稳定、Roll 补偿、诊断日志和 GL 逐帧预览实验。
+- Camera2 capture result 新增 `CameraFrameTiming` 回调，将 `SENSOR_TIMESTAMP`、曝光时间、rolling shutter skew 提供给自研 EIS 帧同步路径。
+
+### Changed
+- 默认预览仍保持逻辑相机 Session；普通预览不使用 `OutputConfiguration.setPhysicalCameraId()`，双摄校准 `strictPhysical=true` 路径不变。
+- 自研 EIS 只叠加显示层矩阵，不静默开启系统 Camera2 EIS；系统 EIS 仍只由 `防抖` 弹窗显式切换。
+- GL 逐帧预览实验开启后自动停用 YOLO、绿光识别和截图校准入口，避免预览源与识别源不一致。
+
+### Verified
+- 已通过 `.\gradlew.bat :app:assembleDebug --no-daemon`。
+
 ## [0.8.30] - 2026-08-28
 
 ### Fixed

@@ -23,6 +23,13 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+data class CameraFrameTiming(
+    val frameNumber: Long,
+    val sensorTimestampNs: Long,
+    val exposureTimeNs: Long?,
+    val rollingShutterSkewNs: Long?,
+)
+
 /**
  * 相机控制器
  *
@@ -95,6 +102,7 @@ class Camera2Controller(private val context: Context) {
     var onExposureStateChanged: ((String) -> Unit)? = null
     var onActivePhysicalCameraChanged: ((String?) -> Unit)? = null
     var onVideoStabilizationStateChanged: ((Int, String) -> Unit)? = null
+    var onFrameTimingChanged: ((CameraFrameTiming) -> Unit)? = null
 
     val isActive: Boolean get() = cameraDevice != null
     private var surfaceTexture: SurfaceTexture? = null
@@ -348,6 +356,18 @@ class Camera2Controller(private val context: Context) {
                 "oisRequest=${oisStabilizationModeName(requestedOisMode)}, " +
                 "oisResult=${oisStabilizationModeName(resultOisMode)}, " +
                 "frame=${result.frameNumber}",
+        )
+    }
+
+    private fun publishFrameTiming(result: TotalCaptureResult) {
+        val sensorTimestampNs = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+        onFrameTimingChanged?.invoke(
+            CameraFrameTiming(
+                frameNumber = result.frameNumber,
+                sensorTimestampNs = sensorTimestampNs,
+                exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                rollingShutterSkewNs = result.get(CaptureResult.SENSOR_ROLLING_SHUTTER_SKEW),
+            ),
         )
     }
 
@@ -695,6 +715,7 @@ class Camera2Controller(private val context: Context) {
             request: CaptureRequest,
             result: TotalCaptureResult,
         ) {
+            publishFrameTiming(result)
             publishActivePhysicalCameraId(result)
             publishStabilizationCaptureResult(request, result)
         }

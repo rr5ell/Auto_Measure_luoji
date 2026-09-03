@@ -1,5 +1,21 @@
 # Error Report
 
+## [2026-09-03] 自研 EIS 集成报告
+
+### 发现的问题
+- `E:\StudioProjects\Auto_measure` 已有应用层陀螺仪预览防抖、帧同步、GL 逐帧预览实验和防抖标定诊断；luoji 项目缺少这套自研 EIS 能力。
+- 严重程度：中。没有应用层防抖时，长焦逻辑相机预览抖动更明显；直接开启系统 Camera2 EIS 又可能触发电子裁剪并造成坐标漂移。
+
+### 解决方案
+- 新增 `GyroPreviewStabilizer` 和 `GlStabilizedPreviewView`，并在 `CameraScreen` 接入陀螺仪采样、Camera2 frame timing、TextureView/GL 显示层矩阵合成、HUD 和参数弹窗。
+- `Camera2Controller` 增加 `CameraFrameTiming` 回调，向自研 EIS 帧同步路径提供 `SENSOR_TIMESTAMP`、曝光时间和 rolling shutter skew。
+- 新增 `更多 -> 自研EIS`、`自研EIS参数`、`防抖标定`；GL 逐帧预览实验开启后禁用 YOLO、绿光识别和截图校准，避免数据源不一致。
+
+### 预防措施
+- 自研 EIS 只能作为应用层显示矩阵使用，不得借集成默认开启系统 Camera2 EIS。
+- 普通预览继续保持父逻辑相机 Session；`OutputConfiguration.setPhysicalCameraId()` 只允许留在双摄校准 `strictPhysical=true` 路径。
+- 真机调参先看 HUD 和 `gyro-calib` 日志：方向错误优先切换反向或 X/Y 互换，强度不匹配再调整 gain、strength、crop 和 frame offset。
+
 ## [2026-08-28] 蒲公英 0.8.30 发布记录
 
 ### 发现的问题

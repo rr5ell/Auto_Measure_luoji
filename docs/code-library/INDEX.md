@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/yolo-frame-source-toggle` |
+| 当前主要分支 | `feature/gyro-preview-stabilization` |
 
 ## 可复用能力
 
@@ -18,6 +18,7 @@
 |---|---|---|---|---|
 | android-camera2-ois-toggle | Camera2 OIS 显式开关 | android, kotlin, camera2, ois, stabilization | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-camera2-eis-experimental-toggle | Camera2 EIS 实验模式开关 | android, kotlin, camera2, eis, video-stabilization, hardware-control | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
+| android-gyro-preview-stabilization | 应用层陀螺仪预览防抖 | android, kotlin, camera2, gyroscope, textureview, opengl, stabilization, calibration | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/GyroPreviewStabilizer.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt` | active |
 | android-camera2-calibration-ev-compensation | 校准期间 Camera2 AE 曝光补偿 | android, kotlin, camera2, ae, exposure-compensation, calibration | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-system-speech-hotword-loop | 中文语音热词识别循环 | android, kotlin, speech-recognition, restart-loop, hotword-matching | `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ChineseVoiceHotwordRecognizer.kt` | active |
 | android-voice-model-resumable-downloader | 第三方语音模型断点续传下载 | android, kotlin, http-range, model-download, speech-recognition | `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ThirdPartyVoiceModelDownloader.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ChineseVoiceHotwordRecognizer.kt` | active |
@@ -44,4 +45,4 @@
 
 ## 最后更新
 
-2026-08-28，Codex Agent。校准锁定后倍率文本改为显示包含 UI 居中 scale 的视觉总倍率；Camera2 请求倍率和校准样本继续使用真实倍率。
+2026-09-03，Codex Agent。按 Auto_measure 集成应用层自研 EIS、帧同步、GL 逐帧预览实验和防抖标定；普通预览仍保持父逻辑相机 Session，系统 Camera2 EIS 默认 OFF。
