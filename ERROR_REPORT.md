@@ -1,5 +1,20 @@
 # Error Report
 
+## [2026-09-04] 蒲公英 0.8.31 发布记录
+
+### 发现的问题
+- 最新自研 EIS 同步完成后，项目版本仍停留在已上传过的 `0.8.30 (830)`，直接上传会让测试包无法区分是否包含本次防抖模型更新。
+- 严重程度：中。版本重复会影响现场验证和问题回溯。
+
+### 解决方案
+- 上传前将 Android 构建版本提升为 `versionName=0.8.31`、`versionCode=831`。
+- 使用项目内 `scripts/upload_pgyer.ps1` 读取环境变量 `PGYER_API_KEY` 上传 Debug APK。
+- 蒲公英已确认显示 `Auto_Measure_luoji 0.8.31 (831)`，下载页为 `https://www.pgyer.com/automeasureluoji`。
+
+### 预防措施
+- 每次蒲公英发布包含功能或模型行为变化时，先递增 `app/build.gradle.kts` 中的 `versionName/versionCode`。
+- 上传命令和文档不得包含真实 API Key。
+
 ## [2026-09-04] 自研 EIS 最新参数同步报告
 
 ### 发现的问题

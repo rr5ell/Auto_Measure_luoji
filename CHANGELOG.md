@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.31] - 2026-09-04
+
+### 修复
+- Android 构建版本同步为 `versionName=0.8.31`、`versionCode=831`，用于上传包含最新自研 EIS 长焦稳定逻辑的新包。
+- 蒲公英已上传并确认显示 `Auto_Measure_luoji 0.8.31 (831)`，下载页为 `https://www.pgyer.com/automeasureluoji`。
+
 ## [gyro-preview-stabilization-sync-2026-09-04] - 2026-09-04
 
 ### 变更
