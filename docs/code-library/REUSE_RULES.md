@@ -8,6 +8,7 @@
 - 自研 EIS 只能作为应用层显示矩阵防抖使用，不得把 `GyroPreviewStabilizer` 的集成改成默认开启 Camera2 系统 EIS。
 - 自研 EIS 不得改变普通预览的父逻辑相机 Session；普通预览继续禁止 `OutputConfiguration.setPhysicalCameraId()`，双摄校准 `strictPhysical=true` 例外不变。
 - 普通校准、双摄校准和绿光采集期间必须暂停或绕过自研 EIS 补偿，避免显示层坐标和采集坐标漂移。
+- 自研 EIS 补偿模型必须区分并记录 `opticalZoomBase`、`digitalZoomRatio`、`displayZoomRatio` 和 `renderScale`；纯 UI 放大或校准居中不能被误写成 Camera2 请求倍率。
 - GL 逐帧预览实验开启时必须禁用 YOLO、绿光识别和 `TextureView.getBitmap()` 截图校准入口，避免预览源、识别源、矩阵坐标不一致。
 - 大体积模型、缓存、构建产物、密钥和真实用户隐私数据不得登记到代码资产库。
 - 绿光识别校准链路优先传入归一化图片 bytes：预览帧先缩放到 `1080x1920`，再编码为 PNG/JPEG 等完整图片格式，禁止把无宽高/stride 元数据的裸帧直接传入 bytes 入口。

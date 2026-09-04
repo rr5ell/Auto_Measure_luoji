@@ -67,7 +67,8 @@ app/src/main/java/com/example/auto_measure_luoji/
 - 双镜头广角 zoom 在 API 30+ 优先使用 CONTROL_ZOOM_RATIO，低版本或失败时回退 SCALER_CROP_REGION
 - `更多` 菜单提供 OIS 开关和 `防抖 EIS:OFF/ON/PREVIEW` 实验入口；当前镜头不支持或请求失败时显示 3 秒提示
 - `更多 -> 自研EIS` 提供应用层陀螺仪预览防抖：普通预览仍使用逻辑相机 Session，只在 TextureView/GL 显示层叠加缩放、平移和 Roll 矩阵，不改变双摄校准物理绑定逻辑
-- `更多 -> 自研EIS参数` 可调整强度、跟随、裁切、方向反转、X/Y 互换、帧同步、倍率补偿、瞄准稳定、Roll 补偿、诊断日志和 GL 逐帧预览实验
+- 自研 EIS 有效倍率按 `光学倍率 * Camera2 数码倍率 * 显示层倍率` 建模，纯 UI 放大、校准居中和防抖裁切会进入补偿计算；长焦静止瞄准时包含大残留释放和 anti-windup 限幅回灌
+- `更多 -> 自研EIS参数` 可调整强度、跟随、裁切、方向反转、X/Y 互换、帧同步、倍率补偿、瞄准稳定、Roll 补偿、诊断日志和 GL 逐帧预览实验；HUD 会显示 `display/render/release/residual/still/windup` 便于真机调参
 - `更多 -> 防抖标定` 会按相邻预览帧的亮度匹配估计实际位移，并和自研 EIS 补偿量对比，输出“反/少/多/准/弱”调参提示
 - 电子防抖 (EIS) 默认保持 OFF；用户在防抖弹窗中显式选择 ON/PREVIEW 时，会按设备支持模式写入 `CONTROL_VIDEO_STABILIZATION_MODE`，需要注意电子裁剪可能导致校准坐标漂移
 

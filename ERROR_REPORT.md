@@ -1,5 +1,21 @@
 # Error Report
 
+## [2026-09-04] 自研 EIS 最新参数同步报告
+
+### 发现的问题
+- `E:\StudioProjects\Auto_measure` 的自研 EIS 已更新长焦大残留释放、限幅 anti-windup、显示层倍率参与补偿和更完整的诊断日志；luoji 仍停留在旧模型。
+- 严重程度：中。高倍率静止瞄准时，旧模型可能因为补偿输出被裁切边界限制而残留偏移；纯 UI 放大或校准居中后，旧模型也没有把显示层放大计入补偿倍率。
+
+### 解决方案
+- 同步 `GyroPreviewStabilizer` 的 residual release、anti-windup、`displayZoomRatio`、`renderScale` 和 `光学 * 数码 * 显示层` 有效倍率模型。
+- `CameraScreen` 在帧同步和陀螺仪实时路径中传入显示层倍率与最终渲染缩放，并把 TextureView 缩放改为基础缩放叠加 EIS 裁切缩放。
+- 自研 EIS HUD、诊断文本、模型日志和 preset 日志补充 `display/render/release/residual/still/windup`，参数版本升级到 `6`。
+
+### 预防措施
+- 后续同步参考项目 EIS 时，只能移植应用层模型和显示矩阵逻辑，不得顺带改普通预览为物理输出 Surface。
+- 调参时同时查看 UI 显示倍率、Camera2 请求倍率、`displayZoomRatio` 和 `renderScale`，避免把显示层裁切误判成 Camera2 zoom。
+- 校准采集期间继续暂停或绕过自研 EIS 补偿，系统 Camera2 EIS 仍默认 OFF。
+
 ## [2026-09-03] 自研 EIS 集成报告
 
 ### 发现的问题

@@ -149,7 +149,7 @@ private const val GYRO_STABILIZATION_CALIBRATION_FINE_MAX_SAMPLE_H = 1280
 private const val GYRO_STABILIZATION_CALIBRATION_MIN_SCORE = 0.18f
 private const val GYRO_STABILIZATION_CALIBRATION_HINT_MIN_SIGNAL_PX = 0.6f
 private const val GYRO_STABILIZATION_CALIBRATION_HINT_WINDOW_MS = 1_200L
-private const val GYRO_PREVIEW_CONFIG_VERSION = 4
+private const val GYRO_PREVIEW_CONFIG_VERSION = 6
 private const val MIN_GYRO_PREVIEW_STRENGTH = 0.0f
 private const val MAX_GYRO_PREVIEW_STRENGTH = 1.5f
 private const val MIN_GYRO_PREVIEW_PATH_FOLLOW = 1.0f
@@ -1143,7 +1143,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewMaxRollDegreesInput = formatFloatSetting(preset.maxRollDegrees)
         gyroPreviewInvertRollInput = preset.invertRoll
         gyroPreviewSettingsError = null
-        Log.i("CameraScreen", "gyro-preview-preset: label=${preset.label}")
+        Log.i(
+            "CameraScreen",
+            "gyro-preview-preset: label=${preset.label}, strength=${preset.strength}, " +
+                "pathFollow=${preset.pathFollowPerSecond}, outputAlpha=${preset.outputLowPassAlpha}, " +
+                "outputRateLimit=${preset.outputRateLimitPxPerSecond}, " +
+                "crop=${preset.cropScale}, maxShift=${preset.maxShiftRatio}, deadband=${preset.deadbandPx}, " +
+                "hGain=${preset.horizontalGain}, vGain=${preset.verticalGain}, " +
+                "aim=${preset.aimStabilizationEnabled}, aimRps=${preset.aimRpsThreshold}, " +
+                "aimStrength=${preset.aimStrengthMultiplier}, aimFollow=${preset.aimPathFollowPerSecond}, " +
+                "aimDeadband=${preset.aimDeadbandPx}, aimRateLimit=${preset.aimOutputRateLimitPxPerSecond}, " +
+                "zoomComp=${preset.zoomCompensationEnabled}, " +
+                "zoomStrength=${preset.zoomCompensationStrength}, maxZoom=${preset.maxCompensationZoom}, " +
+                "frameSync=${preset.frameSyncEnabled}, frameOffsetMs=${preset.frameTimestampOffsetMs}, " +
+                "roll=${preset.rollCompensationEnabled}, " +
+                "rollStrength=${preset.rollStrength}, maxRoll=${preset.maxRollDegrees}, invertRoll=${preset.invertRoll}",
+        )
     }
 
     fun openGyroPreviewSettingsDialog() {
@@ -1421,6 +1436,40 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroStabilizationCalibrationFineSampleInput = false
     }
 
+    fun resetGyroPreviewRenderTransformToBase() {
+        val wrapper = wrapperRef ?: return
+        val viewWidth = wrapper.width.toFloat()
+        val viewHeight = wrapper.height.toFloat()
+        if (viewWidth <= 0f || viewHeight <= 0f) return
+
+        val baseScale = textureBaseScale.coerceAtLeast(1f)
+        val tx = textureBaseTx
+        val ty = textureBaseTy
+        if (gyroPreviewGlRenderEnabled) {
+            textureViewRef?.setTransform(Matrix())
+            glPreviewViewRef?.setPreviewTransform(
+                scale = baseScale,
+                translationX = tx,
+                translationY = ty,
+                rotationDegrees = 0f,
+                viewWidth = viewWidth,
+                viewHeight = viewHeight,
+            )
+        } else {
+            glPreviewViewRef?.resetPreviewTransform()
+            val matrix = Matrix()
+            if (baseScale != 1f || tx != 0f || ty != 0f) {
+                matrix.setScale(baseScale, baseScale, viewWidth / 2f, viewHeight / 2f)
+                matrix.postTranslate(tx, ty)
+            }
+            textureViewRef?.setTransform(matrix)
+        }
+        wrapperTx = tx
+        wrapperTy = ty
+        wrapperScale = baseScale
+        wrapperRotation = 0f
+    }
+
     fun resetGyroPreviewStabilization() {
         gyroPreviewStabilizer.reset()
         gyroPreviewTransform = GyroPreviewStabilizer.Transform.Identity
@@ -1431,6 +1480,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (!gyroPreviewStabilizationEnabled) {
             gyroPreviewText = ""
         }
+        resetGyroPreviewRenderTransformToBase()
     }
 
     fun toggleGyroPreviewStabilization() {
@@ -1960,7 +2010,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
         val baseScale = textureBaseScale.coerceAtLeast(1f)
         val stabilizationScale = activeStabilization.scale.coerceAtLeast(1f)
-        val scale = max(baseScale, stabilizationScale)
+        val scale = baseScale * stabilizationScale
         val baseTranslationScale = scale / baseScale
         val tx = textureBaseTx * baseTranslationScale + activeStabilization.translationX
         val ty = textureBaseTy * baseTranslationScale + activeStabilization.translationY
@@ -2036,6 +2086,23 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         return (actualZoom / opticalBase).coerceAtLeast(1f)
     }
 
+    fun gyroPreviewDisplayZoomRatio(): Float {
+        val baseScale = textureBaseScale.coerceAtLeast(1f)
+        val cropScale = gyroPreviewCropScale.coerceAtLeast(1f)
+        val includedUiScale = if (uiZoomOnlyEnabled && !(isDualCalibMode && isUsingDualTele)) {
+            uiZoomDisplayScale().coerceAtLeast(1f)
+        } else {
+            1f
+        }
+        val extraBaseScale = (baseScale / includedUiScale).coerceAtLeast(1f)
+        return (extraBaseScale * cropScale).coerceAtLeast(1f)
+    }
+
+    fun gyroPreviewRenderScale(): Float {
+        return (textureBaseScale.coerceAtLeast(1f) * gyroPreviewCropScale.coerceAtLeast(1f))
+            .coerceAtLeast(1f)
+    }
+
     fun gyroPreviewLensProjection(
         viewWidth: Float,
         viewHeight: Float,
@@ -2093,7 +2160,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
         return String.format(
             Locale.US,
-            "自研EIS[%s]: dx=%.1f dy=%.1f rot=%.2f crop=%.2f z=%.1f(o%.1f*d%.1f) rps=%.3f aim=%.0f%% g=%.2f/%.2f lim=%.0f %s",
+            "自研EIS[%s]: dx=%.1f dy=%.1f rot=%.2f crop=%.2f z=%.1f(o%.1f*d%.1f*v%.2f) rps=%.3f aim=%.0f%% g=%.2f/%.2f lim=%.0f %s",
             syncMode,
             transform.translationX,
             transform.translationY,
@@ -2102,6 +2169,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             transform.effectiveZoom,
             transform.opticalZoomBase,
             transform.digitalZoomRatio,
+            transform.displayZoomRatio,
             transform.rps,
             transform.aimBlend * 100f,
             gyroPreviewHorizontalGain,
@@ -2115,7 +2183,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         return String.format(
             Locale.US,
             "\n诊断: gx=%.3f gy=%.3f gz=%.3f pitchSrc=%.3f yawSrc=%.3f rollSrc=%.3f frame=%s samples=%d dt=%.1fms lag=%.1fms" +
-                "\n模型: raw=%.1f/%.1f target=%.1f/%.1f out=%.1f/%.1f max=%.0f/%.0f step=%.1f lim=%s clamp=%s focal=%.0f/%.0f lens=%.0f/%.0f fov=%s exp=%.2fms skew=%.2fms off=%.2fms",
+                "\n模型: raw=%.1f/%.1f target=%.1f/%.1f out=%.1f/%.1f max=%.0f/%.0f step=%.1f lim=%s clamp=%s focal=%.0f/%.0f lens=%.0f/%.0f fov=%s display=%.2f render=%.2f exp=%.2fms skew=%.2fms off=%.2fms rel=%s res=%.0f%% still=%.0fms wind=%s",
             transform.gyroXRadPerSec,
             transform.gyroYRadPerSec,
             transform.gyroZRadPerSec,
@@ -2142,9 +2210,15 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             transform.lensFocalPxX,
             transform.lensFocalPxY,
             gyroPreviewLensFovText(transform),
+            transform.displayZoomRatio,
+            transform.renderScale,
             transform.exposureTimeMs,
             transform.rollingShutterSkewMs,
             transform.frameTargetOffsetMs,
+            if (transform.residualReleaseActive) "on" else "off",
+            transform.residualLevelRatio * 100f,
+            transform.residualStillMs,
+            gyroPreviewAxisFlag(transform.residualAntiWindupX, transform.residualAntiWindupY),
         )
     }
 
@@ -2155,7 +2229,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             "gyro-preview-model: lens=%s/%s out=%.1f/%.1f raw=%.1f/%.1f target=%.1f/%.1f " +
                 "max=%.0f/%.0f step=%.1f limited=%s clamped=%s modelFocal=%.0f/%.0f " +
                 "lensFocal=%.0f/%.0f fov=%s exp=%.2fms rolling=%.2fms targetOffset=%.2fms " +
-                "samples=%d dt=%.1fms lag=%.1fms zoom=%.2f(o%.2f*d%.2f)",
+                "samples=%d dt=%.1fms lag=%.1fms zoom=%.2f(o%.2f*d%.2f*v%.2f) render=%.2f " +
+                "release=%s residual=%.2f still=%.0fms windup=%s",
             lens?.cameraId ?: "unknown",
             lens?.physicalId ?: "logical",
             transform.translationX,
@@ -2183,6 +2258,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             transform.effectiveZoom,
             transform.opticalZoomBase,
             transform.digitalZoomRatio,
+            transform.displayZoomRatio,
+            transform.renderScale,
+            if (transform.residualReleaseActive) "on" else "off",
+            transform.residualLevelRatio,
+            transform.residualStillMs,
+            gyroPreviewAxisFlag(transform.residualAntiWindupX, transform.residualAntiWindupY),
         )
     }
 
@@ -2562,6 +2643,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 val wrapper = wrapperRef ?: return@post
                 if (wrapper.width <= 0 || wrapper.height <= 0) return@post
                 val digitalZoomRatio = gyroPreviewDigitalZoomRatio()
+                val displayZoomRatio = gyroPreviewDisplayZoomRatio()
+                val renderScale = gyroPreviewRenderScale()
                 val lensProjection = gyroPreviewLensProjection(
                     wrapper.width.toFloat(),
                     wrapper.height.toFloat(),
@@ -2576,6 +2659,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     viewHeight = wrapper.height.toFloat(),
                     opticalZoomBase = opticalBaseForLens(),
                     digitalZoomRatio = digitalZoomRatio,
+                    displayZoomRatio = displayZoomRatio,
+                    renderScale = renderScale,
                     lensFocalPxX = lensProjection.focalPxX,
                     lensFocalPxY = lensProjection.focalPxY,
                 )
@@ -2648,6 +2733,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         val wrapper = wrapperRef
                         if (wrapper != null && wrapper.width > 0 && wrapper.height > 0) {
                             val digitalZoomRatio = gyroPreviewDigitalZoomRatio()
+                            val displayZoomRatio = gyroPreviewDisplayZoomRatio()
+                            val renderScale = gyroPreviewRenderScale()
                             val lensProjection = gyroPreviewLensProjection(
                                 wrapper.width.toFloat(),
                                 wrapper.height.toFloat(),
@@ -2662,6 +2749,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 viewHeight = wrapper.height.toFloat(),
                                 opticalZoomBase = opticalBaseForLens(),
                                 digitalZoomRatio = digitalZoomRatio,
+                                displayZoomRatio = displayZoomRatio,
+                                renderScale = renderScale,
                                 lensFocalPxX = lensProjection.focalPxX,
                                 lensFocalPxY = lensProjection.focalPxY,
                             )

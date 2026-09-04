@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [gyro-preview-stabilization-sync-2026-09-04] - 2026-09-04
+
+### 变更
+- 同步 `E:\StudioProjects\Auto_measure` 最新自研 EIS 模型，加入长焦大残留释放和 anti-windup 限幅回灌，降低高倍率静止瞄准后补偿量卡在边界的概率。
+- 自研 EIS 有效倍率模型从 `光学倍率 * Camera2 数码倍率` 扩展为 `光学倍率 * Camera2 数码倍率 * 显示层倍率`，纯 UI 放大、校准居中和防抖裁切会纳入补偿强度计算。
+- 预览显示矩阵改为基础显示缩放叠加自研 EIS 裁切缩放，避免 `max(baseScale, stabilizationScale)` 在校准居中或 UI 放大时吞掉防抖预留裁切。
+- HUD、诊断文本和 `gyro-preview-model` 日志新增 `display/render/release/residual/still/windup`，preset 日志输出完整调参项，方便真机复盘。
+- 自研 EIS 参数配置版本升级到 `6`，沿用参考项目回退后的默认长焦参数。
+
+### 保持
+- 普通预览仍保持父逻辑相机 Session，不使用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface；双摄校准 `strictPhysical=true` 物理输出路径不变。
+- 系统 Camera2 EIS 默认仍为 OFF，只能通过 `防抖` 弹窗显式切换 ON/PREVIEW。
+
+### 验证
+- 已通过 `.\gradlew.bat :app:assembleDebug --no-daemon`。
+
 ## [camera-gyro-preview-stabilization-2026-09-03] - 2026-09-03
 
 ### Added

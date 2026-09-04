@@ -33,5 +33,5 @@
 - 当前项目随包携带 Sherpa-ONNX native 推理库，但不把 SenseVoice / Silero VAD 模型权重打进 APK；模型仍由 `ThirdPartyVoiceModelDownloader` 下载到应用私有目录。
 - YOLO 可在 `TextureView.getBitmap()` 预览截图源与 Camera2 `ImageReader` 的 `YUV_420_888` 数据源之间切换；YUV 实时识别复用 native `yuv_preprocess` 预处理链路。
 - Camera2 EIS 默认保持 OFF；用户显式选择实验模式 ON/PREVIEW 时允许写入 `CONTROL_VIDEO_STABILIZATION_MODE`，校准时必须记录模式并验证坐标漂移。
-- 自研 EIS 是应用层显示矩阵防抖，依赖 `HIGH_SAMPLING_RATE_SENSORS`、陀螺仪采样和 `CameraFrameTiming`；普通预览不绑定物理输出 Surface。
+- 自研 EIS 是应用层显示矩阵防抖，依赖 `HIGH_SAMPLING_RATE_SENSORS`、陀螺仪采样和 `CameraFrameTiming`；补偿模型按 `光学倍率 * Camera2 数码倍率 * 显示层倍率` 计算，普通预览不绑定物理输出 Surface。
 - Camera2 zoom 后端以 `zoom: backend=...` 形式输出到 Logcat 和主界面状态区。

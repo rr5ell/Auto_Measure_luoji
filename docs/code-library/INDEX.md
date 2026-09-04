@@ -45,4 +45,4 @@
 
 ## 最后更新
 
-2026-09-03，Codex Agent。按 Auto_measure 集成应用层自研 EIS、帧同步、GL 逐帧预览实验和防抖标定；普通预览仍保持父逻辑相机 Session，系统 Camera2 EIS 默认 OFF。
+2026-09-04，Codex Agent。同步 Auto_measure 最新自研 EIS：显示层倍率进入补偿模型，TextureView 基础缩放叠加 EIS 裁切缩放，加入大残留释放和 anti-windup；普通预览仍保持父逻辑相机 Session，系统 Camera2 EIS 默认 OFF。

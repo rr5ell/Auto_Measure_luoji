@@ -4,6 +4,7 @@ import java.util.ArrayDeque
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToLong
 import kotlin.math.sqrt
@@ -34,6 +35,13 @@ class GyroPreviewStabilizer(
         val aimPathFollowPerSecond: Float = 0.8f,
         val aimDeadbandPx: Float = 0.0f,
         val aimOutputRateLimitPxPerSecond: Float = 260f,
+        val residualReleaseEnabled: Boolean = true,
+        val residualReleaseEnterRatio: Float = 0.75f,
+        val residualReleaseExitRatio: Float = 0.25f,
+        val residualReleaseStillMs: Float = 180f,
+        val residualReleasePathFollowPerSecond: Float = 8.0f,
+        val residualReleaseOutputRateLimitPxPerSecond: Float = 900f,
+        val residualAntiWindupEnabled: Boolean = true,
         val zoomCompensationEnabled: Boolean = true,
         val zoomCompensationStrength: Float = 1.5f,
         val maxCompensationZoom: Float = 20.0f,
@@ -64,8 +72,15 @@ class GyroPreviewStabilizer(
         val sourceRollRate: Float = 0f,
         val opticalZoomBase: Float = 1f,
         val digitalZoomRatio: Float = 1f,
+        val displayZoomRatio: Float = 1f,
+        val renderScale: Float = 1f,
         val effectiveZoom: Float = 1f,
         val outputRateLimitPxPerSecond: Float = 0f,
+        val residualReleaseActive: Boolean = false,
+        val residualLevelRatio: Float = 0f,
+        val residualStillMs: Float = 0f,
+        val residualAntiWindupX: Boolean = false,
+        val residualAntiWindupY: Boolean = false,
         val rawTranslationX: Float = 0f,
         val rawTranslationY: Float = 0f,
         val targetTranslationX: Float = 0f,
@@ -120,6 +135,8 @@ class GyroPreviewStabilizer(
     private var outputTranslationX = 0f
     private var outputTranslationY = 0f
     private var outputRotationDegrees = 0f
+    private var residualStillDurationSec = 0f
+    private var residualReleaseActive = false
     private var initialized = false
     private var lastTransform = Transform.Identity
 
@@ -141,6 +158,8 @@ class GyroPreviewStabilizer(
         outputTranslationX = 0f
         outputTranslationY = 0f
         outputRotationDegrees = 0f
+        residualStillDurationSec = 0f
+        residualReleaseActive = false
         initialized = false
         lastTransform = Transform.Identity
         gyroSamples.clear()
@@ -179,6 +198,8 @@ class GyroPreviewStabilizer(
         viewHeight: Float,
         opticalZoomBase: Float,
         digitalZoomRatio: Float,
+        displayZoomRatio: Float = 1f,
+        renderScale: Float = 1f,
         lensFocalPxX: Float = 0f,
         lensFocalPxY: Float = 0f,
     ): Transform {
@@ -188,7 +209,7 @@ class GyroPreviewStabilizer(
         val sourcePitchRate = if (config.swapPitchYawAxes) gyroYRadPerSec else gyroXRadPerSec
         val sourceYawRate = if (config.swapPitchYawAxes) gyroXRadPerSec else gyroYRadPerSec
         val sourceRollRate = gyroZRadPerSec
-        val effectiveZoom = resolveEffectiveZoom(opticalZoomBase, digitalZoomRatio)
+        val effectiveZoom = resolveEffectiveZoom(opticalZoomBase, digitalZoomRatio, displayZoomRatio)
         val modelFocalPx = calculateModelFocalPx(viewWidth, viewHeight, effectiveZoom)
         if (!initialized || lastTimestampNs <= 0L || timestampNs <= lastTimestampNs) {
             lastTimestampNs = timestampNs
@@ -206,6 +227,8 @@ class GyroPreviewStabilizer(
                 sourceRollRate = sourceRollRate,
                 opticalZoomBase = opticalZoomBase.coerceAtLeast(1f),
                 digitalZoomRatio = digitalZoomRatio.coerceAtLeast(1f),
+                displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
+                renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
                 effectiveZoom = effectiveZoom,
                 outputRateLimitPxPerSecond = resolveOutputRateLimit(initialAimBlend),
                 modelFocalPxX = modelFocalPx,
@@ -241,6 +264,8 @@ class GyroPreviewStabilizer(
             viewHeight = viewHeight,
             opticalZoomBase = opticalZoomBase,
             digitalZoomRatio = digitalZoomRatio,
+            displayZoomRatio = displayZoomRatio,
+            renderScale = renderScale,
             effectiveZoom = effectiveZoom,
             lensFocalPxX = lensFocalPxX,
             lensFocalPxY = lensFocalPxY,
@@ -263,6 +288,8 @@ class GyroPreviewStabilizer(
         viewHeight: Float,
         opticalZoomBase: Float,
         digitalZoomRatio: Float,
+        displayZoomRatio: Float = 1f,
+        renderScale: Float = 1f,
         lensFocalPxX: Float = 0f,
         lensFocalPxY: Float = 0f,
     ): Transform {
@@ -279,7 +306,7 @@ class GyroPreviewStabilizer(
         val latestLagMs = latestSample?.let {
             (it.timestampNs - targetTimestampNs) / 1_000_000f
         } ?: ((nowElapsedRealtimeNs - targetTimestampNs) / 1_000_000f)
-        val effectiveZoom = resolveEffectiveZoom(opticalZoomBase, digitalZoomRatio)
+        val effectiveZoom = resolveEffectiveZoom(opticalZoomBase, digitalZoomRatio, displayZoomRatio)
         val modelFocalPx = calculateModelFocalPx(viewWidth, viewHeight, effectiveZoom)
         val exposureTimeMs = safeExposureTimeNs / 1_000_000f
         val rollingShutterSkewMs = safeRollingShutterSkewNs / 1_000_000f
@@ -308,6 +335,8 @@ class GyroPreviewStabilizer(
                 sourceRollRate = sourceRollRate,
                 opticalZoomBase = opticalZoomBase.coerceAtLeast(1f),
                 digitalZoomRatio = digitalZoomRatio.coerceAtLeast(1f),
+                displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
+                renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
                 effectiveZoom = effectiveZoom,
                 outputRateLimitPxPerSecond = resolveOutputRateLimit(initialAimBlend),
                 modelFocalPxX = modelFocalPx,
@@ -336,6 +365,8 @@ class GyroPreviewStabilizer(
                 frameLagMs = latestLagMs,
                 opticalZoomBase = opticalZoomBase.coerceAtLeast(1f),
                 digitalZoomRatio = digitalZoomRatio.coerceAtLeast(1f),
+                displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
+                renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
                 effectiveZoom = effectiveZoom,
                 modelFocalPxX = modelFocalPx,
                 modelFocalPxY = modelFocalPx,
@@ -361,6 +392,8 @@ class GyroPreviewStabilizer(
                 frameLagMs = latestLagMs,
                 opticalZoomBase = opticalZoomBase.coerceAtLeast(1f),
                 digitalZoomRatio = digitalZoomRatio.coerceAtLeast(1f),
+                displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
+                renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
                 effectiveZoom = effectiveZoom,
                 modelFocalPxX = modelFocalPx,
                 modelFocalPxY = modelFocalPx,
@@ -402,6 +435,8 @@ class GyroPreviewStabilizer(
             viewHeight = viewHeight,
             opticalZoomBase = opticalZoomBase,
             digitalZoomRatio = digitalZoomRatio,
+            displayZoomRatio = displayZoomRatio,
+            renderScale = renderScale,
             effectiveZoom = effectiveZoom,
             lensFocalPxX = lensFocalPxX,
             lensFocalPxY = lensFocalPxY,
@@ -430,6 +465,8 @@ class GyroPreviewStabilizer(
         viewHeight: Float,
         opticalZoomBase: Float,
         digitalZoomRatio: Float,
+        displayZoomRatio: Float,
+        renderScale: Float,
         effectiveZoom: Float,
         lensFocalPxX: Float,
         lensFocalPxY: Float,
@@ -441,39 +478,11 @@ class GyroPreviewStabilizer(
         frameLagMs: Float,
     ): Transform {
         val aimBlend = calculateAimBlend(rps)
-
-        orientationPitchRad += pitchDeltaRad
-        orientationYawRad += yawDeltaRad
-        orientationRollRad += rollDeltaRad
-
-        // 实时防抖使用“平滑路径 - 原始路径”的差值：
-        // 1. 原始路径快速跟随手抖。
-        // 2. 平滑路径只跟随慢速移动。
-        // 3. 二者差值只保留快抖，转换成反向平移后不会把慢速转动一直拉住。
-        //
-        // 瞄准时的运动幅度很小，但长焦会把细小角速度放大成明显像素漂移。
-        // 因此低转速区间使用更慢的路径跟随、更高的补偿强度和更小的像素死区；
-        // 转速升高后平滑释放，避免主动扫动时画面被补偿拖住。
-        val activePathFollow = lerp(
-            start = config.pathFollowPerSecond,
-            end = config.aimPathFollowPerSecond,
-            t = aimBlend,
-        ).coerceAtLeast(0.1f)
-        val followAlpha = (1f - exp(-activePathFollow * dtSec))
-            .toFloat()
-            .coerceIn(0f, 1f)
-        smoothPitchRad += (orientationPitchRad - smoothPitchRad) * followAlpha
-        smoothYawRad += (orientationYawRad - smoothYawRad) * followAlpha
-        smoothRollRad += (orientationRollRad - smoothRollRad) * followAlpha
-
-        val correctionPitchRad = smoothPitchRad - orientationPitchRad
-        val correctionYawRad = smoothYawRad - orientationYawRad
-        val correctionRollRad = smoothRollRad - orientationRollRad
-
         val focalPx = calculateModelFocalPx(viewWidth, viewHeight, effectiveZoom)
         val scale = config.cropScale.coerceAtLeast(1f)
-        val cropMarginX = viewWidth * (scale - 1f) * 0.46f
-        val cropMarginY = viewHeight * (scale - 1f) * 0.46f
+        val finalRenderScale = renderScale.coerceAtLeast(scale)
+        val cropMarginX = viewWidth * (finalRenderScale - 1f) * 0.46f
+        val cropMarginY = viewHeight * (finalRenderScale - 1f) * 0.46f
         val maxDx = min(viewWidth * config.maxShiftRatio, cropMarginX)
         val maxDy = min(viewHeight * config.maxShiftRatio, cropMarginY)
         val strength = config.strength.coerceIn(0f, 2f) * lerp(
@@ -488,6 +497,79 @@ class GyroPreviewStabilizer(
             end = config.aimDeadbandPx,
             t = aimBlend,
         )
+
+        orientationPitchRad += pitchDeltaRad
+        orientationYawRad += yawDeltaRad
+        orientationRollRad += rollDeltaRad
+
+        val previousResidualLevelRatio = calculateResidualLevelRatio(
+            x1 = outputTranslationX,
+            y1 = outputTranslationY,
+            x2 = lastTransform.rawTranslationX,
+            y2 = lastTransform.rawTranslationY,
+            x3 = lastTransform.targetTranslationX,
+            y3 = lastTransform.targetTranslationY,
+            maxX = maxDx,
+            maxY = maxDy,
+        )
+        updateResidualReleaseState(
+            rps = rps,
+            dtSec = dtSec,
+            residualLevelRatio = previousResidualLevelRatio,
+        )
+
+        // 实时防抖使用“平滑路径 - 原始路径”的差值：
+        // 1. 原始路径快速跟随手抖。
+        // 2. 平滑路径只跟随慢速移动。
+        // 3. 二者差值只保留快抖，转换成反向平移后不会把慢速转动一直拉住。
+        //
+        // 瞄准时的运动幅度很小，但长焦会把细小角速度放大成明显像素漂移。
+        // 因此低转速区间使用更慢的路径跟随、更高的补偿强度和更小的像素死区；
+        // 转速升高后平滑释放，避免主动扫动时画面被补偿拖住。
+        val basePathFollow = lerp(
+            start = config.pathFollowPerSecond,
+            end = config.aimPathFollowPerSecond,
+            t = aimBlend,
+        ).coerceAtLeast(0.1f)
+        val activePathFollow = if (residualReleaseActive) {
+            max(basePathFollow, config.residualReleasePathFollowPerSecond.coerceAtLeast(0.1f))
+        } else {
+            basePathFollow
+        }
+        val followAlpha = (1f - exp(-activePathFollow * dtSec))
+            .toFloat()
+            .coerceIn(0f, 1f)
+        smoothPitchRad += (orientationPitchRad - smoothPitchRad) * followAlpha
+        smoothYawRad += (orientationYawRad - smoothYawRad) * followAlpha
+        smoothRollRad += (orientationRollRad - smoothRollRad) * followAlpha
+
+        var correctionPitchRad = smoothPitchRad - orientationPitchRad
+        var correctionYawRad = smoothYawRad - orientationYawRad
+        val correctionRollRad = smoothRollRad - orientationRollRad
+
+        val yawLimitResult = limitCorrectionRad(
+            correctionRad = correctionYawRad,
+            maxTranslationPx = maxDx,
+            focalPx = focalPx,
+            strength = horizontalStrength,
+        )
+        val pitchLimitResult = limitCorrectionRad(
+            correctionRad = correctionPitchRad,
+            maxTranslationPx = maxDy,
+            focalPx = focalPx,
+            strength = verticalStrength,
+        )
+        val residualAntiWindupX = config.residualAntiWindupEnabled && yawLimitResult.second
+        val residualAntiWindupY = config.residualAntiWindupEnabled && pitchLimitResult.second
+        if (residualAntiWindupX) {
+            correctionYawRad = yawLimitResult.first
+            smoothYawRad = orientationYawRad + correctionYawRad
+        }
+        if (residualAntiWindupY) {
+            correctionPitchRad = pitchLimitResult.first
+            smoothPitchRad = orientationPitchRad + correctionPitchRad
+        }
+
         val unclampedRawTx = correctionYawRad * focalPx * horizontalStrength
         val unclampedRawTy = -correctionPitchRad * focalPx * verticalStrength
         val rawTx = applyDeadband(
@@ -499,7 +581,7 @@ class GyroPreviewStabilizer(
             deadband = deadband,
         )
         val outputAlpha = config.outputLowPassAlpha.coerceIn(0.05f, 1f)
-        val outputRateLimitPxPerSecond = resolveOutputRateLimit(aimBlend)
+        val outputRateLimitPxPerSecond = resolveOutputRateLimit(aimBlend, residualReleaseActive)
         val maxOutputStepPx = outputRateLimitPxPerSecond * dtSec
         val previousOutputX = outputTranslationX
         val previousOutputY = outputTranslationY
@@ -511,10 +593,22 @@ class GyroPreviewStabilizer(
         outputTranslationY = limitStep(outputTranslationY, targetTranslationY, maxOutputStepPx)
         val finalTranslationX = outputTranslationX.coerceIn(-maxDx, maxDx)
         val finalTranslationY = outputTranslationY.coerceIn(-maxDy, maxDy)
+        outputTranslationX = finalTranslationX
+        outputTranslationY = finalTranslationY
         val translationClampedX = maxDx > 0f &&
-            (abs(unclampedRawTx) > maxDx || abs(finalTranslationX) >= maxDx - 0.001f)
+            (residualAntiWindupX || abs(unclampedRawTx) > maxDx || abs(finalTranslationX) >= maxDx - 0.001f)
         val translationClampedY = maxDy > 0f &&
-            (abs(unclampedRawTy) > maxDy || abs(finalTranslationY) >= maxDy - 0.001f)
+            (residualAntiWindupY || abs(unclampedRawTy) > maxDy || abs(finalTranslationY) >= maxDy - 0.001f)
+        val residualLevelRatio = calculateResidualLevelRatio(
+            x1 = finalTranslationX,
+            y1 = finalTranslationY,
+            x2 = rawTx,
+            y2 = rawTy,
+            x3 = targetTranslationX,
+            y3 = targetTranslationY,
+            maxX = maxDx,
+            maxY = maxDy,
+        )
         val maxRollDegrees = config.maxRollDegrees.coerceAtLeast(0f)
         val rawRotationDegrees = if (config.rollCompensationEnabled && maxRollDegrees > 0f) {
             (correctionRollRad * RAD_TO_DEGREES * config.rollStrength.coerceIn(0f, 2f))
@@ -539,8 +633,15 @@ class GyroPreviewStabilizer(
             sourceRollRate = sourceRollRate,
             opticalZoomBase = opticalZoomBase.coerceAtLeast(1f),
             digitalZoomRatio = digitalZoomRatio.coerceAtLeast(1f),
+            displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
+            renderScale = finalRenderScale,
             effectiveZoom = effectiveZoom,
             outputRateLimitPxPerSecond = outputRateLimitPxPerSecond,
+            residualReleaseActive = residualReleaseActive,
+            residualLevelRatio = residualLevelRatio,
+            residualStillMs = residualStillDurationSec * 1000f,
+            residualAntiWindupX = residualAntiWindupX,
+            residualAntiWindupY = residualAntiWindupY,
             rawTranslationX = rawTx,
             rawTranslationY = rawTy,
             targetTranslationX = targetTranslationX,
@@ -635,6 +736,86 @@ class GyroPreviewStabilizer(
         return current + if (delta > 0f) limit else -limit
     }
 
+    private fun limitCorrectionRad(
+        correctionRad: Float,
+        maxTranslationPx: Float,
+        focalPx: Float,
+        strength: Float,
+    ): Pair<Float, Boolean> {
+        if (maxTranslationPx <= 0f || focalPx <= 0f || strength <= 0f) {
+            return Pair(correctionRad, false)
+        }
+
+        val maxCorrectionRad = maxTranslationPx / (focalPx * strength)
+        if (maxCorrectionRad <= 0f || abs(correctionRad) <= maxCorrectionRad) {
+            return Pair(correctionRad, false)
+        }
+
+        return Pair(correctionRad.coerceIn(-maxCorrectionRad, maxCorrectionRad), true)
+    }
+
+    private fun updateResidualReleaseState(
+        rps: Float,
+        dtSec: Float,
+        residualLevelRatio: Float,
+    ) {
+        if (!config.residualReleaseEnabled) {
+            residualStillDurationSec = 0f
+            residualReleaseActive = false
+            return
+        }
+
+        val stillThreshold = (config.aimRpsThreshold.coerceIn(0.001f, 1f) * 1.25f)
+            .coerceAtLeast(0.002f)
+        val isStill = rps <= stillThreshold
+        if (isStill) {
+            residualStillDurationSec += dtSec.coerceAtLeast(0f)
+        } else {
+            residualStillDurationSec = 0f
+            residualReleaseActive = false
+            return
+        }
+
+        val enterRatio = config.residualReleaseEnterRatio.coerceIn(0.05f, 1f)
+        val exitRatio = min(config.residualReleaseExitRatio.coerceIn(0f, 1f), enterRatio)
+        if (residualReleaseActive) {
+            if (residualLevelRatio <= exitRatio) {
+                residualReleaseActive = false
+            }
+            return
+        }
+
+        val requiredStillSec = config.residualReleaseStillMs.coerceAtLeast(0f) / 1000f
+        if (residualStillDurationSec >= requiredStillSec && residualLevelRatio >= enterRatio) {
+            residualReleaseActive = true
+        }
+    }
+
+    private fun calculateResidualLevelRatio(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        x3: Float,
+        y3: Float,
+        maxX: Float,
+        maxY: Float,
+    ): Float {
+        val xRatio = maxAbsRatio(maxX, x1, x2, x3)
+        val yRatio = maxAbsRatio(maxY, y1, y2, y3)
+        return max(xRatio, yRatio).coerceIn(0f, 1f)
+    }
+
+    private fun maxAbsRatio(maxValue: Float, vararg values: Float): Float {
+        if (maxValue <= 0f) return 0f
+
+        var result = 0f
+        for (value in values) {
+            result = max(result, abs(value) / maxValue)
+        }
+        return result
+    }
+
     private fun calculateRps(xRadPerSec: Float, yRadPerSec: Float, zRadPerSec: Float): Float {
         return (
             sqrt(
@@ -661,22 +842,32 @@ class GyroPreviewStabilizer(
         return 1f - smoothT
     }
 
-    private fun resolveEffectiveZoom(opticalZoomBase: Float, digitalZoomRatio: Float): Float {
+    private fun resolveEffectiveZoom(
+        opticalZoomBase: Float,
+        digitalZoomRatio: Float,
+        displayZoomRatio: Float,
+    ): Float {
         if (!config.zoomCompensationEnabled) return 1f
         val opticalBase = opticalZoomBase.coerceAtLeast(1f)
         val digitalRatio = digitalZoomRatio.coerceAtLeast(1f)
+        val displayRatio = displayZoomRatio.coerceAtLeast(1f)
         val maxZoom = config.maxCompensationZoom.coerceAtLeast(1f)
-        val hardwareZoom = (opticalBase * digitalRatio).coerceIn(1f, maxZoom)
+        val hardwareZoom = (opticalBase * digitalRatio * displayRatio).coerceIn(1f, maxZoom)
         val zoomStrength = config.zoomCompensationStrength.coerceIn(0f, 2f)
         return (1f + (hardwareZoom - 1f) * zoomStrength).coerceIn(1f, maxZoom)
     }
 
-    private fun resolveOutputRateLimit(aimBlend: Float): Float {
-        return lerp(
+    private fun resolveOutputRateLimit(aimBlend: Float, releaseActive: Boolean = false): Float {
+        val baseLimit = lerp(
             start = config.outputRateLimitPxPerSecond,
             end = config.aimOutputRateLimitPxPerSecond,
             t = aimBlend,
         ).coerceAtLeast(0f)
+        return if (releaseActive) {
+            max(baseLimit, config.residualReleaseOutputRateLimitPxPerSecond.coerceAtLeast(0f))
+        } else {
+            baseLimit
+        }
     }
 
     private fun lerp(start: Float, end: Float, t: Float): Float {
