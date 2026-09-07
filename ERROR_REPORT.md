@@ -1,5 +1,24 @@
 # Error Report
 
+## [2026-09-07] 自研 EIS 与 YOLO 旗杆阈值同步报告
+
+### 发现的问题
+- `E:\StudioProjects\Auto_measure` 的自研 EIS 已继续迭代输出加速度、软边界限幅、重新瞄准释放和残留释放转速阈值；luoji 项目仍停留在 2026-09-04 版本。
+- YOLO 旗杆识别后处理仍固定为旧常量，不能在现场切换“只保留最高置信度目标”和“原始多框”策略。
+- 严重程度：中。旧 EIS 参数在长焦边界和重新瞄准场景下更容易残留补偿；固定 YOLO 阈值会影响旗杆误检/漏检排查。
+
+### 解决方案
+- 同步 `GyroPreviewStabilizer` 的最新应用层稳定器逻辑，并在 `CameraScreen` 中持久化新增参数，参数版本升级到 `19`。
+- 新增 `YoloPostprocessOptions`，将置信度阈值和最大检测数量从硬编码常量改为可配置后处理选项。
+- `更多` 菜单新增 YOLO 后处理入口，默认单框阈值 `0.25`，可切回原始多框阈值 `0.10`。
+- 保持普通预览为逻辑相机 Session，系统 Camera2 EIS 默认 OFF；本轮未新增默认启用系统电子防抖的路径。
+
+### 预防措施
+- 后续同步 `Auto_measure` 防抖算法时，先比对 `GyroPreviewStabilizer.Config` 和 `CameraScreen` 持久化键，确保算法字段与 UI 设置同时迁移。
+- YOLO 阈值调试必须通过 `YoloPostprocessOptions` 传入，禁止重新在 `YoloDetector` 内写死全局阈值。
+- 真机验证时同时观察检测状态文本中的 `单框/多框`、阈值、`pre/inf/post` 耗时和检测数量。
+- Android Camera2 EIS 仍只能由用户显式在 `防抖` 弹窗选择；普通预览不得启用物理输出 Surface 绑定。
+
 ## [2026-09-04] 蒲公英 0.8.31 发布记录
 
 ### 发现的问题

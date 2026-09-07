@@ -25,10 +25,43 @@ import org.tensorflow.lite.gpu.GpuDelegateFactory
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+
+data class YoloPostprocessOptions(
+    val confidenceThreshold: Float,
+    val topConfidenceOnly: Boolean,
+) {
+    val maxDetections: Int
+        get() = if (topConfidenceOnly) TOP_ONLY_MAX_DETECTIONS else ORIGINAL_MAX_DETECTIONS
+
+    fun normalized(): YoloPostprocessOptions = copy(
+        confidenceThreshold = confidenceThreshold.coerceIn(MIN_CONFIDENCE_THRESHOLD, MAX_CONFIDENCE_THRESHOLD),
+    )
+
+    companion object {
+        const val ORIGINAL_CONFIDENCE_THRESHOLD = 0.10f
+        const val DEFAULT_TOP_CONFIDENCE_THRESHOLD = 0.25f
+        const val MIN_CONFIDENCE_THRESHOLD = 0.0f
+        const val MAX_CONFIDENCE_THRESHOLD = 1.0f
+        const val TOP_ONLY_MAX_DETECTIONS = 1
+        const val ORIGINAL_MAX_DETECTIONS = 100
+
+        fun original(): YoloPostprocessOptions = YoloPostprocessOptions(
+            confidenceThreshold = ORIGINAL_CONFIDENCE_THRESHOLD,
+            topConfidenceOnly = false,
+        )
+
+        fun topOnly(threshold: Float = DEFAULT_TOP_CONFIDENCE_THRESHOLD): YoloPostprocessOptions =
+            YoloPostprocessOptions(
+                confidenceThreshold = threshold,
+                topConfidenceOnly = true,
+            )
+    }
+}
 
 class YoloDetector(
     private val context: Context,
@@ -40,9 +73,7 @@ class YoloDetector(
 
     companion object {
         private const val TAG = "YoloDetector"
-        private const val CONF_THRESHOLD = 0.1f
         private const val IOU_THRESHOLD = 0.45f
-        private const val MAX_DETECTIONS = 100
         private const val INV255 = 1f / 255f
         private const val PAD_VAL = 114f * INV255
     }
@@ -203,7 +234,11 @@ class YoloDetector(
      * @param image    YUV_420_888 格式的 Image
      * @param rotation 传感器旋转角度
      */
-    fun detectFromYuv(image: android.media.Image, rotation: Int): DetectResult {
+    fun detectFromYuv(
+        image: android.media.Image,
+        rotation: Int,
+        postprocessOptions: YoloPostprocessOptions = YoloPostprocessOptions.topOnly(),
+    ): DetectResult {
         val r = runner ?: error("Runner is null")
         val t0 = SystemClock.elapsedRealtimeNanos()
         val timings = Timings()
@@ -275,16 +310,24 @@ class YoloDetector(
         val plan = YuvFrameProcessor.getOrBuildPlan(srcW, srcH, inputW, inputH)
         val detections = parseAndNms(outputObj, outTensor, outShape, outType,
             LbMeta(plan.scale.toFloat(), plan.padX.toFloat(), plan.padY.toFloat(), inputW, inputH),
-            srcW, srcH)
+            srcW, srcH, postprocessOptions)
         timings.postprocessMs = (SystemClock.elapsedRealtimeNanos() - tPost0) / 1_000_000L
 
         timings.totalMs = (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000L
-        Log.d(TAG, "YUV检测: 后端=$backend 耗时=${timings.totalMs}ms 目标=${detections.size}个")
+        val options = postprocessOptions.normalized()
+        Log.d(
+            TAG,
+            "YUV检测: 后端=$backend 耗时=${timings.totalMs}ms 目标=${detections.size}个 " +
+                "阈值=${String.format(Locale.US, "%.2f", options.confidenceThreshold)} 单框=${options.topConfidenceOnly}",
+        )
 
         return DetectResult(detections, timings)
     }
 
-    fun detect(bitmap: Bitmap): DetectResult {
+    fun detect(
+        bitmap: Bitmap,
+        postprocessOptions: YoloPostprocessOptions = YoloPostprocessOptions.topOnly(),
+    ): DetectResult {
         val r = runner ?: error("Runner is null")
         val t0 = SystemClock.elapsedRealtimeNanos()
         val timings = Timings()
@@ -356,11 +399,25 @@ class YoloDetector(
 
         // 4. postprocess
         val tPost0 = SystemClock.elapsedRealtimeNanos()
-        val detections = parseAndNms(outputObj, outTensor, outShape, outType, plan.meta, bitmap.width, bitmap.height)
+        val detections = parseAndNms(
+            outputObj,
+            outTensor,
+            outShape,
+            outType,
+            plan.meta,
+            bitmap.width,
+            bitmap.height,
+            postprocessOptions,
+        )
         timings.postprocessMs = (SystemClock.elapsedRealtimeNanos() - tPost0) / 1_000_000L
 
         timings.totalMs = (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000L
-        Log.d(TAG, "检测: 后端=$backend 耗时=${timings.totalMs}ms 目标=${detections.size}个")
+        val options = postprocessOptions.normalized()
+        Log.d(
+            TAG,
+            "检测: 后端=$backend 耗时=${timings.totalMs}ms 目标=${detections.size}个 " +
+                "阈值=${String.format(Locale.US, "%.2f", options.confidenceThreshold)} 单框=${options.topConfidenceOnly}",
+        )
 
         return DetectResult(detections, timings)
     }
@@ -495,7 +552,10 @@ class YoloDetector(
         outputObj: Any, outTensor: org.tensorflow.lite.Tensor,
         outShape: IntArray, outType: DataType,
         lb: LbMeta, origW: Int, origH: Int,
+        postprocessOptions: YoloPostprocessOptions,
     ): List<Detection> {
+        val options = postprocessOptions.normalized()
+        val threshold = options.confidenceThreshold
         val f2d = OutputReader.toFloat2DAuto(outputObj, outTensor, outShape, outType)
         val raw = f2d.data
         val n = f2d.n
@@ -507,7 +567,7 @@ class YoloDetector(
             c == 6 -> {
                 for (i in 0 until n) {
                     val score = raw[i][4]
-                    if (score < CONF_THRESHOLD) continue
+                    if (score < threshold) continue
                     val boxOnInput = RectF(raw[i][0], raw[i][1], raw[i][2], raw[i][3])
                     val boxOnOrig = lb.mapBoxToOriginal(boxOnInput, origW, origH)
                     val cls = raw[i][5].toInt()
@@ -524,7 +584,7 @@ class YoloDetector(
                         cx *= lb.inputW.toFloat(); cy *= lb.inputH.toFloat()
                         w *= lb.inputW.toFloat(); h *= lb.inputH.toFloat()
                     }
-                    if (conf < CONF_THRESHOLD) continue
+                    if (conf < threshold) continue
                     val boxOnInput = RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
                     val boxOnOrig = lb.mapBoxToOriginal(boxOnInput, origW, origH)
                     candidates.add(Detection(0, labels.getOrNull(0) ?: "class_0", conf, boxOnOrig))
@@ -546,7 +606,7 @@ class YoloDetector(
                         if (p > best) { best = p; bestId = k }
                     }
                     val score = obj * best
-                    if (score < CONF_THRESHOLD) continue
+                    if (score < threshold) continue
                     val boxOnInput = RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
                     val boxOnOrig = lb.mapBoxToOriginal(boxOnInput, origW, origH)
                     candidates.add(Detection(bestId, labels.getOrNull(bestId) ?: "class_$bestId", score, boxOnOrig))
@@ -558,7 +618,7 @@ class YoloDetector(
             }
         }
 
-        return Nms.classAwareNms(candidates, IOU_THRESHOLD, MAX_DETECTIONS)
+        return Nms.classAwareNms(candidates, IOU_THRESHOLD, options.maxDetections)
     }
 
     private fun createOutputBuffer(outTensor: org.tensorflow.lite.Tensor): Any {

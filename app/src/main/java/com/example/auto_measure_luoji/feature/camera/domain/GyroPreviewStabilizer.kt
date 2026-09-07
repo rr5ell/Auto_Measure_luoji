@@ -22,31 +22,48 @@ class GyroPreviewStabilizer(
     data class Config(
         val strength: Float = 0.75f,
         val pathFollowPerSecond: Float = 5.0f,
-        val outputLowPassAlpha: Float = 0.75f,
+        val outputLowPassAlpha: Float = 0.85f,
         val outputRateLimitPxPerSecond: Float = 720f,
-        val cropScale: Float = 1.16f,
-        val maxShiftRatio: Float = 0.075f,
+        val outputAccelerationLimitPxPerSecond2: Float = 0f,
+        val cropScale: Float = 1.18f,
+        val maxShiftRatio: Float = 0.08f,
         val deadbandPx: Float = 0.0f,
-        val horizontalGain: Float = 2.7f,
-        val verticalGain: Float = 0.35f,
+        val horizontalGain: Float = 1.30f,
+        val verticalGain: Float = 1.25f,
         val aimStabilizationEnabled: Boolean = true,
         val aimRpsThreshold: Float = 0.04f,
-        val aimStrengthMultiplier: Float = 2.2f,
+        val aimStrengthMultiplier: Float = 2.0f,
         val aimPathFollowPerSecond: Float = 0.8f,
         val aimDeadbandPx: Float = 0.0f,
-        val aimOutputRateLimitPxPerSecond: Float = 260f,
-        val residualReleaseEnabled: Boolean = true,
-        val residualReleaseEnterRatio: Float = 0.75f,
+        val aimOutputRateLimitPxPerSecond: Float = 720f,
+        val aimOutputAccelerationLimitPxPerSecond2: Float = 0f,
+        val residualReleaseEnabled: Boolean = false,
+        val residualReleaseEnterRatio: Float = 0.90f,
         val residualReleaseExitRatio: Float = 0.25f,
-        val residualReleaseStillMs: Float = 180f,
-        val residualReleasePathFollowPerSecond: Float = 8.0f,
-        val residualReleaseOutputRateLimitPxPerSecond: Float = 900f,
+        val residualReleaseStillMs: Float = 300f,
+        val residualReleaseRpsThreshold: Float = 0.015f,
+        val residualReleasePathFollowPerSecond: Float = 4.5f,
+        val residualReleaseOutputRateLimitPxPerSecond: Float = 240f,
+        val residualReleaseOutputAccelerationLimitPxPerSecond2: Float = 0f,
+        val residualReleaseBlendInPerSecond: Float = 2.0f,
+        val residualReleaseBlendOutPerSecond: Float = 2.0f,
         val residualAntiWindupEnabled: Boolean = true,
+        val softBoundaryEnabled: Boolean = true,
+        val softBoundaryStartRatio: Float = 0.80f,
+        val softBoundaryStrength: Float = 1.00f,
+        val reAimEnabled: Boolean = true,
+        val reAimRpsThreshold: Float = 0.012f,
+        val reAimResidualEnterRatio: Float = 0.65f,
+        val reAimResidualExitRatio: Float = 0.25f,
+        val reAimStillMs: Float = 250f,
+        val reAimPathFollowPerSecond: Float = 12.0f,
+        val reAimBlendInPerSecond: Float = 8.0f,
+        val reAimBlendOutPerSecond: Float = 3.0f,
         val zoomCompensationEnabled: Boolean = true,
-        val zoomCompensationStrength: Float = 1.5f,
+        val zoomCompensationStrength: Float = 1.0f,
         val maxCompensationZoom: Float = 20.0f,
         val frameSyncEnabled: Boolean = true,
-        val frameTimestampOffsetMs: Float = 0f,
+        val frameTimestampOffsetMs: Float = 5f,
         val rollCompensationEnabled: Boolean = false,
         val rollStrength: Float = 0.35f,
         val maxRollDegrees: Float = 1.5f,
@@ -64,6 +81,11 @@ class GyroPreviewStabilizer(
         val rotationDegrees: Float = 0f,
         val rps: Float = 0f,
         val aimBlend: Float = 0f,
+        val baseAimBlend: Float = 0f,
+        val reAimActive: Boolean = false,
+        val reAimBlend: Float = 0f,
+        val reAimStillMs: Float = 0f,
+        val reAimTrigger: String = "",
         val gyroXRadPerSec: Float = 0f,
         val gyroYRadPerSec: Float = 0f,
         val gyroZRadPerSec: Float = 0f,
@@ -76,11 +98,20 @@ class GyroPreviewStabilizer(
         val renderScale: Float = 1f,
         val effectiveZoom: Float = 1f,
         val outputRateLimitPxPerSecond: Float = 0f,
+        val outputAccelerationLimitPxPerSecond2: Float = 0f,
+        val outputVelocityX: Float = 0f,
+        val outputVelocityY: Float = 0f,
         val residualReleaseActive: Boolean = false,
+        val residualReleaseBlend: Float = 0f,
         val residualLevelRatio: Float = 0f,
         val residualStillMs: Float = 0f,
+        val residualReleaseRpsThreshold: Float = 0f,
         val residualAntiWindupX: Boolean = false,
         val residualAntiWindupY: Boolean = false,
+        val softBoundaryActiveX: Boolean = false,
+        val softBoundaryActiveY: Boolean = false,
+        val softBoundaryRatioX: Float = 0f,
+        val softBoundaryRatioY: Float = 0f,
         val rawTranslationX: Float = 0f,
         val rawTranslationY: Float = 0f,
         val targetTranslationX: Float = 0f,
@@ -90,6 +121,8 @@ class GyroPreviewStabilizer(
         val maxOutputStepPx: Float = 0f,
         val outputLimitedX: Boolean = false,
         val outputLimitedY: Boolean = false,
+        val outputAccelerationLimitedX: Boolean = false,
+        val outputAccelerationLimitedY: Boolean = false,
         val translationClampedX: Boolean = false,
         val translationClampedY: Boolean = false,
         val modelFocalPxX: Float = 0f,
@@ -123,6 +156,19 @@ class GyroPreviewStabilizer(
         val samples: Int,
     )
 
+    private data class OutputAxisState(
+        val value: Float,
+        val velocity: Float,
+        val velocityLimited: Boolean,
+        val accelerationLimited: Boolean,
+    )
+
+    private data class SoftBoundaryAxisState(
+        val value: Float,
+        val active: Boolean,
+        val ratio: Float,
+    )
+
     private val gyroSamples = ArrayDeque<GyroSample>()
     private var lastTimestampNs = 0L
     private var latestGyroSample: GyroSample? = null
@@ -134,9 +180,16 @@ class GyroPreviewStabilizer(
     private var smoothRollRad = 0f
     private var outputTranslationX = 0f
     private var outputTranslationY = 0f
+    private var outputVelocityX = 0f
+    private var outputVelocityY = 0f
     private var outputRotationDegrees = 0f
     private var residualStillDurationSec = 0f
     private var residualReleaseActive = false
+    private var residualReleaseBlend = 0f
+    private var reAimStillDurationSec = 0f
+    private var reAimActive = false
+    private var reAimBlend = 0f
+    private var lastReAimTrigger = ""
     private var initialized = false
     private var lastTransform = Transform.Identity
 
@@ -157,9 +210,16 @@ class GyroPreviewStabilizer(
         smoothRollRad = 0f
         outputTranslationX = 0f
         outputTranslationY = 0f
+        outputVelocityX = 0f
+        outputVelocityY = 0f
         outputRotationDegrees = 0f
         residualStillDurationSec = 0f
         residualReleaseActive = false
+        residualReleaseBlend = 0f
+        reAimStillDurationSec = 0f
+        reAimActive = false
+        reAimBlend = 0f
+        lastReAimTrigger = ""
         initialized = false
         lastTransform = Transform.Identity
         gyroSamples.clear()
@@ -219,6 +279,7 @@ class GyroPreviewStabilizer(
                 scale = config.cropScale,
                 rps = rps,
                 aimBlend = initialAimBlend,
+                baseAimBlend = initialAimBlend,
                 gyroXRadPerSec = gyroXRadPerSec,
                 gyroYRadPerSec = gyroYRadPerSec,
                 gyroZRadPerSec = gyroZRadPerSec,
@@ -231,6 +292,8 @@ class GyroPreviewStabilizer(
                 renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
                 effectiveZoom = effectiveZoom,
                 outputRateLimitPxPerSecond = resolveOutputRateLimit(initialAimBlend),
+                outputAccelerationLimitPxPerSecond2 = resolveOutputAccelerationLimit(initialAimBlend),
+                residualReleaseRpsThreshold = residualReleaseRpsThreshold(),
                 modelFocalPxX = modelFocalPx,
                 modelFocalPxY = modelFocalPx,
                 lensFocalPxX = lensFocalPxX.coerceAtLeast(0f),
@@ -327,6 +390,7 @@ class GyroPreviewStabilizer(
                 scale = config.cropScale,
                 rps = rps,
                 aimBlend = initialAimBlend,
+                baseAimBlend = initialAimBlend,
                 gyroXRadPerSec = gyroX,
                 gyroYRadPerSec = gyroY,
                 gyroZRadPerSec = gyroZ,
@@ -339,6 +403,8 @@ class GyroPreviewStabilizer(
                 renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
                 effectiveZoom = effectiveZoom,
                 outputRateLimitPxPerSecond = resolveOutputRateLimit(initialAimBlend),
+                outputAccelerationLimitPxPerSecond2 = resolveOutputAccelerationLimit(initialAimBlend),
+                residualReleaseRpsThreshold = residualReleaseRpsThreshold(),
                 modelFocalPxX = modelFocalPx,
                 modelFocalPxY = modelFocalPx,
                 lensFocalPxX = lensFocalPxX.coerceAtLeast(0f),
@@ -477,7 +543,7 @@ class GyroPreviewStabilizer(
         frameSamples: Int,
         frameLagMs: Float,
     ): Transform {
-        val aimBlend = calculateAimBlend(rps)
+        val baseAimBlend = calculateAimBlend(rps)
         val focalPx = calculateModelFocalPx(viewWidth, viewHeight, effectiveZoom)
         val scale = config.cropScale.coerceAtLeast(1f)
         val finalRenderScale = renderScale.coerceAtLeast(scale)
@@ -485,6 +551,23 @@ class GyroPreviewStabilizer(
         val cropMarginY = viewHeight * (finalRenderScale - 1f) * 0.46f
         val maxDx = min(viewWidth * config.maxShiftRatio, cropMarginX)
         val maxDy = min(viewHeight * config.maxShiftRatio, cropMarginY)
+        val previousResidualLevelRatio = calculateResidualLevelRatio(
+            x1 = outputTranslationX,
+            y1 = outputTranslationY,
+            x2 = lastTransform.rawTranslationX,
+            y2 = lastTransform.rawTranslationY,
+            x3 = lastTransform.targetTranslationX,
+            y3 = lastTransform.targetTranslationY,
+            maxX = maxDx,
+            maxY = maxDy,
+        )
+        val reAimTrigger = updateReAimState(
+            rps = rps,
+            dtSec = dtSec,
+            residualLevelRatio = previousResidualLevelRatio,
+        )
+        val activeReAimBlend = updateReAimBlend(dtSec)
+        val aimBlend = baseAimBlend * (1f - activeReAimBlend)
         val strength = config.strength.coerceIn(0f, 2f) * lerp(
             start = 1f,
             end = config.aimStrengthMultiplier.coerceIn(1f, 3f),
@@ -502,21 +585,12 @@ class GyroPreviewStabilizer(
         orientationYawRad += yawDeltaRad
         orientationRollRad += rollDeltaRad
 
-        val previousResidualLevelRatio = calculateResidualLevelRatio(
-            x1 = outputTranslationX,
-            y1 = outputTranslationY,
-            x2 = lastTransform.rawTranslationX,
-            y2 = lastTransform.rawTranslationY,
-            x3 = lastTransform.targetTranslationX,
-            y3 = lastTransform.targetTranslationY,
-            maxX = maxDx,
-            maxY = maxDy,
-        )
         updateResidualReleaseState(
             rps = rps,
             dtSec = dtSec,
             residualLevelRatio = previousResidualLevelRatio,
         )
+        val releaseBlend = updateResidualReleaseBlend(dtSec)
 
         // 实时防抖使用“平滑路径 - 原始路径”的差值：
         // 1. 原始路径快速跟随手抖。
@@ -531,11 +605,16 @@ class GyroPreviewStabilizer(
             end = config.aimPathFollowPerSecond,
             t = aimBlend,
         ).coerceAtLeast(0.1f)
-        val activePathFollow = if (residualReleaseActive) {
-            max(basePathFollow, config.residualReleasePathFollowPerSecond.coerceAtLeast(0.1f))
-        } else {
-            basePathFollow
-        }
+        val releasePathFollow = max(
+            basePathFollow,
+            config.residualReleasePathFollowPerSecond.coerceAtLeast(0.1f),
+        )
+        val releaseBlendedPathFollow = lerp(basePathFollow, releasePathFollow, releaseBlend)
+        val reAimPathFollow = max(
+            releaseBlendedPathFollow,
+            config.reAimPathFollowPerSecond.coerceAtLeast(0.1f),
+        )
+        val activePathFollow = lerp(releaseBlendedPathFollow, reAimPathFollow, activeReAimBlend)
         val followAlpha = (1f - exp(-activePathFollow * dtSec))
             .toFloat()
             .coerceIn(0f, 1f)
@@ -572,27 +651,50 @@ class GyroPreviewStabilizer(
 
         val unclampedRawTx = correctionYawRad * focalPx * horizontalStrength
         val unclampedRawTy = -correctionPitchRad * focalPx * verticalStrength
+        val softRawX = applySoftBoundary(unclampedRawTx, maxDx)
+        val softRawY = applySoftBoundary(unclampedRawTy, maxDy)
         val rawTx = applyDeadband(
-            value = unclampedRawTx.coerceIn(-maxDx, maxDx),
+            value = softRawX.value,
             deadband = deadband,
         )
         val rawTy = applyDeadband(
-            value = unclampedRawTy.coerceIn(-maxDy, maxDy),
+            value = softRawY.value,
             deadband = deadband,
         )
         val outputAlpha = config.outputLowPassAlpha.coerceIn(0.05f, 1f)
-        val outputRateLimitPxPerSecond = resolveOutputRateLimit(aimBlend, residualReleaseActive)
+        val outputRateLimitPxPerSecond = resolveOutputRateLimit(aimBlend, releaseBlend)
+        val outputAccelerationLimitPxPerSecond2 = resolveOutputAccelerationLimit(aimBlend, releaseBlend)
         val maxOutputStepPx = outputRateLimitPxPerSecond * dtSec
-        val previousOutputX = outputTranslationX
-        val previousOutputY = outputTranslationY
         val targetTranslationX = outputTranslationX + (rawTx - outputTranslationX) * outputAlpha
         val targetTranslationY = outputTranslationY + (rawTy - outputTranslationY) * outputAlpha
-        val outputLimitedX = maxOutputStepPx > 0f && abs(targetTranslationX - previousOutputX) > maxOutputStepPx
-        val outputLimitedY = maxOutputStepPx > 0f && abs(targetTranslationY - previousOutputY) > maxOutputStepPx
-        outputTranslationX = limitStep(outputTranslationX, targetTranslationX, maxOutputStepPx)
-        outputTranslationY = limitStep(outputTranslationY, targetTranslationY, maxOutputStepPx)
+        val outputX = updateOutputAxis(
+            current = outputTranslationX,
+            currentVelocity = outputVelocityX,
+            target = targetTranslationX,
+            dtSec = dtSec,
+            maxVelocityPxPerSecond = outputRateLimitPxPerSecond,
+            maxAccelerationPxPerSecond2 = outputAccelerationLimitPxPerSecond2,
+        )
+        val outputY = updateOutputAxis(
+            current = outputTranslationY,
+            currentVelocity = outputVelocityY,
+            target = targetTranslationY,
+            dtSec = dtSec,
+            maxVelocityPxPerSecond = outputRateLimitPxPerSecond,
+            maxAccelerationPxPerSecond2 = outputAccelerationLimitPxPerSecond2,
+        )
+        outputTranslationX = outputX.value
+        outputTranslationY = outputY.value
+        outputVelocityX = outputX.velocity
+        outputVelocityY = outputY.velocity
         val finalTranslationX = outputTranslationX.coerceIn(-maxDx, maxDx)
         val finalTranslationY = outputTranslationY.coerceIn(-maxDy, maxDy)
+        if (finalTranslationX != outputTranslationX) {
+            outputVelocityX = 0f
+        }
+        if (finalTranslationY != outputTranslationY) {
+            outputVelocityY = 0f
+        }
         outputTranslationX = finalTranslationX
         outputTranslationY = finalTranslationY
         val translationClampedX = maxDx > 0f &&
@@ -625,6 +727,11 @@ class GyroPreviewStabilizer(
             rotationDegrees = outputRotationDegrees.coerceIn(-maxRollDegrees, maxRollDegrees),
             rps = rps,
             aimBlend = aimBlend,
+            baseAimBlend = baseAimBlend,
+            reAimActive = activeReAimBlend > 0.001f,
+            reAimBlend = activeReAimBlend,
+            reAimStillMs = reAimStillDurationSec * 1000f,
+            reAimTrigger = reAimTrigger,
             gyroXRadPerSec = gyroXRadPerSec,
             gyroYRadPerSec = gyroYRadPerSec,
             gyroZRadPerSec = gyroZRadPerSec,
@@ -637,11 +744,20 @@ class GyroPreviewStabilizer(
             renderScale = finalRenderScale,
             effectiveZoom = effectiveZoom,
             outputRateLimitPxPerSecond = outputRateLimitPxPerSecond,
-            residualReleaseActive = residualReleaseActive,
+            outputAccelerationLimitPxPerSecond2 = outputAccelerationLimitPxPerSecond2,
+            outputVelocityX = outputVelocityX,
+            outputVelocityY = outputVelocityY,
+            residualReleaseActive = releaseBlend > 0.001f,
+            residualReleaseBlend = releaseBlend,
             residualLevelRatio = residualLevelRatio,
             residualStillMs = residualStillDurationSec * 1000f,
+            residualReleaseRpsThreshold = residualReleaseRpsThreshold(),
             residualAntiWindupX = residualAntiWindupX,
             residualAntiWindupY = residualAntiWindupY,
+            softBoundaryActiveX = softRawX.active,
+            softBoundaryActiveY = softRawY.active,
+            softBoundaryRatioX = softRawX.ratio,
+            softBoundaryRatioY = softRawY.ratio,
             rawTranslationX = rawTx,
             rawTranslationY = rawTy,
             targetTranslationX = targetTranslationX,
@@ -649,8 +765,10 @@ class GyroPreviewStabilizer(
             maxTranslationX = maxDx,
             maxTranslationY = maxDy,
             maxOutputStepPx = maxOutputStepPx,
-            outputLimitedX = outputLimitedX,
-            outputLimitedY = outputLimitedY,
+            outputLimitedX = outputX.velocityLimited,
+            outputLimitedY = outputY.velocityLimited,
+            outputAccelerationLimitedX = outputX.accelerationLimited,
+            outputAccelerationLimitedY = outputY.accelerationLimited,
             translationClampedX = translationClampedX,
             translationClampedY = translationClampedY,
             modelFocalPxX = focalPx,
@@ -729,11 +847,105 @@ class GyroPreviewStabilizer(
         return if (abs(value) < deadband.coerceAtLeast(0f)) 0f else value
     }
 
-    private fun limitStep(current: Float, target: Float, maxStep: Float): Float {
-        val limit = maxStep.coerceAtLeast(0f)
+    private fun applySoftBoundary(value: Float, maxTranslationPx: Float): SoftBoundaryAxisState {
+        if (maxTranslationPx <= 0f) {
+            return SoftBoundaryAxisState(value = 0f, active = false, ratio = 0f)
+        }
+
+        val hardLimitedValue = value.coerceIn(-maxTranslationPx, maxTranslationPx)
+        val ratio = (abs(value) / maxTranslationPx).coerceIn(0f, 9.999f)
+        if (!config.softBoundaryEnabled) {
+            return SoftBoundaryAxisState(
+                value = hardLimitedValue,
+                active = abs(value) > maxTranslationPx,
+                ratio = ratio,
+            )
+        }
+
+        val startRatio = config.softBoundaryStartRatio.coerceIn(0.05f, 0.98f)
+        val strength = config.softBoundaryStrength.coerceIn(0f, 8f)
+        val startPx = maxTranslationPx * startRatio
+        val edgePx = (maxTranslationPx - startPx).coerceAtLeast(0.001f)
+        val absHardLimited = abs(hardLimitedValue)
+        if (strength <= 0f || absHardLimited <= startPx) {
+            return SoftBoundaryAxisState(
+                value = hardLimitedValue,
+                active = false,
+                ratio = ratio,
+            )
+        }
+
+        val edgeRatio = ((absHardLimited - startPx) / edgePx).coerceAtLeast(0f)
+        val softenedEdgeRatio = edgeRatio / (1f + strength * edgeRatio)
+        val softenedAbs = startPx + edgePx * softenedEdgeRatio.coerceIn(0f, 1f)
+        val softenedValue = if (hardLimitedValue < 0f) -softenedAbs else softenedAbs
+        return SoftBoundaryAxisState(
+            value = softenedValue.coerceIn(-maxTranslationPx, maxTranslationPx),
+            active = true,
+            ratio = ratio,
+        )
+    }
+
+    private fun updateOutputAxis(
+        current: Float,
+        currentVelocity: Float,
+        target: Float,
+        dtSec: Float,
+        maxVelocityPxPerSecond: Float,
+        maxAccelerationPxPerSecond2: Float,
+    ): OutputAxisState {
+        val dt = dtSec.coerceAtLeast(0.001f)
         val delta = target - current
-        if (limit <= 0f || abs(delta) <= limit) return target
-        return current + if (delta > 0f) limit else -limit
+        if (abs(delta) <= 0.001f) {
+            return OutputAxisState(
+                value = target,
+                velocity = 0f,
+                velocityLimited = false,
+                accelerationLimited = false,
+            )
+        }
+
+        val requestedVelocity = delta / dt
+        val velocityLimit = maxVelocityPxPerSecond.coerceAtLeast(0f)
+        val targetVelocity = if (velocityLimit > 0f) {
+            requestedVelocity.coerceIn(-velocityLimit, velocityLimit)
+        } else {
+            requestedVelocity
+        }
+        val velocityLimited = velocityLimit > 0f && abs(requestedVelocity) > velocityLimit
+
+        val accelerationLimit = maxAccelerationPxPerSecond2.coerceAtLeast(0f)
+        val velocityDelta = targetVelocity - currentVelocity
+        val maxVelocityDelta = accelerationLimit * dt
+        val resolvedVelocity = if (accelerationLimit > 0f && abs(velocityDelta) > maxVelocityDelta) {
+            currentVelocity + if (velocityDelta > 0f) maxVelocityDelta else -maxVelocityDelta
+        } else {
+            targetVelocity
+        }
+        val accelerationLimited = accelerationLimit > 0f && abs(velocityDelta) > maxVelocityDelta
+
+        val directionalVelocity = if (delta * resolvedVelocity < 0f) {
+            0f
+        } else {
+            resolvedVelocity
+        }
+        val rawValue = current + directionalVelocity * dt
+        val resolvedValue = if (delta > 0f) {
+            min(rawValue, target)
+        } else {
+            max(rawValue, target)
+        }
+        val resolvedVelocityForNextFrame = if (resolvedValue == target && !accelerationLimited) {
+            0f
+        } else {
+            directionalVelocity
+        }
+        return OutputAxisState(
+            value = resolvedValue,
+            velocity = resolvedVelocityForNextFrame,
+            velocityLimited = velocityLimited,
+            accelerationLimited = accelerationLimited,
+        )
     }
 
     private fun limitCorrectionRad(
@@ -754,6 +966,86 @@ class GyroPreviewStabilizer(
         return Pair(correctionRad.coerceIn(-maxCorrectionRad, maxCorrectionRad), true)
     }
 
+    private fun updateReAimState(
+        rps: Float,
+        dtSec: Float,
+        residualLevelRatio: Float,
+    ): String {
+        if (!config.reAimEnabled) {
+            reAimStillDurationSec = 0f
+            reAimActive = false
+            lastReAimTrigger = ""
+            return ""
+        }
+
+        val rpsThreshold = reAimRpsThreshold()
+        val enterRatio = config.reAimResidualEnterRatio.coerceIn(0.05f, 0.98f)
+        val exitRatio = min(config.reAimResidualExitRatio.coerceIn(0f, 0.95f), enterRatio - 0.01f)
+            .coerceAtLeast(0f)
+        val edgeActive = lastTransform.softBoundaryActiveX ||
+            lastTransform.softBoundaryActiveY ||
+            lastTransform.translationClampedX ||
+            lastTransform.translationClampedY ||
+            lastTransform.outputLimitedX ||
+            lastTransform.outputLimitedY
+        val rpsActive = rps >= rpsThreshold
+        val residualActive = residualLevelRatio >= enterRatio
+        if (rpsActive || residualActive || edgeActive) {
+            reAimActive = true
+            reAimStillDurationSec = 0f
+            lastReAimTrigger = buildReAimTrigger(rpsActive, residualActive, edgeActive)
+            return lastReAimTrigger
+        }
+
+        if (reAimActive) {
+            val isStill = rps <= rpsThreshold && residualLevelRatio <= exitRatio
+            if (isStill) {
+                reAimStillDurationSec += dtSec.coerceAtLeast(0f)
+            } else {
+                reAimStillDurationSec = 0f
+            }
+            val requiredStillSec = config.reAimStillMs.coerceIn(0f, 2_000f) / 1000f
+            if (reAimStillDurationSec >= requiredStillSec) {
+                reAimActive = false
+                lastReAimTrigger = ""
+            }
+        }
+
+        return if (reAimActive) lastReAimTrigger else ""
+    }
+
+    private fun buildReAimTrigger(
+        rpsActive: Boolean,
+        residualActive: Boolean,
+        edgeActive: Boolean,
+    ): String {
+        val triggers = mutableListOf<String>()
+        if (rpsActive) triggers.add("rps")
+        if (residualActive) triggers.add("residual")
+        if (edgeActive) triggers.add("edge")
+        return triggers.joinToString("+")
+    }
+
+    private fun updateReAimBlend(dtSec: Float): Float {
+        val targetBlend = if (config.reAimEnabled && reAimActive) 1f else 0f
+        val ratePerSecond = if (targetBlend > reAimBlend) {
+            config.reAimBlendInPerSecond
+        } else {
+            config.reAimBlendOutPerSecond
+        }.coerceAtLeast(0f)
+        val step = ratePerSecond * dtSec.coerceAtLeast(0f)
+        reAimBlend = when {
+            targetBlend > reAimBlend -> min(targetBlend, reAimBlend + step)
+            targetBlend < reAimBlend -> max(targetBlend, reAimBlend - step)
+            else -> reAimBlend
+        }.coerceIn(0f, 1f)
+        return reAimBlend
+    }
+
+    private fun reAimRpsThreshold(): Float {
+        return config.reAimRpsThreshold.coerceIn(0.001f, 0.300f)
+    }
+
     private fun updateResidualReleaseState(
         rps: Float,
         dtSec: Float,
@@ -765,8 +1057,7 @@ class GyroPreviewStabilizer(
             return
         }
 
-        val stillThreshold = (config.aimRpsThreshold.coerceIn(0.001f, 1f) * 1.25f)
-            .coerceAtLeast(0.002f)
+        val stillThreshold = residualReleaseRpsThreshold()
         val isStill = rps <= stillThreshold
         if (isStill) {
             residualStillDurationSec += dtSec.coerceAtLeast(0f)
@@ -789,6 +1080,26 @@ class GyroPreviewStabilizer(
         if (residualStillDurationSec >= requiredStillSec && residualLevelRatio >= enterRatio) {
             residualReleaseActive = true
         }
+    }
+
+    private fun updateResidualReleaseBlend(dtSec: Float): Float {
+        val targetBlend = if (config.residualReleaseEnabled && residualReleaseActive) 1f else 0f
+        val ratePerSecond = if (targetBlend > residualReleaseBlend) {
+            config.residualReleaseBlendInPerSecond
+        } else {
+            config.residualReleaseBlendOutPerSecond
+        }.coerceAtLeast(0f)
+        val step = ratePerSecond * dtSec.coerceAtLeast(0f)
+        residualReleaseBlend = when {
+            targetBlend > residualReleaseBlend -> min(targetBlend, residualReleaseBlend + step)
+            targetBlend < residualReleaseBlend -> max(targetBlend, residualReleaseBlend - step)
+            else -> residualReleaseBlend
+        }.coerceIn(0f, 1f)
+        return residualReleaseBlend
+    }
+
+    private fun residualReleaseRpsThreshold(): Float {
+        return config.residualReleaseRpsThreshold.coerceIn(0.001f, 0.300f)
     }
 
     private fun calculateResidualLevelRatio(
@@ -857,17 +1168,30 @@ class GyroPreviewStabilizer(
         return (1f + (hardwareZoom - 1f) * zoomStrength).coerceIn(1f, maxZoom)
     }
 
-    private fun resolveOutputRateLimit(aimBlend: Float, releaseActive: Boolean = false): Float {
+    private fun resolveOutputRateLimit(aimBlend: Float, releaseBlend: Float = 0f): Float {
         val baseLimit = lerp(
             start = config.outputRateLimitPxPerSecond,
             end = config.aimOutputRateLimitPxPerSecond,
             t = aimBlend,
         ).coerceAtLeast(0f)
-        return if (releaseActive) {
-            max(baseLimit, config.residualReleaseOutputRateLimitPxPerSecond.coerceAtLeast(0f))
+        val releaseLimit = config.residualReleaseOutputRateLimitPxPerSecond.coerceAtLeast(0f)
+        if (releaseLimit <= 0f) return baseLimit
+        return lerp(baseLimit, releaseLimit, releaseBlend)
+    }
+
+    private fun resolveOutputAccelerationLimit(aimBlend: Float, releaseBlend: Float = 0f): Float {
+        val baseLimit = lerp(
+            start = config.outputAccelerationLimitPxPerSecond2,
+            end = config.aimOutputAccelerationLimitPxPerSecond2,
+            t = aimBlend,
+        ).coerceAtLeast(0f)
+        if (baseLimit <= 0f) return 0f
+        val releaseLimit = if (config.residualReleaseOutputAccelerationLimitPxPerSecond2 > 0f) {
+            min(baseLimit, config.residualReleaseOutputAccelerationLimitPxPerSecond2)
         } else {
             baseLimit
         }
+        return lerp(baseLimit, releaseLimit, releaseBlend)
     }
 
     private fun lerp(start: Float, end: Float, t: Float): Float {

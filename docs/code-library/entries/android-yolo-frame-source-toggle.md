@@ -53,7 +53,7 @@
 
 ## 复用方式
 - `Camera2Controller` 负责创建普通逻辑 Session 的 YUV `ImageReader`，监听器只保留最新一帧，通过 `acquireLatestAnalysisImage()` 交给 UI 消费。
-- `CameraScreen` 的实时检测循环按 `YoloFrameSource` 分流：预览截图调用 `YoloDetector.detect(bitmap)`，YUV 数据流调用 `YoloDetector.detectFromYuv(image, rotation)`。
+- `CameraScreen` 的实时检测循环按 `YoloFrameSource` 分流：预览截图调用 `YoloDetector.detect(bitmap, postprocessOptions)`，YUV 数据流调用 `YoloDetector.detectFromYuv(image, rotation, postprocessOptions)`。
 - 校准采集统一调用 `captureLaserFrameForCalibration()`，YUV 校准帧通过 `ImageUtils.normalizeYuv420ForCalibration()` 转为 `1080x1920` PNG bytes 后进入原有绿光检测链路。
 
 ## 注意事项

@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [eis-yolo-filter-sync-2026-09-07] - 2026-09-07
+
+### 变更
+- 从 `E:\StudioProjects\Auto_measure` 同步最新自研 EIS 稳定器逻辑，加入输出加速度限幅、软边界限幅、重新瞄准释放、瞄准输出加速度和残留释放转速阈值等可调参数。
+- `更多 -> 自研EIS参数` 新增对应设置项，并将自研 EIS 参数配置版本升级到 `19`，旧配置会自动写入本轮默认值。
+- YOLO 旗杆识别新增后处理配置：默认只保留最高置信度目标，单框阈值默认 `0.25`；可在 `更多 -> YOLO单框` 切回原始多框阈值 `0.10`。
+- 实时检测状态文本新增当前 YOLO 后处理模式和阈值，便于现场确认识别配置。
+
+### 保持
+- 普通预览仍保持父逻辑相机 Session，不使用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface；双摄校准 `strictPhysical=true` 物理输出路径不变。
+- 系统 Camera2 EIS 默认仍为 OFF，只能通过 `防抖` 弹窗显式切换 ON/PREVIEW；本轮同步的是应用层自研 EIS。
+
+### 验证
+- 已通过 `git diff --check`。
+- 已通过 `.\gradlew.bat :app:compileDebugKotlin --no-daemon`。
+- 已通过 `.\gradlew.bat :app:assembleDebug --no-daemon`。
+
 ## [0.8.31] - 2026-09-04
 
 ### 修复

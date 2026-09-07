@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/gyro-preview-stabilization` |
+| 当前主要分支 | `feature/update-eis-flag-threshold` |
 
 ## 可复用能力
 
@@ -28,6 +28,7 @@
 | android-ble-distance-state-notification | BLE 测距数据事件通知与自动采集延迟 | android, kotlin, ble, compose-state, distance-measurement, calibration-delay | `app/src/main/java/com/example/auto_measure_luoji/feature/bluetooth/domain/BleConnectionManager.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/ui/CalibrationPanel.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/ui/DualCalibrationPanel.kt` | active |
 | android-yolo-capture-resolution-toggle | YOLO TextureView 图源 1080P/4K 切换 | android, kotlin, compose, yolo, textureview, model-input | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/detection/domain/YoloDetector.kt` | active |
 | android-yolo-frame-source-toggle | YOLO 预览截图/YUV 数据源切换 | android, kotlin, camera2, imagereader, yuv, textureview, yolo, calibration, jni | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/calibration/util/ImageUtils.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/detection/domain/YoloDetector.kt`; `app/src/main/cpp/yuv_preprocess.cpp` | active |
+| android-yolo-postprocess-threshold | YOLO 旗杆后处理阈值与单框策略 | android, kotlin, compose, yolo, nms, threshold, flag-detection | `app/src/main/java/com/example/auto_measure_luoji/feature/detection/domain/YoloDetector.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-yuv-native-preprocess-fast-path | YOLO YUV native 预处理快路径 | android, c++, jni, camera2, imagereader, yuv, yolo, image-processing, model-input | `app/src/main/cpp/yuv_preprocess.cpp`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/YuvPreprocessNative.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/detection/domain/YoloDetector.kt` | active |
 | pgyer-apk-upload-powershell | 蒲公英 APK 上传脚本 | powershell, pgyer, apk, release | `scripts/upload_pgyer.ps1` | active |
 | android-camera-top-action-two-row-layout | 相机页顶部按钮两行布局 | android, kotlin, compose, camera-ui, toolbar-layout | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | superseded |
@@ -45,4 +46,4 @@
 
 ## 最后更新
 
-2026-09-04，Codex Agent。同步 Auto_measure 最新自研 EIS：显示层倍率进入补偿模型，TextureView 基础缩放叠加 EIS 裁切缩放，加入大残留释放和 anti-windup；普通预览仍保持父逻辑相机 Session，系统 Camera2 EIS 默认 OFF。
+2026-09-07，Codex Agent。同步 Auto_measure 最新自研 EIS：新增输出加速度限幅、软边界限幅、重新瞄准释放、瞄准输出加速度和残留释放转速阈值；新增 YOLO 旗杆后处理单框阈值设置。普通预览仍保持父逻辑相机 Session，系统 Camera2 EIS 默认 OFF。

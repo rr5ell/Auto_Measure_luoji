@@ -33,7 +33,7 @@
 ## 复用方式
 - 顶部工具条复用 `TopActionButton`，文案为 `图1080P/图4K`。
 - 检测循环根据 `yoloCaptureMode` 调用 `TextureView.getBitmap(width, height)`。
-- `YoloDetector.detect(bitmap)` 继续读取模型 input tensor shape 并执行 letterbox。
+- `YoloDetector.detect(bitmap, postprocessOptions)` 继续读取模型 input tensor shape 并执行 letterbox，YOLO 后处理阈值由 `YoloPostprocessOptions` 统一传入。
 - 日志同时查看 `YOLO图源: ...` 和 `YoloDetector Input: ... -> ...`。
 
 ## 注意事项

@@ -75,6 +75,7 @@ import com.example.auto_measure_luoji.feature.camera.domain.Camera2Controller
 import com.example.auto_measure_luoji.feature.camera.domain.GyroPreviewStabilizer
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
+import com.example.auto_measure_luoji.feature.detection.domain.YoloPostprocessOptions
 import com.example.auto_measure_luoji.feature.detection.ui.DetectionOverlay
 import com.example.auto_measure_luoji.feature.detection.ui.RecognitionArea
 import com.example.auto_measure_luoji.feature.voice.domain.ChineseVoiceHotwordRecognizer
@@ -96,6 +97,8 @@ private const val NORMAL_PREVIEW_MAX_ZOOM = 24f
 private const val NORMAL_MIN_ZOOM_OFFSET = 0.1f
 private const val CALIBRATION_EXPOSURE_EV = -2.0f
 private const val CAMERA_SCREEN_PREFS = "camera_screen_settings"
+private const val KEY_YOLO_TOP_DETECTION_ENABLED = "yolo_top_detection_enabled"
+private const val KEY_YOLO_TOP_CONFIDENCE_THRESHOLD = "yolo_top_confidence_threshold"
 private const val KEY_YOLO_FRAME_SOURCE = "yolo_frame_source"
 private const val KEY_UI_ZOOM_ONLY_ENABLED = "ui_zoom_only_enabled"
 private const val KEY_GYRO_PREVIEW_CONFIG_VERSION = "gyro_preview_config_version"
@@ -104,8 +107,22 @@ private const val KEY_GYRO_PREVIEW_STRENGTH = "gyro_preview_strength"
 private const val KEY_GYRO_PREVIEW_PATH_FOLLOW = "gyro_preview_path_follow"
 private const val KEY_GYRO_PREVIEW_OUTPUT_ALPHA = "gyro_preview_output_alpha"
 private const val KEY_GYRO_PREVIEW_OUTPUT_RATE_LIMIT = "gyro_preview_output_rate_limit"
+private const val KEY_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT = "gyro_preview_output_acceleration_limit"
 private const val KEY_GYRO_PREVIEW_CROP_SCALE = "gyro_preview_crop_scale"
 private const val KEY_GYRO_PREVIEW_MAX_SHIFT = "gyro_preview_max_shift"
+private const val KEY_GYRO_PREVIEW_SOFT_BOUNDARY_ENABLED = "gyro_preview_soft_boundary_enabled"
+private const val KEY_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO = "gyro_preview_soft_boundary_start_ratio"
+private const val KEY_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH = "gyro_preview_soft_boundary_strength"
+private const val KEY_GYRO_PREVIEW_RE_AIM_ENABLED = "gyro_preview_re_aim_enabled"
+private const val KEY_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD = "gyro_preview_re_aim_rps_threshold"
+private const val KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_ENTER_RATIO =
+    "gyro_preview_re_aim_residual_enter_ratio"
+private const val KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_EXIT_RATIO =
+    "gyro_preview_re_aim_residual_exit_ratio"
+private const val KEY_GYRO_PREVIEW_RE_AIM_STILL_MS = "gyro_preview_re_aim_still_ms"
+private const val KEY_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW = "gyro_preview_re_aim_path_follow"
+private const val KEY_GYRO_PREVIEW_RE_AIM_BLEND_IN = "gyro_preview_re_aim_blend_in"
+private const val KEY_GYRO_PREVIEW_RE_AIM_BLEND_OUT = "gyro_preview_re_aim_blend_out"
 private const val KEY_GYRO_PREVIEW_DEADBAND_PX = "gyro_preview_deadband_px"
 private const val KEY_GYRO_PREVIEW_HORIZONTAL_GAIN = "gyro_preview_horizontal_gain"
 private const val KEY_GYRO_PREVIEW_VERTICAL_GAIN = "gyro_preview_vertical_gain"
@@ -115,6 +132,10 @@ private const val KEY_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER = "gyro_preview_aim_s
 private const val KEY_GYRO_PREVIEW_AIM_PATH_FOLLOW = "gyro_preview_aim_path_follow"
 private const val KEY_GYRO_PREVIEW_AIM_DEADBAND_PX = "gyro_preview_aim_deadband_px"
 private const val KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT = "gyro_preview_aim_output_rate_limit"
+private const val KEY_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT =
+    "gyro_preview_aim_output_acceleration_limit"
+private const val KEY_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD =
+    "gyro_preview_residual_release_rps_threshold"
 private const val KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_ENABLED = "gyro_preview_zoom_compensation_enabled"
 private const val KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH = "gyro_preview_zoom_compensation_strength"
 private const val KEY_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM = "gyro_preview_max_compensation_zoom"
@@ -149,7 +170,7 @@ private const val GYRO_STABILIZATION_CALIBRATION_FINE_MAX_SAMPLE_H = 1280
 private const val GYRO_STABILIZATION_CALIBRATION_MIN_SCORE = 0.18f
 private const val GYRO_STABILIZATION_CALIBRATION_HINT_MIN_SIGNAL_PX = 0.6f
 private const val GYRO_STABILIZATION_CALIBRATION_HINT_WINDOW_MS = 1_200L
-private const val GYRO_PREVIEW_CONFIG_VERSION = 6
+private const val GYRO_PREVIEW_CONFIG_VERSION = 19
 private const val MIN_GYRO_PREVIEW_STRENGTH = 0.0f
 private const val MAX_GYRO_PREVIEW_STRENGTH = 1.5f
 private const val MIN_GYRO_PREVIEW_PATH_FOLLOW = 1.0f
@@ -158,10 +179,26 @@ private const val MIN_GYRO_PREVIEW_OUTPUT_ALPHA = 0.05f
 private const val MAX_GYRO_PREVIEW_OUTPUT_ALPHA = 1.0f
 private const val MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT = 0.0f
 private const val MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT = 5_000.0f
+private const val MIN_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT = 0.0f
+private const val MAX_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT = 50_000.0f
 private const val MIN_GYRO_PREVIEW_CROP_SCALE = 1.0f
 private const val MAX_GYRO_PREVIEW_CROP_SCALE = 1.25f
 private const val MIN_GYRO_PREVIEW_MAX_SHIFT = 0.0f
 private const val MAX_GYRO_PREVIEW_MAX_SHIFT = 0.10f
+private const val MIN_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO = 0.05f
+private const val MAX_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO = 0.98f
+private const val MIN_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH = 0.0f
+private const val MAX_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH = 8.0f
+private const val MIN_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD = 0.001f
+private const val MAX_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD = 0.300f
+private const val MIN_GYRO_PREVIEW_RE_AIM_RATIO = 0.0f
+private const val MAX_GYRO_PREVIEW_RE_AIM_RATIO = 0.98f
+private const val MIN_GYRO_PREVIEW_RE_AIM_STILL_MS = 0.0f
+private const val MAX_GYRO_PREVIEW_RE_AIM_STILL_MS = 2_000.0f
+private const val MIN_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW = 0.2f
+private const val MAX_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW = 30.0f
+private const val MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE = 0.0f
+private const val MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE = 20.0f
 private const val MIN_GYRO_PREVIEW_DEADBAND_PX = 0.0f
 private const val MAX_GYRO_PREVIEW_DEADBAND_PX = 5.0f
 private const val MIN_GYRO_PREVIEW_AXIS_GAIN = 0.0f
@@ -176,6 +213,10 @@ private const val MIN_GYRO_PREVIEW_AIM_DEADBAND_PX = 0.0f
 private const val MAX_GYRO_PREVIEW_AIM_DEADBAND_PX = 2.0f
 private const val MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT = 0.0f
 private const val MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT = 5_000.0f
+private const val MIN_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT = 0.0f
+private const val MAX_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT = 50_000.0f
+private const val MIN_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD = 0.001f
+private const val MAX_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD = 0.300f
 private const val MIN_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH = 0.0f
 private const val MAX_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH = 2.0f
 private const val MIN_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM = 1.0f
@@ -250,8 +291,21 @@ private data class GyroPreviewParameterPreset(
     val pathFollowPerSecond: Float,
     val outputLowPassAlpha: Float,
     val outputRateLimitPxPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.outputRateLimitPxPerSecond,
+    val outputAccelerationLimitPxPerSecond2: Float =
+        DEFAULT_GYRO_PREVIEW_CONFIG.outputAccelerationLimitPxPerSecond2,
     val cropScale: Float,
     val maxShiftRatio: Float,
+    val softBoundaryEnabled: Boolean = DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryEnabled,
+    val softBoundaryStartRatio: Float = DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryStartRatio,
+    val softBoundaryStrength: Float = DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryStrength,
+    val reAimEnabled: Boolean = DEFAULT_GYRO_PREVIEW_CONFIG.reAimEnabled,
+    val reAimRpsThreshold: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimRpsThreshold,
+    val reAimResidualEnterRatio: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualEnterRatio,
+    val reAimResidualExitRatio: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualExitRatio,
+    val reAimStillMs: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimStillMs,
+    val reAimPathFollowPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimPathFollowPerSecond,
+    val reAimBlendInPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendInPerSecond,
+    val reAimBlendOutPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendOutPerSecond,
     val deadbandPx: Float,
     val horizontalGain: Float,
     val verticalGain: Float,
@@ -261,6 +315,9 @@ private data class GyroPreviewParameterPreset(
     val aimPathFollowPerSecond: Float,
     val aimDeadbandPx: Float,
     val aimOutputRateLimitPxPerSecond: Float = DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputRateLimitPxPerSecond,
+    val aimOutputAccelerationLimitPxPerSecond2: Float =
+        DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputAccelerationLimitPxPerSecond2,
+    val residualReleaseRpsThreshold: Float = DEFAULT_GYRO_PREVIEW_CONFIG.residualReleaseRpsThreshold,
     val zoomCompensationEnabled: Boolean,
     val zoomCompensationStrength: Float,
     val maxCompensationZoom: Float,
@@ -484,6 +541,96 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     val cameraPrefs = remember(context.applicationContext) {
         context.applicationContext.getSharedPreferences(CAMERA_SCREEN_PREFS, Context.MODE_PRIVATE)
     }
+    remember(cameraPrefs) {
+        if (cameraPrefs.getInt(KEY_GYRO_PREVIEW_CONFIG_VERSION, 0) < GYRO_PREVIEW_CONFIG_VERSION) {
+            cameraPrefs.edit()
+                .putInt(KEY_GYRO_PREVIEW_CONFIG_VERSION, GYRO_PREVIEW_CONFIG_VERSION)
+                .putFloat(KEY_GYRO_PREVIEW_STRENGTH, DEFAULT_GYRO_PREVIEW_CONFIG.strength)
+                .putFloat(KEY_GYRO_PREVIEW_PATH_FOLLOW, DEFAULT_GYRO_PREVIEW_CONFIG.pathFollowPerSecond)
+                .putFloat(KEY_GYRO_PREVIEW_OUTPUT_ALPHA, DEFAULT_GYRO_PREVIEW_CONFIG.outputLowPassAlpha)
+                .putFloat(
+                    KEY_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.outputRateLimitPxPerSecond,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.outputAccelerationLimitPxPerSecond2,
+                )
+                .putFloat(KEY_GYRO_PREVIEW_CROP_SCALE, DEFAULT_GYRO_PREVIEW_CONFIG.cropScale)
+                .putFloat(KEY_GYRO_PREVIEW_MAX_SHIFT, DEFAULT_GYRO_PREVIEW_CONFIG.maxShiftRatio)
+                .putBoolean(
+                    KEY_GYRO_PREVIEW_SOFT_BOUNDARY_ENABLED,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryEnabled,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryStartRatio,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryStrength,
+                )
+                .putBoolean(KEY_GYRO_PREVIEW_RE_AIM_ENABLED, DEFAULT_GYRO_PREVIEW_CONFIG.reAimEnabled)
+                .putFloat(KEY_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD, DEFAULT_GYRO_PREVIEW_CONFIG.reAimRpsThreshold)
+                .putFloat(
+                    KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_ENTER_RATIO,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualEnterRatio,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_EXIT_RATIO,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualExitRatio,
+                )
+                .putFloat(KEY_GYRO_PREVIEW_RE_AIM_STILL_MS, DEFAULT_GYRO_PREVIEW_CONFIG.reAimStillMs)
+                .putFloat(
+                    KEY_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.reAimPathFollowPerSecond,
+                )
+                .putFloat(KEY_GYRO_PREVIEW_RE_AIM_BLEND_IN, DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendInPerSecond)
+                .putFloat(KEY_GYRO_PREVIEW_RE_AIM_BLEND_OUT, DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendOutPerSecond)
+                .putFloat(KEY_GYRO_PREVIEW_DEADBAND_PX, DEFAULT_GYRO_PREVIEW_CONFIG.deadbandPx)
+                .putFloat(KEY_GYRO_PREVIEW_HORIZONTAL_GAIN, DEFAULT_GYRO_PREVIEW_CONFIG.horizontalGain)
+                .putFloat(KEY_GYRO_PREVIEW_VERTICAL_GAIN, DEFAULT_GYRO_PREVIEW_CONFIG.verticalGain)
+                .putBoolean(
+                    KEY_GYRO_PREVIEW_AIM_STABILIZATION_ENABLED,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.aimStabilizationEnabled,
+                )
+                .putFloat(KEY_GYRO_PREVIEW_AIM_RPS_THRESHOLD, DEFAULT_GYRO_PREVIEW_CONFIG.aimRpsThreshold)
+                .putFloat(
+                    KEY_GYRO_PREVIEW_AIM_STRENGTH_MULTIPLIER,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.aimStrengthMultiplier,
+                )
+                .putFloat(KEY_GYRO_PREVIEW_AIM_PATH_FOLLOW, DEFAULT_GYRO_PREVIEW_CONFIG.aimPathFollowPerSecond)
+                .putFloat(KEY_GYRO_PREVIEW_AIM_DEADBAND_PX, DEFAULT_GYRO_PREVIEW_CONFIG.aimDeadbandPx)
+                .putFloat(
+                    KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputRateLimitPxPerSecond,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputAccelerationLimitPxPerSecond2,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.residualReleaseRpsThreshold,
+                )
+                .putBoolean(
+                    KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_ENABLED,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationEnabled,
+                )
+                .putFloat(
+                    KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.zoomCompensationStrength,
+                )
+                .putFloat(KEY_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM, DEFAULT_GYRO_PREVIEW_CONFIG.maxCompensationZoom)
+                .putBoolean(KEY_GYRO_PREVIEW_FRAME_SYNC_ENABLED, DEFAULT_GYRO_PREVIEW_CONFIG.frameSyncEnabled)
+                .putFloat(
+                    KEY_GYRO_PREVIEW_FRAME_TIMESTAMP_OFFSET_MS,
+                    DEFAULT_GYRO_PREVIEW_CONFIG.frameTimestampOffsetMs,
+                )
+                .putBoolean(KEY_GYRO_PREVIEW_INVERT_VERTICAL, DEFAULT_GYRO_PREVIEW_CONFIG.invertVertical)
+                .apply()
+        }
+    }
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     val isLaserCompareApp = remember(context.packageName) {
         context.packageName.endsWith(".lasercompare")
@@ -551,6 +698,17 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             ).coerceIn(MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT, MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT),
         )
     }
+    var gyroPreviewOutputAccelerationLimit by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+                DEFAULT_GYRO_PREVIEW_CONFIG.outputAccelerationLimitPxPerSecond2,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+                MAX_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+            ),
+        )
+    }
     var gyroPreviewCropScale by remember {
         mutableFloatStateOf(
             cameraPrefs.getFloat(KEY_GYRO_PREVIEW_CROP_SCALE, DEFAULT_GYRO_PREVIEW_CONFIG.cropScale)
@@ -561,6 +719,121 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         mutableFloatStateOf(
             cameraPrefs.getFloat(KEY_GYRO_PREVIEW_MAX_SHIFT, DEFAULT_GYRO_PREVIEW_CONFIG.maxShiftRatio)
                 .coerceIn(MIN_GYRO_PREVIEW_MAX_SHIFT, MAX_GYRO_PREVIEW_MAX_SHIFT),
+        )
+    }
+    var gyroPreviewSoftBoundaryEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(
+                KEY_GYRO_PREVIEW_SOFT_BOUNDARY_ENABLED,
+                DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryEnabled,
+            ),
+        )
+    }
+    var gyroPreviewSoftBoundaryStartRatio by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+                DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryStartRatio,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+                MAX_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+            ),
+        )
+    }
+    var gyroPreviewSoftBoundaryStrength by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+                DEFAULT_GYRO_PREVIEW_CONFIG.softBoundaryStrength,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+                MAX_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+            ),
+        )
+    }
+    var gyroPreviewReAimEnabled by remember {
+        mutableStateOf(
+            cameraPrefs.getBoolean(
+                KEY_GYRO_PREVIEW_RE_AIM_ENABLED,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimEnabled,
+            ),
+        )
+    }
+    var gyroPreviewReAimRpsThreshold by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimRpsThreshold,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+                MAX_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+            ),
+        )
+    }
+    var gyroPreviewReAimResidualEnterRatio by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_ENTER_RATIO,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualEnterRatio,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ),
+        )
+    }
+    var gyroPreviewReAimResidualExitRatio by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_EXIT_RATIO,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualExitRatio,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ),
+        )
+    }
+    var gyroPreviewReAimStillMs by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_STILL_MS,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimStillMs,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_STILL_MS,
+                MAX_GYRO_PREVIEW_RE_AIM_STILL_MS,
+            ),
+        )
+    }
+    var gyroPreviewReAimPathFollow by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimPathFollowPerSecond,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+                MAX_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+            ),
+        )
+    }
+    var gyroPreviewReAimBlendIn by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_BLEND_IN,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendInPerSecond,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+                MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+            ),
+        )
+    }
+    var gyroPreviewReAimBlendOut by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RE_AIM_BLEND_OUT,
+                DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendOutPerSecond,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+                MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+            ),
         )
     }
     var gyroPreviewDeadbandPx by remember {
@@ -623,6 +896,28 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
                 DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputRateLimitPxPerSecond,
             ).coerceIn(MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT, MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT),
+        )
+    }
+    var gyroPreviewAimOutputAccelerationLimit by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+                DEFAULT_GYRO_PREVIEW_CONFIG.aimOutputAccelerationLimitPxPerSecond2,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+                MAX_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+            ),
+        )
+    }
+    var gyroPreviewResidualReleaseRpsThreshold by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+                DEFAULT_GYRO_PREVIEW_CONFIG.residualReleaseRpsThreshold,
+            ).coerceIn(
+                MIN_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+                MAX_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+            ),
         )
     }
     var gyroPreviewZoomCompensationEnabled by remember {
@@ -726,8 +1021,40 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var gyroPreviewPathFollowInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewPathFollow)) }
     var gyroPreviewOutputAlphaInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewOutputAlpha)) }
     var gyroPreviewOutputRateLimitInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewOutputRateLimit)) }
+    var gyroPreviewOutputAccelerationLimitInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewOutputAccelerationLimit))
+    }
     var gyroPreviewCropScaleInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewCropScale)) }
     var gyroPreviewMaxShiftInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewMaxShift)) }
+    var gyroPreviewSoftBoundaryEnabledInput by remember { mutableStateOf(gyroPreviewSoftBoundaryEnabled) }
+    var gyroPreviewSoftBoundaryStartRatioInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewSoftBoundaryStartRatio))
+    }
+    var gyroPreviewSoftBoundaryStrengthInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewSoftBoundaryStrength))
+    }
+    var gyroPreviewReAimEnabledInput by remember { mutableStateOf(gyroPreviewReAimEnabled) }
+    var gyroPreviewReAimRpsThresholdInput by remember {
+        mutableStateOf(formatGyroRps(gyroPreviewReAimRpsThreshold))
+    }
+    var gyroPreviewReAimResidualEnterRatioInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewReAimResidualEnterRatio))
+    }
+    var gyroPreviewReAimResidualExitRatioInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewReAimResidualExitRatio))
+    }
+    var gyroPreviewReAimStillMsInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewReAimStillMs))
+    }
+    var gyroPreviewReAimPathFollowInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewReAimPathFollow))
+    }
+    var gyroPreviewReAimBlendInInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewReAimBlendIn))
+    }
+    var gyroPreviewReAimBlendOutInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewReAimBlendOut))
+    }
     var gyroPreviewDeadbandInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewDeadbandPx)) }
     var gyroPreviewHorizontalGainInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewHorizontalGain)) }
     var gyroPreviewVerticalGainInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewVerticalGain)) }
@@ -742,6 +1069,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var gyroPreviewAimDeadbandInput by remember { mutableStateOf(formatFloatSetting(gyroPreviewAimDeadbandPx)) }
     var gyroPreviewAimOutputRateLimitInput by remember {
         mutableStateOf(formatFloatSetting(gyroPreviewAimOutputRateLimit))
+    }
+    var gyroPreviewAimOutputAccelerationLimitInput by remember {
+        mutableStateOf(formatFloatSetting(gyroPreviewAimOutputAccelerationLimit))
+    }
+    var gyroPreviewResidualReleaseRpsThresholdInput by remember {
+        mutableStateOf(formatGyroRps(gyroPreviewResidualReleaseRpsThreshold))
     }
     var gyroPreviewZoomCompensationEnabledInput by remember {
         mutableStateOf(gyroPreviewZoomCompensationEnabled)
@@ -848,6 +1181,24 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             } ?: YoloFrameSource.PREVIEW_BITMAP,
         )
     }
+    var yoloTopDetectionEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_YOLO_TOP_DETECTION_ENABLED, true))
+    }
+    var yoloTopConfidenceThreshold by remember {
+        mutableFloatStateOf(
+            cameraPrefs.getFloat(
+                KEY_YOLO_TOP_CONFIDENCE_THRESHOLD,
+                YoloPostprocessOptions.DEFAULT_TOP_CONFIDENCE_THRESHOLD,
+            ).coerceIn(
+                YoloPostprocessOptions.MIN_CONFIDENCE_THRESHOLD,
+                YoloPostprocessOptions.MAX_CONFIDENCE_THRESHOLD,
+            ),
+        )
+    }
+    var showYoloFilterDialog by remember { mutableStateOf(false) }
+    var yoloTopDetectionEnabledInput by remember { mutableStateOf(yoloTopDetectionEnabled) }
+    var yoloConfidenceThresholdInput by remember { mutableStateOf(formatYoloConfidence(yoloTopConfidenceThreshold)) }
+    var yoloFilterError by remember { mutableStateOf<String?>(null) }
 
     // 在后台线程加载模型（避免 Tasks.await 阻塞主线程）
     LaunchedEffect(gyroPreviewGlRenderEnabled) {
@@ -991,8 +1342,50 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
                 MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
             ),
+            outputAccelerationLimitPxPerSecond2 = gyroPreviewOutputAccelerationLimit.coerceIn(
+                MIN_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+                MAX_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+            ),
             cropScale = gyroPreviewCropScale.coerceIn(MIN_GYRO_PREVIEW_CROP_SCALE, MAX_GYRO_PREVIEW_CROP_SCALE),
             maxShiftRatio = gyroPreviewMaxShift.coerceIn(MIN_GYRO_PREVIEW_MAX_SHIFT, MAX_GYRO_PREVIEW_MAX_SHIFT),
+            softBoundaryEnabled = gyroPreviewSoftBoundaryEnabled,
+            softBoundaryStartRatio = gyroPreviewSoftBoundaryStartRatio.coerceIn(
+                MIN_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+                MAX_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+            ),
+            softBoundaryStrength = gyroPreviewSoftBoundaryStrength.coerceIn(
+                MIN_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+                MAX_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+            ),
+            reAimEnabled = gyroPreviewReAimEnabled,
+            reAimRpsThreshold = gyroPreviewReAimRpsThreshold.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+                MAX_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+            ),
+            reAimResidualEnterRatio = gyroPreviewReAimResidualEnterRatio.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ),
+            reAimResidualExitRatio = gyroPreviewReAimResidualExitRatio.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ),
+            reAimStillMs = gyroPreviewReAimStillMs.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_STILL_MS,
+                MAX_GYRO_PREVIEW_RE_AIM_STILL_MS,
+            ),
+            reAimPathFollowPerSecond = gyroPreviewReAimPathFollow.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+                MAX_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+            ),
+            reAimBlendInPerSecond = gyroPreviewReAimBlendIn.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+                MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+            ),
+            reAimBlendOutPerSecond = gyroPreviewReAimBlendOut.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+                MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+            ),
             deadbandPx = gyroPreviewDeadbandPx.coerceIn(
                 MIN_GYRO_PREVIEW_DEADBAND_PX,
                 MAX_GYRO_PREVIEW_DEADBAND_PX,
@@ -1025,6 +1418,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             aimOutputRateLimitPxPerSecond = gyroPreviewAimOutputRateLimit.coerceIn(
                 MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
                 MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
+            ),
+            aimOutputAccelerationLimitPxPerSecond2 = gyroPreviewAimOutputAccelerationLimit.coerceIn(
+                MIN_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+                MAX_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+            ),
+            residualReleaseRpsThreshold = gyroPreviewResidualReleaseRpsThreshold.coerceIn(
+                MIN_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+                MAX_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
             ),
             zoomCompensationEnabled = gyroPreviewZoomCompensationEnabled,
             zoomCompensationStrength = gyroPreviewZoomCompensationStrength.coerceIn(
@@ -1088,8 +1489,21 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewPathFollowInput = formatFloatSetting(config.pathFollowPerSecond)
         gyroPreviewOutputAlphaInput = formatFloatSetting(config.outputLowPassAlpha)
         gyroPreviewOutputRateLimitInput = formatFloatSetting(config.outputRateLimitPxPerSecond)
+        gyroPreviewOutputAccelerationLimitInput =
+            formatFloatSetting(config.outputAccelerationLimitPxPerSecond2)
         gyroPreviewCropScaleInput = formatFloatSetting(config.cropScale)
         gyroPreviewMaxShiftInput = formatFloatSetting(config.maxShiftRatio)
+        gyroPreviewSoftBoundaryEnabledInput = config.softBoundaryEnabled
+        gyroPreviewSoftBoundaryStartRatioInput = formatFloatSetting(config.softBoundaryStartRatio)
+        gyroPreviewSoftBoundaryStrengthInput = formatFloatSetting(config.softBoundaryStrength)
+        gyroPreviewReAimEnabledInput = config.reAimEnabled
+        gyroPreviewReAimRpsThresholdInput = formatGyroRps(config.reAimRpsThreshold)
+        gyroPreviewReAimResidualEnterRatioInput = formatFloatSetting(config.reAimResidualEnterRatio)
+        gyroPreviewReAimResidualExitRatioInput = formatFloatSetting(config.reAimResidualExitRatio)
+        gyroPreviewReAimStillMsInput = formatFloatSetting(config.reAimStillMs)
+        gyroPreviewReAimPathFollowInput = formatFloatSetting(config.reAimPathFollowPerSecond)
+        gyroPreviewReAimBlendInInput = formatFloatSetting(config.reAimBlendInPerSecond)
+        gyroPreviewReAimBlendOutInput = formatFloatSetting(config.reAimBlendOutPerSecond)
         gyroPreviewDeadbandInput = formatFloatSetting(config.deadbandPx)
         gyroPreviewHorizontalGainInput = formatFloatSetting(config.horizontalGain)
         gyroPreviewVerticalGainInput = formatFloatSetting(config.verticalGain)
@@ -1099,6 +1513,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewAimPathFollowInput = formatFloatSetting(config.aimPathFollowPerSecond)
         gyroPreviewAimDeadbandInput = formatFloatSetting(config.aimDeadbandPx)
         gyroPreviewAimOutputRateLimitInput = formatFloatSetting(config.aimOutputRateLimitPxPerSecond)
+        gyroPreviewAimOutputAccelerationLimitInput =
+            formatFloatSetting(config.aimOutputAccelerationLimitPxPerSecond2)
+        gyroPreviewResidualReleaseRpsThresholdInput = formatGyroRps(config.residualReleaseRpsThreshold)
         gyroPreviewZoomCompensationEnabledInput = config.zoomCompensationEnabled
         gyroPreviewZoomCompensationStrengthInput = formatFloatSetting(config.zoomCompensationStrength)
         gyroPreviewMaxCompensationZoomInput = formatFloatSetting(config.maxCompensationZoom)
@@ -1122,8 +1539,21 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewPathFollowInput = formatFloatSetting(preset.pathFollowPerSecond)
         gyroPreviewOutputAlphaInput = formatFloatSetting(preset.outputLowPassAlpha)
         gyroPreviewOutputRateLimitInput = formatFloatSetting(preset.outputRateLimitPxPerSecond)
+        gyroPreviewOutputAccelerationLimitInput =
+            formatFloatSetting(preset.outputAccelerationLimitPxPerSecond2)
         gyroPreviewCropScaleInput = formatFloatSetting(preset.cropScale)
         gyroPreviewMaxShiftInput = formatFloatSetting(preset.maxShiftRatio)
+        gyroPreviewSoftBoundaryEnabledInput = preset.softBoundaryEnabled
+        gyroPreviewSoftBoundaryStartRatioInput = formatFloatSetting(preset.softBoundaryStartRatio)
+        gyroPreviewSoftBoundaryStrengthInput = formatFloatSetting(preset.softBoundaryStrength)
+        gyroPreviewReAimEnabledInput = preset.reAimEnabled
+        gyroPreviewReAimRpsThresholdInput = formatGyroRps(preset.reAimRpsThreshold)
+        gyroPreviewReAimResidualEnterRatioInput = formatFloatSetting(preset.reAimResidualEnterRatio)
+        gyroPreviewReAimResidualExitRatioInput = formatFloatSetting(preset.reAimResidualExitRatio)
+        gyroPreviewReAimStillMsInput = formatFloatSetting(preset.reAimStillMs)
+        gyroPreviewReAimPathFollowInput = formatFloatSetting(preset.reAimPathFollowPerSecond)
+        gyroPreviewReAimBlendInInput = formatFloatSetting(preset.reAimBlendInPerSecond)
+        gyroPreviewReAimBlendOutInput = formatFloatSetting(preset.reAimBlendOutPerSecond)
         gyroPreviewDeadbandInput = formatFloatSetting(preset.deadbandPx)
         gyroPreviewHorizontalGainInput = formatFloatSetting(preset.horizontalGain)
         gyroPreviewVerticalGainInput = formatFloatSetting(preset.verticalGain)
@@ -1133,6 +1563,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewAimPathFollowInput = formatFloatSetting(preset.aimPathFollowPerSecond)
         gyroPreviewAimDeadbandInput = formatFloatSetting(preset.aimDeadbandPx)
         gyroPreviewAimOutputRateLimitInput = formatFloatSetting(preset.aimOutputRateLimitPxPerSecond)
+        gyroPreviewAimOutputAccelerationLimitInput =
+            formatFloatSetting(preset.aimOutputAccelerationLimitPxPerSecond2)
+        gyroPreviewResidualReleaseRpsThresholdInput = formatGyroRps(preset.residualReleaseRpsThreshold)
         gyroPreviewZoomCompensationEnabledInput = preset.zoomCompensationEnabled
         gyroPreviewZoomCompensationStrengthInput = formatFloatSetting(preset.zoomCompensationStrength)
         gyroPreviewMaxCompensationZoomInput = formatFloatSetting(preset.maxCompensationZoom)
@@ -1201,6 +1634,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             MIN_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
             MAX_GYRO_PREVIEW_OUTPUT_RATE_LIMIT,
         ) ?: return
+        val outputAccelerationLimit = parseFloat(
+            "输出加速度",
+            gyroPreviewOutputAccelerationLimitInput,
+            MIN_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+            MAX_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT,
+        ) ?: return
         val cropScale = parseFloat(
             "裁切倍数",
             gyroPreviewCropScaleInput,
@@ -1213,6 +1652,105 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             MIN_GYRO_PREVIEW_MAX_SHIFT,
             MAX_GYRO_PREVIEW_MAX_SHIFT,
         ) ?: return
+        val softBoundaryStartRatio = parseFloat(
+            "软边界开始比例",
+            gyroPreviewSoftBoundaryStartRatioInput,
+            MIN_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+            MAX_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO,
+        ) ?: return
+        val softBoundaryStrength = parseFloat(
+            "软边界强度",
+            gyroPreviewSoftBoundaryStrengthInput,
+            MIN_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+            MAX_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH,
+        ) ?: return
+        val reAimRpsThreshold = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄转速阈值",
+                gyroPreviewReAimRpsThresholdInput,
+                MIN_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+                MAX_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD,
+            ) ?: return
+        } else {
+            gyroPreviewReAimRpsThresholdInput.trim().toFloatOrNull()
+                ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimRpsThreshold
+        }
+        val reAimResidualEnterRatio = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄进入残留",
+                gyroPreviewReAimResidualEnterRatioInput,
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ) ?: return
+        } else {
+            gyroPreviewReAimResidualEnterRatioInput.trim().toFloatOrNull()
+                ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualEnterRatio
+        }
+        val reAimResidualExitRatioInputValue = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄退出残留",
+                gyroPreviewReAimResidualExitRatioInput,
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ) ?: return
+        } else {
+            gyroPreviewReAimResidualExitRatioInput.trim().toFloatOrNull()
+                ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimResidualExitRatio
+        }
+        if (gyroPreviewReAimEnabledInput && reAimResidualExitRatioInputValue >= reAimResidualEnterRatio) {
+            gyroPreviewSettingsError = "重瞄退出残留必须小于进入残留"
+            return
+        }
+        val reAimResidualExitRatio = min(
+            reAimResidualExitRatioInputValue.coerceIn(
+                MIN_GYRO_PREVIEW_RE_AIM_RATIO,
+                MAX_GYRO_PREVIEW_RE_AIM_RATIO,
+            ),
+            reAimResidualEnterRatio - 0.01f,
+        ).coerceAtLeast(0f)
+        val reAimStillMs = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄停稳时间",
+                gyroPreviewReAimStillMsInput,
+                MIN_GYRO_PREVIEW_RE_AIM_STILL_MS,
+                MAX_GYRO_PREVIEW_RE_AIM_STILL_MS,
+            ) ?: return
+        } else {
+            gyroPreviewReAimStillMsInput.trim().toFloatOrNull() ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimStillMs
+        }
+        val reAimPathFollow = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄跟随速度",
+                gyroPreviewReAimPathFollowInput,
+                MIN_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+                MAX_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW,
+            ) ?: return
+        } else {
+            gyroPreviewReAimPathFollowInput.trim().toFloatOrNull()
+                ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimPathFollowPerSecond
+        }
+        val reAimBlendIn = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄混入速度",
+                gyroPreviewReAimBlendInInput,
+                MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+                MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+            ) ?: return
+        } else {
+            gyroPreviewReAimBlendInInput.trim().toFloatOrNull()
+                ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendInPerSecond
+        }
+        val reAimBlendOut = if (gyroPreviewReAimEnabledInput) {
+            parseFloat(
+                "重瞄混出速度",
+                gyroPreviewReAimBlendOutInput,
+                MIN_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+                MAX_GYRO_PREVIEW_RE_AIM_BLEND_RATE,
+            ) ?: return
+        } else {
+            gyroPreviewReAimBlendOutInput.trim().toFloatOrNull()
+                ?: DEFAULT_GYRO_PREVIEW_CONFIG.reAimBlendOutPerSecond
+        }
         val deadband = parseFloat(
             "像素死区",
             gyroPreviewDeadbandInput,
@@ -1261,6 +1799,18 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             MIN_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
             MAX_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT,
         ) ?: return
+        val aimOutputAccelerationLimit = parseFloat(
+            "瞄准加速度",
+            gyroPreviewAimOutputAccelerationLimitInput,
+            MIN_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+            MAX_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+        ) ?: return
+        val residualReleaseRpsThreshold = parseFloat(
+            "残留释放转速",
+            gyroPreviewResidualReleaseRpsThresholdInput,
+            MIN_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+            MAX_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+        ) ?: return
         val zoomCompensationStrength = parseFloat(
             "倍率补偿强度",
             gyroPreviewZoomCompensationStrengthInput,
@@ -1297,8 +1847,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             pathFollowPerSecond = pathFollow,
             outputLowPassAlpha = outputAlpha,
             outputRateLimitPxPerSecond = outputRateLimit,
+            outputAccelerationLimitPxPerSecond2 = outputAccelerationLimit,
             cropScale = cropScale,
             maxShiftRatio = maxShift,
+            softBoundaryEnabled = gyroPreviewSoftBoundaryEnabledInput,
+            softBoundaryStartRatio = softBoundaryStartRatio,
+            softBoundaryStrength = softBoundaryStrength,
+            reAimEnabled = gyroPreviewReAimEnabledInput,
+            reAimRpsThreshold = reAimRpsThreshold,
+            reAimResidualEnterRatio = reAimResidualEnterRatio,
+            reAimResidualExitRatio = reAimResidualExitRatio,
+            reAimStillMs = reAimStillMs,
+            reAimPathFollowPerSecond = reAimPathFollow,
+            reAimBlendInPerSecond = reAimBlendIn,
+            reAimBlendOutPerSecond = reAimBlendOut,
             deadbandPx = deadband,
             horizontalGain = horizontalGain,
             verticalGain = verticalGain,
@@ -1308,6 +1870,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             aimPathFollowPerSecond = aimPathFollow,
             aimDeadbandPx = aimDeadband,
             aimOutputRateLimitPxPerSecond = aimOutputRateLimit,
+            aimOutputAccelerationLimitPxPerSecond2 = aimOutputAccelerationLimit,
+            residualReleaseRpsThreshold = residualReleaseRpsThreshold,
             zoomCompensationEnabled = gyroPreviewZoomCompensationEnabledInput,
             zoomCompensationStrength = zoomCompensationStrength,
             maxCompensationZoom = maxCompensationZoom,
@@ -1327,8 +1891,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewPathFollow = config.pathFollowPerSecond
         gyroPreviewOutputAlpha = config.outputLowPassAlpha
         gyroPreviewOutputRateLimit = config.outputRateLimitPxPerSecond
+        gyroPreviewOutputAccelerationLimit = config.outputAccelerationLimitPxPerSecond2
         gyroPreviewCropScale = config.cropScale
         gyroPreviewMaxShift = config.maxShiftRatio
+        gyroPreviewSoftBoundaryEnabled = config.softBoundaryEnabled
+        gyroPreviewSoftBoundaryStartRatio = config.softBoundaryStartRatio
+        gyroPreviewSoftBoundaryStrength = config.softBoundaryStrength
+        gyroPreviewReAimEnabled = config.reAimEnabled
+        gyroPreviewReAimRpsThreshold = config.reAimRpsThreshold
+        gyroPreviewReAimResidualEnterRatio = config.reAimResidualEnterRatio
+        gyroPreviewReAimResidualExitRatio = config.reAimResidualExitRatio
+        gyroPreviewReAimStillMs = config.reAimStillMs
+        gyroPreviewReAimPathFollow = config.reAimPathFollowPerSecond
+        gyroPreviewReAimBlendIn = config.reAimBlendInPerSecond
+        gyroPreviewReAimBlendOut = config.reAimBlendOutPerSecond
         gyroPreviewDeadbandPx = config.deadbandPx
         gyroPreviewHorizontalGain = config.horizontalGain
         gyroPreviewVerticalGain = config.verticalGain
@@ -1338,6 +1914,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewAimPathFollow = config.aimPathFollowPerSecond
         gyroPreviewAimDeadbandPx = config.aimDeadbandPx
         gyroPreviewAimOutputRateLimit = config.aimOutputRateLimitPxPerSecond
+        gyroPreviewAimOutputAccelerationLimit = config.aimOutputAccelerationLimitPxPerSecond2
+        gyroPreviewResidualReleaseRpsThreshold = config.residualReleaseRpsThreshold
         gyroPreviewZoomCompensationEnabled = config.zoomCompensationEnabled
         gyroPreviewZoomCompensationStrength = config.zoomCompensationStrength
         gyroPreviewMaxCompensationZoom = config.maxCompensationZoom
@@ -1360,8 +1938,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             .putFloat(KEY_GYRO_PREVIEW_PATH_FOLLOW, config.pathFollowPerSecond)
             .putFloat(KEY_GYRO_PREVIEW_OUTPUT_ALPHA, config.outputLowPassAlpha)
             .putFloat(KEY_GYRO_PREVIEW_OUTPUT_RATE_LIMIT, config.outputRateLimitPxPerSecond)
+            .putFloat(KEY_GYRO_PREVIEW_OUTPUT_ACCELERATION_LIMIT, config.outputAccelerationLimitPxPerSecond2)
             .putFloat(KEY_GYRO_PREVIEW_CROP_SCALE, config.cropScale)
             .putFloat(KEY_GYRO_PREVIEW_MAX_SHIFT, config.maxShiftRatio)
+            .putBoolean(KEY_GYRO_PREVIEW_SOFT_BOUNDARY_ENABLED, config.softBoundaryEnabled)
+            .putFloat(KEY_GYRO_PREVIEW_SOFT_BOUNDARY_START_RATIO, config.softBoundaryStartRatio)
+            .putFloat(KEY_GYRO_PREVIEW_SOFT_BOUNDARY_STRENGTH, config.softBoundaryStrength)
+            .putBoolean(KEY_GYRO_PREVIEW_RE_AIM_ENABLED, config.reAimEnabled)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_RPS_THRESHOLD, config.reAimRpsThreshold)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_ENTER_RATIO, config.reAimResidualEnterRatio)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_RESIDUAL_EXIT_RATIO, config.reAimResidualExitRatio)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_STILL_MS, config.reAimStillMs)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_PATH_FOLLOW, config.reAimPathFollowPerSecond)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_BLEND_IN, config.reAimBlendInPerSecond)
+            .putFloat(KEY_GYRO_PREVIEW_RE_AIM_BLEND_OUT, config.reAimBlendOutPerSecond)
             .putFloat(KEY_GYRO_PREVIEW_DEADBAND_PX, config.deadbandPx)
             .putFloat(KEY_GYRO_PREVIEW_HORIZONTAL_GAIN, config.horizontalGain)
             .putFloat(KEY_GYRO_PREVIEW_VERTICAL_GAIN, config.verticalGain)
@@ -1371,6 +1961,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             .putFloat(KEY_GYRO_PREVIEW_AIM_PATH_FOLLOW, config.aimPathFollowPerSecond)
             .putFloat(KEY_GYRO_PREVIEW_AIM_DEADBAND_PX, config.aimDeadbandPx)
             .putFloat(KEY_GYRO_PREVIEW_AIM_OUTPUT_RATE_LIMIT, config.aimOutputRateLimitPxPerSecond)
+            .putFloat(
+                KEY_GYRO_PREVIEW_AIM_OUTPUT_ACCELERATION_LIMIT,
+                config.aimOutputAccelerationLimitPxPerSecond2,
+            )
+            .putFloat(
+                KEY_GYRO_PREVIEW_RESIDUAL_RELEASE_RPS_THRESHOLD,
+                config.residualReleaseRpsThreshold,
+            )
             .putBoolean(KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_ENABLED, config.zoomCompensationEnabled)
             .putFloat(KEY_GYRO_PREVIEW_ZOOM_COMPENSATION_STRENGTH, config.zoomCompensationStrength)
             .putFloat(KEY_GYRO_PREVIEW_MAX_COMPENSATION_ZOOM, config.maxCompensationZoom)
@@ -1434,6 +2032,44 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewGlRenderEnabledInput = false
         gyroPreviewDiagnosticsEnabledInput = false
         gyroStabilizationCalibrationFineSampleInput = false
+    }
+
+    fun openYoloFilterDialog() {
+        yoloTopDetectionEnabledInput = yoloTopDetectionEnabled
+        yoloConfidenceThresholdInput = formatYoloConfidence(yoloTopConfidenceThreshold)
+        yoloFilterError = null
+        showYoloFilterDialog = true
+    }
+
+    fun saveYoloFilterSetting() {
+        val threshold = yoloConfidenceThresholdInput.trim().toFloatOrNull()
+        if (yoloTopDetectionEnabledInput &&
+            (threshold == null ||
+                threshold !in YoloPostprocessOptions.MIN_CONFIDENCE_THRESHOLD..YoloPostprocessOptions.MAX_CONFIDENCE_THRESHOLD)
+        ) {
+            yoloFilterError = "阈值请输入 0.00-1.00"
+            return
+        }
+        val normalizedThreshold = (threshold ?: yoloTopConfidenceThreshold).coerceIn(
+            YoloPostprocessOptions.MIN_CONFIDENCE_THRESHOLD,
+            YoloPostprocessOptions.MAX_CONFIDENCE_THRESHOLD,
+        )
+        yoloTopDetectionEnabled = yoloTopDetectionEnabledInput
+        yoloTopConfidenceThreshold = normalizedThreshold
+        cameraPrefs.edit()
+            .putBoolean(KEY_YOLO_TOP_DETECTION_ENABLED, yoloTopDetectionEnabledInput)
+            .putFloat(KEY_YOLO_TOP_CONFIDENCE_THRESHOLD, normalizedThreshold)
+            .apply()
+        showYoloFilterDialog = false
+        statusText = if (yoloTopDetectionEnabledInput) {
+            "YOLO单框：阈值 ${formatYoloConfidence(normalizedThreshold)}"
+        } else {
+            "YOLO多框：原始阈值 ${formatYoloConfidence(YoloPostprocessOptions.ORIGINAL_CONFIDENCE_THRESHOLD)}"
+        }
+        Log.d(
+            "CameraScreen",
+            "yoloFilter: topOnly=$yoloTopDetectionEnabledInput threshold=$normalizedThreshold",
+        )
     }
 
     fun resetGyroPreviewRenderTransformToBase() {
@@ -3204,7 +3840,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     // 检测帧处理循环：支持 TextureView.getBitmap() 和 ImageReader YUV 两种数据源。
 
-    LaunchedEffect(detectionEnabled, yoloCaptureMode, yoloFrameSource) {
+    LaunchedEffect(
+        detectionEnabled,
+        yoloCaptureMode,
+        yoloFrameSource,
+        yoloTopDetectionEnabled,
+        yoloTopConfidenceThreshold,
+    ) {
         if (!detectionEnabled || yoloDetector == null) {
             detectionBoxes = emptyList()
             detectionPerfText = ""
@@ -3233,6 +3875,16 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         var sourceLabel = ""
                         var sourceWidth = 0
                         var sourceHeight = 0
+                        val postprocessOptions = if (yoloTopDetectionEnabled) {
+                            YoloPostprocessOptions.topOnly(yoloTopConfidenceThreshold)
+                        } else {
+                            YoloPostprocessOptions.original()
+                        }
+                        val filterText = if (postprocessOptions.topConfidenceOnly) {
+                            "单框>=${formatYoloConfidence(postprocessOptions.confidenceThreshold)}"
+                        } else {
+                            "多框>=${formatYoloConfidence(postprocessOptions.confidenceThreshold)}"
+                        }
                         val result = when (yoloFrameSource) {
                             YoloFrameSource.PREVIEW_BITMAP -> {
                                 val snapshot = withContext(Dispatchers.Main) {
@@ -3247,7 +3899,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                         val lensDebug = activeLensDebugText()
                                         sourceLabel = "PreviewBitmap ${captureMode.label} ${snapshot.width}x${snapshot.height} $lensDebug"
                                         Log.d("CameraScreen", "YOLO source: $sourceLabel")
-                                        withContext(Dispatchers.Default) { detector.detect(snapshot) }
+                                        withContext(Dispatchers.Default) {
+                                            detector.detect(snapshot, postprocessOptions)
+                                        }
                                     } finally {
                                         snapshot.recycle()
                                     }
@@ -3274,7 +3928,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                             val lensDebug = activeLensDebugText()
                                             sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation $lensDebug"
                                             Log.d("CameraScreen", "YOLO source: $sourceLabel")
-                                            withContext(Dispatchers.Default) { detector.detectFromYuv(image, rotation) }
+                                            withContext(Dispatchers.Default) {
+                                                detector.detectFromYuv(image, rotation, postprocessOptions)
+                                            }
                                         } finally {
                                             image.close()
                                         }
@@ -3313,7 +3969,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     r to "${d.label} ${"%.2f".format(d.score)}"
                                 }
                                 detectionBoxes = mapped
-                                detectionPerfText = "$sourceLabel | pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms total=${totalMs}ms | ${result.detections.size}obj"
+                                detectionPerfText = "$sourceLabel | $filterText | pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms total=${totalMs}ms | ${result.detections.size}obj"
                                 Log.d("CameraScreen", "detection done: objects=${result.detections.size}, total=${totalMs}ms")
 
                                 val screenCX = viewW / 2f
@@ -3657,6 +4313,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 showMeasurePrompt = false
                                 wasTargetInArea = false
                                 statusText = "YOLO数据源: ${nextSource.label}"
+                            },
+                        )
+                        ToolMenuItem(
+                            text = if (yoloTopDetectionEnabled) {
+                                "YOLO单框 >=${formatYoloConfidence(yoloTopConfidenceThreshold)}"
+                            } else {
+                                "YOLO多框"
+                            },
+                            active = yoloTopDetectionEnabled,
+                            enabled = !gyroPreviewGlRenderEnabled,
+                            accent = Color(0xFFFF9800),
+                            onClick = {
+                                toolsMenuExpanded = false
+                                openYoloFilterDialog()
                             },
                         )
                         ToolMenuItem(
@@ -4431,6 +5101,67 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        if (showYoloFilterDialog) {
+            AlertDialog(
+                onDismissRequest = { showYoloFilterDialog = false },
+                title = { Text("YOLO识别阈值") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "最高置信度单框",
+                                modifier = Modifier.weight(1f),
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Switch(
+                                checked = yoloTopDetectionEnabledInput,
+                                onCheckedChange = {
+                                    yoloTopDetectionEnabledInput = it
+                                    yoloFilterError = null
+                                },
+                            )
+                        }
+                        OutlinedTextField(
+                            value = yoloConfidenceThresholdInput,
+                            onValueChange = {
+                                yoloConfidenceThresholdInput = it
+                                yoloFilterError = null
+                            },
+                            enabled = yoloTopDetectionEnabledInput,
+                            label = { Text("单框阈值") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = if (yoloTopDetectionEnabledInput) {
+                                "当前阈值 ${formatYoloConfidence(yoloConfidenceThresholdInput.trim().toFloatOrNull() ?: yoloTopConfidenceThreshold)}"
+                            } else {
+                                "原始多框阈值 ${formatYoloConfidence(YoloPostprocessOptions.ORIGINAL_CONFIDENCE_THRESHOLD)}"
+                            },
+                            color = Color.White.copy(alpha = 0.70f),
+                            fontSize = 12.sp,
+                        )
+                        yoloFilterError?.let { error ->
+                            Text(error, color = Color(0xFFFF5252), fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { saveYoloFilterSetting() }) { Text("保存") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showYoloFilterDialog = false }) { Text("取消") }
+                },
+            )
+        }
+
         if (showStabilizationDialog) {
             val supportedEisModes = cameraController.getAvailableVideoStabilizationModes()
             AlertDialog(
@@ -4589,6 +5320,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             },
                         )
                         GyroSettingSwitchRow(
+                            text = "软边界限幅",
+                            checked = gyroPreviewSoftBoundaryEnabledInput,
+                            onCheckedChange = {
+                                gyroPreviewSoftBoundaryEnabledInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+                        GyroSettingSwitchRow(
+                            text = "重新瞄准释放",
+                            checked = gyroPreviewReAimEnabledInput,
+                            onCheckedChange = {
+                                gyroPreviewReAimEnabledInput = it
+                                gyroPreviewSettingsError = null
+                            },
+                        )
+                        GyroSettingSwitchRow(
                             text = "Roll补偿",
                             checked = gyroPreviewRollCompensationEnabledInput,
                             onCheckedChange = {
@@ -4649,6 +5396,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 Modifier.weight(1f),
                             )
                         }
+                        GyroSettingTextField(
+                            "输出加速度",
+                            gyroPreviewOutputAccelerationLimitInput,
+                            { gyroPreviewOutputAccelerationLimitInput = it; gyroPreviewSettingsError = null },
+                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             GyroSettingTextField(
                                 "死区px",
@@ -4677,6 +5429,78 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 Modifier.weight(1f),
                             )
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "软边界开始",
+                                gyroPreviewSoftBoundaryStartRatioInput,
+                                { gyroPreviewSoftBoundaryStartRatioInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewSoftBoundaryEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "软边界强度",
+                                gyroPreviewSoftBoundaryStrengthInput,
+                                { gyroPreviewSoftBoundaryStrengthInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewSoftBoundaryEnabledInput,
+                            )
+                        }
+
+                        Text("重新瞄准", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "转速阈值",
+                                gyroPreviewReAimRpsThresholdInput,
+                                { gyroPreviewReAimRpsThresholdInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewReAimEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "停稳ms",
+                                gyroPreviewReAimStillMsInput,
+                                { gyroPreviewReAimStillMsInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewReAimEnabledInput,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "进入残留",
+                                gyroPreviewReAimResidualEnterRatioInput,
+                                { gyroPreviewReAimResidualEnterRatioInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewReAimEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "退出残留",
+                                gyroPreviewReAimResidualExitRatioInput,
+                                { gyroPreviewReAimResidualExitRatioInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewReAimEnabledInput,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "重瞄跟随",
+                                gyroPreviewReAimPathFollowInput,
+                                { gyroPreviewReAimPathFollowInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewReAimEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "混入",
+                                gyroPreviewReAimBlendInInput,
+                                { gyroPreviewReAimBlendInInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewReAimEnabledInput,
+                            )
+                        }
+                        GyroSettingTextField(
+                            "混出",
+                            gyroPreviewReAimBlendOutInput,
+                            { gyroPreviewReAimBlendOutInput = it; gyroPreviewSettingsError = null },
+                            enabled = gyroPreviewReAimEnabledInput,
+                        )
 
                         Text("倍率/瞄准", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4727,11 +5551,26 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 enabled = gyroPreviewAimStabilizationEnabledInput,
                             )
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GyroSettingTextField(
+                                "瞄准限速",
+                                gyroPreviewAimOutputRateLimitInput,
+                                { gyroPreviewAimOutputRateLimitInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewAimStabilizationEnabledInput,
+                            )
+                            GyroSettingTextField(
+                                "瞄准加速度",
+                                gyroPreviewAimOutputAccelerationLimitInput,
+                                { gyroPreviewAimOutputAccelerationLimitInput = it; gyroPreviewSettingsError = null },
+                                Modifier.weight(1f),
+                                enabled = gyroPreviewAimStabilizationEnabledInput,
+                            )
+                        }
                         GyroSettingTextField(
-                            "瞄准限速",
-                            gyroPreviewAimOutputRateLimitInput,
-                            { gyroPreviewAimOutputRateLimitInput = it; gyroPreviewSettingsError = null },
-                            enabled = gyroPreviewAimStabilizationEnabledInput,
+                            "残留释放转速",
+                            gyroPreviewResidualReleaseRpsThresholdInput,
+                            { gyroPreviewResidualReleaseRpsThresholdInput = it; gyroPreviewSettingsError = null },
                         )
 
                         Text("Roll", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -5186,6 +6025,8 @@ private fun estimateStabilizationCalibrationShift(
 }
 
 private fun formatGyroRps(value: Float): String = String.format(Locale.US, "%.3f", value)
+
+private fun formatYoloConfidence(value: Float): String = String.format(Locale.US, "%.2f", value)
 
 private fun formatFloatSetting(value: Float): String = String.format(Locale.US, "%.2f", value)
 
