@@ -9,6 +9,8 @@ import kotlin.math.min
 import kotlin.math.roundToLong
 import kotlin.math.sqrt
 
+private const val RE_AIM_EDGE_CONFIRM_FRAMES = 2
+
 /**
  * App 层低延迟预览防抖实验算法。
  *
@@ -34,6 +36,9 @@ class GyroPreviewStabilizer(
         val aimRpsThreshold: Float = 0.04f,
         val aimStrengthMultiplier: Float = 2.0f,
         val aimPathFollowPerSecond: Float = 0.8f,
+        val aimOutputLowPassAlpha: Float = 0.70f,
+        val aimAdaptiveLowPassEnabled: Boolean = false,
+        val aimAdaptiveLowPassMinAlpha: Float = 0.62f,
         val aimDeadbandPx: Float = 0.0f,
         val aimOutputRateLimitPxPerSecond: Float = 720f,
         val aimOutputAccelerationLimitPxPerSecond2: Float = 0f,
@@ -53,17 +58,18 @@ class GyroPreviewStabilizer(
         val softBoundaryStrength: Float = 1.00f,
         val reAimEnabled: Boolean = true,
         val reAimRpsThreshold: Float = 0.012f,
-        val reAimResidualEnterRatio: Float = 0.65f,
+        val reAimResidualEnterRatio: Float = 0.85f,
         val reAimResidualExitRatio: Float = 0.25f,
         val reAimStillMs: Float = 250f,
-        val reAimPathFollowPerSecond: Float = 12.0f,
-        val reAimBlendInPerSecond: Float = 8.0f,
+        val reAimPathFollowPerSecond: Float = 8.0f,
+        val reAimBlendInPerSecond: Float = 3.0f,
         val reAimBlendOutPerSecond: Float = 3.0f,
         val zoomCompensationEnabled: Boolean = true,
         val zoomCompensationStrength: Float = 1.0f,
         val maxCompensationZoom: Float = 20.0f,
         val frameSyncEnabled: Boolean = true,
         val frameTimestampOffsetMs: Float = 5f,
+        val visualStillGateEnabled: Boolean = false,
         val rollCompensationEnabled: Boolean = false,
         val rollStrength: Float = 0.35f,
         val maxRollDegrees: Float = 1.5f,
@@ -72,6 +78,15 @@ class GyroPreviewStabilizer(
         val swapPitchYawAxes: Boolean = false,
         val invertHorizontal: Boolean = false,
         val invertVertical: Boolean = true,
+    )
+
+    data class VisualMotionFeedback(
+        val timestampNs: Long,
+        val valid: Boolean,
+        val hitSearchBoundary: Boolean,
+        val rawDx: Float,
+        val rawDy: Float,
+        val score: Float,
     )
 
     data class Transform(
@@ -97,6 +112,15 @@ class GyroPreviewStabilizer(
         val displayZoomRatio: Float = 1f,
         val renderScale: Float = 1f,
         val effectiveZoom: Float = 1f,
+        val outputLowPassAlpha: Float = 0f,
+        val aimAdaptiveLowPassBlend: Float = 0f,
+        val aimAdaptiveLowPassJitterPx: Float = 0f,
+        val aimMicroJitterClampActive: Boolean = false,
+        val aimMicroJitterStepPx: Float = 0f,
+        val aimMicroJitterStepChangePx: Float = 0f,
+        val aimMicroJitterMaxStepChangePx: Float = 0f,
+        val aimMicroJitterReverseAlignment: Float = 0f,
+        val aimMicroJitterStrongStepReversal: Boolean = false,
         val outputRateLimitPxPerSecond: Float = 0f,
         val outputAccelerationLimitPxPerSecond2: Float = 0f,
         val outputVelocityX: Float = 0f,
@@ -112,13 +136,36 @@ class GyroPreviewStabilizer(
         val softBoundaryActiveY: Boolean = false,
         val softBoundaryRatioX: Float = 0f,
         val softBoundaryRatioY: Float = 0f,
+        val unclampedRawTranslationX: Float = 0f,
+        val unclampedRawTranslationY: Float = 0f,
         val rawTranslationX: Float = 0f,
         val rawTranslationY: Float = 0f,
         val targetTranslationX: Float = 0f,
         val targetTranslationY: Float = 0f,
+        val unclampedTargetTranslationX: Float = 0f,
+        val unclampedTargetTranslationY: Float = 0f,
         val maxTranslationX: Float = 0f,
         val maxTranslationY: Float = 0f,
+        val remainingCropMarginX: Float = 0f,
+        val remainingCropMarginY: Float = 0f,
         val maxOutputStepPx: Float = 0f,
+        val outputStepDeltaMs: Float = 0f,
+        val outputStepDeltaLimited: Boolean = false,
+        val aimStillHoldActive: Boolean = false,
+        val aimStillHoldBlend: Float = 0f,
+        val aimStillHoldStepPx: Float = 0f,
+        val aimStillHoldRawStepPx: Float = 0f,
+        val aimStillHoldMaxStepPx: Float = 0f,
+        val visualMotionValid: Boolean = false,
+        val visualMotionHitSearchBoundary: Boolean = false,
+        val visualMotionAgeMs: Float = 0f,
+        val visualMotionRawDx: Float = 0f,
+        val visualMotionRawDy: Float = 0f,
+        val visualMotionRawMag: Float = 0f,
+        val visualMotionScore: Float = 0f,
+        val visualStillGateActive: Boolean = false,
+        val visualStillGateBlend: Float = 0f,
+        val visualStillGateTargetStepPx: Float = 0f,
         val outputLimitedX: Boolean = false,
         val outputLimitedY: Boolean = false,
         val outputAccelerationLimitedX: Boolean = false,
@@ -136,6 +183,14 @@ class GyroPreviewStabilizer(
         val frameSamples: Int = 0,
         val frameDeltaMs: Float = 0f,
         val frameLagMs: Float = 0f,
+        val poseQueryTimestampNs: Long = 0L,
+        val gyroWindowStartTimestampNs: Long = 0L,
+        val gyroWindowEndTimestampNs: Long = 0L,
+        val gyroFirstSampleTimestampNs: Long = 0L,
+        val gyroLastSampleTimestampNs: Long = 0L,
+        val gyroMaxGapMs: Float = 0f,
+        val gyroExtrapolationMs: Float = 0f,
+        val stateChanged: Boolean = false,
     ) {
         companion object {
             val Identity = Transform()
@@ -154,6 +209,12 @@ class GyroPreviewStabilizer(
         val yRad: Float,
         val zRad: Float,
         val samples: Int,
+        val windowStartTimestampNs: Long = 0L,
+        val windowEndTimestampNs: Long = 0L,
+        val firstSampleTimestampNs: Long = 0L,
+        val lastSampleTimestampNs: Long = 0L,
+        val maxGapNs: Long = 0L,
+        val extrapolationNs: Long = 0L,
     )
 
     private data class OutputAxisState(
@@ -167,6 +228,47 @@ class GyroPreviewStabilizer(
         val value: Float,
         val active: Boolean,
         val ratio: Float,
+    )
+
+    private data class AimAdaptiveLowPassState(
+        val blend: Float,
+        val jitterPx: Float,
+    )
+
+    private data class AimMicroJitterClampState(
+        val targetX: Float,
+        val targetY: Float,
+        val active: Boolean,
+        val stepPx: Float,
+        val stepChangePx: Float,
+        val maxStepChangePx: Float,
+        val reverseAlignment: Float,
+        val strongStepReversal: Boolean,
+    )
+
+    private data class AimStillHoldState(
+        val targetX: Float,
+        val targetY: Float,
+        val active: Boolean,
+        val blend: Float,
+        val stepPx: Float,
+        val rawStepPx: Float,
+        val maxStepPx: Float,
+    )
+
+    private data class VisualStillGateState(
+        val targetX: Float,
+        val targetY: Float,
+        val active: Boolean,
+        val blend: Float,
+        val targetStepPx: Float,
+        val visualValid: Boolean,
+        val visualHitSearchBoundary: Boolean,
+        val visualAgeMs: Float,
+        val visualRawDx: Float,
+        val visualRawDy: Float,
+        val visualRawMag: Float,
+        val visualScore: Float,
     )
 
     private val gyroSamples = ArrayDeque<GyroSample>()
@@ -190,6 +292,23 @@ class GyroPreviewStabilizer(
     private var reAimActive = false
     private var reAimBlend = 0f
     private var lastReAimTrigger = ""
+    private var reAimEdgeFrames = 0
+    private var aimAdaptiveLowPassBlend = 0f
+    private var aimAdaptiveLowPassJitterPx = 0f
+    private var hasAimRawTranslation = false
+    private var aimLastRawTranslationX = 0f
+    private var aimLastRawTranslationY = 0f
+    private var hasAimRawDelta = false
+    private var aimLastRawDeltaX = 0f
+    private var aimLastRawDeltaY = 0f
+    private var hasAimMicroJitterStep = false
+    private var aimLastMicroJitterStepX = 0f
+    private var aimLastMicroJitterStepY = 0f
+    private var aimStillHoldActive = false
+    private var aimStillHoldBlend = 0f
+    private var latestVisualMotionFeedback: VisualMotionFeedback? = null
+    private var visualStillGateActive = false
+    private var visualStillGateBlend = 0f
     private var initialized = false
     private var lastTransform = Transform.Identity
 
@@ -220,10 +339,42 @@ class GyroPreviewStabilizer(
         reAimActive = false
         reAimBlend = 0f
         lastReAimTrigger = ""
+        reAimEdgeFrames = 0
+        aimAdaptiveLowPassBlend = 0f
+        aimAdaptiveLowPassJitterPx = 0f
+        hasAimRawTranslation = false
+        aimLastRawTranslationX = 0f
+        aimLastRawTranslationY = 0f
+        hasAimRawDelta = false
+        aimLastRawDeltaX = 0f
+        aimLastRawDeltaY = 0f
+        hasAimMicroJitterStep = false
+        aimLastMicroJitterStepX = 0f
+        aimLastMicroJitterStepY = 0f
+        aimStillHoldActive = false
+        aimStillHoldBlend = 0f
+        latestVisualMotionFeedback = null
+        visualStillGateActive = false
+        visualStillGateBlend = 0f
         initialized = false
         lastTransform = Transform.Identity
         gyroSamples.clear()
         latestGyroSample = null
+    }
+
+    @Synchronized
+    fun recordVisualMotionFeedback(feedback: VisualMotionFeedback) {
+        if (feedback.timestampNs <= 0L) return
+        val previous = latestVisualMotionFeedback
+        if (previous != null && feedback.timestampNs < previous.timestampNs) return
+        latestVisualMotionFeedback = feedback
+    }
+
+    @Synchronized
+    fun resetVisualMotionFeedback() {
+        latestVisualMotionFeedback = null
+        visualStillGateActive = false
+        visualStillGateBlend = 0f
     }
 
     @Synchronized
@@ -264,6 +415,7 @@ class GyroPreviewStabilizer(
         lensFocalPxY: Float = 0f,
     ): Transform {
         if (viewWidth <= 0f || viewHeight <= 0f) return Transform.Identity
+        if (timestampNs <= 0L) return lastTransform
 
         val rps = calculateRps(gyroXRadPerSec, gyroYRadPerSec, gyroZRadPerSec)
         val sourcePitchRate = if (config.swapPitchYawAxes) gyroYRadPerSec else gyroXRadPerSec
@@ -271,7 +423,7 @@ class GyroPreviewStabilizer(
         val sourceRollRate = gyroZRadPerSec
         val effectiveZoom = resolveEffectiveZoom(opticalZoomBase, digitalZoomRatio, displayZoomRatio)
         val modelFocalPx = calculateModelFocalPx(viewWidth, viewHeight, effectiveZoom)
-        if (!initialized || lastTimestampNs <= 0L || timestampNs <= lastTimestampNs) {
+        if (!initialized || lastTimestampNs <= 0L) {
             lastTimestampNs = timestampNs
             initialized = true
             val initialAimBlend = calculateAimBlend(rps)
@@ -299,11 +451,16 @@ class GyroPreviewStabilizer(
                 lensFocalPxX = lensFocalPxX.coerceAtLeast(0f),
                 lensFocalPxY = lensFocalPxY.coerceAtLeast(0f),
                 frameSyncEnabled = false,
+                poseQueryTimestampNs = timestampNs,
             )
             return lastTransform
         }
+        if (timestampNs <= lastTimestampNs) {
+            return lastTransform
+        }
 
-        val dtSec = ((timestampNs - lastTimestampNs) / 1_000_000_000f)
+        val startTimestampNs = lastTimestampNs
+        val dtSec = ((timestampNs - startTimestampNs) / 1_000_000_000f)
             .coerceIn(0.001f, config.maxDeltaTimeSec)
         lastTimestampNs = timestampNs
 
@@ -323,6 +480,7 @@ class GyroPreviewStabilizer(
             gyroZRadPerSec = gyroZRadPerSec,
             rps = rps,
             dtSec = dtSec,
+            motionTimestampNs = timestampNs,
             viewWidth = viewWidth,
             viewHeight = viewHeight,
             opticalZoomBase = opticalZoomBase,
@@ -338,6 +496,13 @@ class GyroPreviewStabilizer(
             frameSyncEnabled = false,
             frameSamples = 0,
             frameLagMs = 0f,
+            poseQueryTimestampNs = timestampNs,
+            gyroWindowStartTimestampNs = startTimestampNs,
+            gyroWindowEndTimestampNs = timestampNs,
+            gyroFirstSampleTimestampNs = timestampNs,
+            gyroLastSampleTimestampNs = timestampNs,
+            gyroMaxGapMs = 0f,
+            gyroExtrapolationMs = 0f,
         )
     }
 
@@ -375,7 +540,7 @@ class GyroPreviewStabilizer(
         val rollingShutterSkewMs = safeRollingShutterSkewNs / 1_000_000f
         val frameTargetOffsetMs = frameTargetOffsetNs / 1_000_000f
 
-        if (!initialized || lastTimestampNs <= 0L || targetTimestampNs <= lastTimestampNs) {
+        if (!initialized || lastTimestampNs <= 0L) {
             lastTimestampNs = targetTimestampNs
             initialized = true
             val gyroX = latestSample?.xRadPerSec ?: 0f
@@ -416,13 +581,24 @@ class GyroPreviewStabilizer(
                 frameSamples = 0,
                 frameDeltaMs = 0f,
                 frameLagMs = latestLagMs,
+                poseQueryTimestampNs = targetTimestampNs,
             )
             return lastTransform
         }
+        if (targetTimestampNs <= lastTimestampNs) {
+            return lastTransform
+        }
 
-        val rawDtSec = (targetTimestampNs - lastTimestampNs) / 1_000_000_000f
-        if (rawDtSec > MAX_FRAME_SYNC_DELTA_SEC) {
-            lastTimestampNs = targetTimestampNs
+        val startTimestampNs = lastTimestampNs
+        val rawDtSec = (targetTimestampNs - startTimestampNs) / 1_000_000_000f
+
+        val integrated = integrateGyroWindow(startTimestampNs, targetTimestampNs)
+        val dtSec = rawDtSec.coerceIn(0.001f, MAX_FRAME_SYNC_DELTA_SEC)
+        val motionDtSec = rawDtSec.coerceAtLeast(0.001f)
+        val hasUsableGyroWindow = integrated.lastSampleTimestampNs > 0L &&
+            integrated.extrapolationNs <= MAX_FRAME_SYNC_GYRO_EXTRAPOLATION_NS &&
+            (integrated.maxGapNs <= 0L || integrated.maxGapNs <= MAX_FRAME_SYNC_GYRO_GAP_NS)
+        if (!hasUsableGyroWindow) {
             lastTransform = lastTransform.copy(
                 scale = config.cropScale,
                 frameSyncEnabled = true,
@@ -441,46 +617,28 @@ class GyroPreviewStabilizer(
                 exposureTimeMs = exposureTimeMs,
                 rollingShutterSkewMs = rollingShutterSkewMs,
                 frameTargetOffsetMs = frameTargetOffsetMs,
+                poseQueryTimestampNs = targetTimestampNs,
+                gyroWindowStartTimestampNs = integrated.windowStartTimestampNs,
+                gyroWindowEndTimestampNs = integrated.windowEndTimestampNs,
+                gyroFirstSampleTimestampNs = integrated.firstSampleTimestampNs,
+                gyroLastSampleTimestampNs = integrated.lastSampleTimestampNs,
+                gyroMaxGapMs = integrated.maxGapNs / 1_000_000f,
+                gyroExtrapolationMs = integrated.extrapolationNs / 1_000_000f,
+                stateChanged = true,
             )
             return lastTransform
         }
-
-        val startTimestampNs = lastTimestampNs
-        val integrated = integrateGyroWindow(startTimestampNs, targetTimestampNs)
         lastTimestampNs = targetTimestampNs
-        val dtSec = rawDtSec.coerceIn(0.001f, MAX_FRAME_SYNC_DELTA_SEC)
-        if (integrated.samples <= 0) {
-            lastTransform = lastTransform.copy(
-                scale = config.cropScale,
-                frameSyncEnabled = true,
-                frameSamples = 0,
-                frameDeltaMs = dtSec * 1000f,
-                frameLagMs = latestLagMs,
-                opticalZoomBase = opticalZoomBase.coerceAtLeast(1f),
-                digitalZoomRatio = digitalZoomRatio.coerceAtLeast(1f),
-                displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
-                renderScale = renderScale.coerceAtLeast(config.cropScale.coerceAtLeast(1f)),
-                effectiveZoom = effectiveZoom,
-                modelFocalPxX = modelFocalPx,
-                modelFocalPxY = modelFocalPx,
-                lensFocalPxX = lensFocalPxX.coerceAtLeast(0f),
-                lensFocalPxY = lensFocalPxY.coerceAtLeast(0f),
-                exposureTimeMs = exposureTimeMs,
-                rollingShutterSkewMs = rollingShutterSkewMs,
-                frameTargetOffsetMs = frameTargetOffsetMs,
-            )
-            return lastTransform
-        }
 
-        val gyroXRadPerSec = integrated.xRad / dtSec
-        val gyroYRadPerSec = integrated.yRad / dtSec
-        val gyroZRadPerSec = integrated.zRad / dtSec
+        val gyroXRadPerSec = integrated.xRad / motionDtSec
+        val gyroYRadPerSec = integrated.yRad / motionDtSec
+        val gyroZRadPerSec = integrated.zRad / motionDtSec
         val sourcePitchDelta = if (config.swapPitchYawAxes) integrated.yRad else integrated.xRad
         val sourceYawDelta = if (config.swapPitchYawAxes) integrated.xRad else integrated.yRad
         val sourceRollDelta = integrated.zRad
-        val sourcePitchRate = sourcePitchDelta / dtSec
-        val sourceYawRate = sourceYawDelta / dtSec
-        val sourceRollRate = sourceRollDelta / dtSec
+        val sourcePitchRate = sourcePitchDelta / motionDtSec
+        val sourceYawRate = sourceYawDelta / motionDtSec
+        val sourceRollRate = sourceRollDelta / motionDtSec
         val pitchDelta = if (config.invertVertical) -sourcePitchDelta else sourcePitchDelta
         val yawDelta = if (config.invertHorizontal) -sourceYawDelta else sourceYawDelta
         val rollDelta = if (config.invertRoll) -sourceRollDelta else sourceRollDelta
@@ -497,6 +655,8 @@ class GyroPreviewStabilizer(
             gyroZRadPerSec = gyroZRadPerSec,
             rps = calculateRps(gyroXRadPerSec, gyroYRadPerSec, gyroZRadPerSec),
             dtSec = dtSec,
+            frameDeltaMs = rawDtSec * 1000f,
+            motionTimestampNs = frameTimestampNs,
             viewWidth = viewWidth,
             viewHeight = viewHeight,
             opticalZoomBase = opticalZoomBase,
@@ -512,6 +672,13 @@ class GyroPreviewStabilizer(
             frameSyncEnabled = true,
             frameSamples = integrated.samples,
             frameLagMs = latestLagMs,
+            poseQueryTimestampNs = targetTimestampNs,
+            gyroWindowStartTimestampNs = integrated.windowStartTimestampNs,
+            gyroWindowEndTimestampNs = integrated.windowEndTimestampNs,
+            gyroFirstSampleTimestampNs = integrated.firstSampleTimestampNs,
+            gyroLastSampleTimestampNs = integrated.lastSampleTimestampNs,
+            gyroMaxGapMs = integrated.maxGapNs / 1_000_000f,
+            gyroExtrapolationMs = integrated.extrapolationNs / 1_000_000f,
         )
     }
 
@@ -527,6 +694,8 @@ class GyroPreviewStabilizer(
         gyroZRadPerSec: Float,
         rps: Float,
         dtSec: Float,
+        frameDeltaMs: Float = dtSec * 1000f,
+        motionTimestampNs: Long,
         viewWidth: Float,
         viewHeight: Float,
         opticalZoomBase: Float,
@@ -542,6 +711,13 @@ class GyroPreviewStabilizer(
         frameSyncEnabled: Boolean,
         frameSamples: Int,
         frameLagMs: Float,
+        poseQueryTimestampNs: Long,
+        gyroWindowStartTimestampNs: Long,
+        gyroWindowEndTimestampNs: Long,
+        gyroFirstSampleTimestampNs: Long,
+        gyroLastSampleTimestampNs: Long,
+        gyroMaxGapMs: Float,
+        gyroExtrapolationMs: Float,
     ): Transform {
         val baseAimBlend = calculateAimBlend(rps)
         val focalPx = calculateModelFocalPx(viewWidth, viewHeight, effectiveZoom)
@@ -661,17 +837,85 @@ class GyroPreviewStabilizer(
             value = softRawY.value,
             deadband = deadband,
         )
-        val outputAlpha = config.outputLowPassAlpha.coerceIn(0.05f, 1f)
+        val baseOutputAlpha = config.outputLowPassAlpha.coerceIn(0.05f, 1f)
+        val aimOutputAlpha = config.aimOutputLowPassAlpha.coerceIn(0.05f, 1f)
+        val softBoundaryOutputFade = calculateSoftBoundaryOutputFade(softRawX.ratio, softRawY.ratio)
+        val aimOutputAlphaBlend = aimBlend * (1f - releaseBlend) * softBoundaryOutputFade
+        val aimAdaptiveLowPass = updateAimAdaptiveLowPass(
+            rawTx = rawTx,
+            rawTy = rawTy,
+            aimOutputAlphaBlend = aimOutputAlphaBlend,
+            dtSec = dtSec,
+        )
+        val aimAdaptiveMinAlpha = min(
+            aimOutputAlpha,
+            config.aimAdaptiveLowPassMinAlpha.coerceIn(0.05f, 1f),
+        )
+        val adaptiveAimOutputAlpha = if (config.aimAdaptiveLowPassEnabled) {
+            lerp(
+                start = aimOutputAlpha,
+                end = aimAdaptiveMinAlpha,
+                t = aimAdaptiveLowPass.blend,
+            )
+        } else {
+            aimOutputAlpha
+        }
+        val outputAlpha = lerp(
+            start = baseOutputAlpha,
+            end = adaptiveAimOutputAlpha,
+            t = aimOutputAlphaBlend,
+        )
         val outputRateLimitPxPerSecond = resolveOutputRateLimit(aimBlend, releaseBlend)
         val outputAccelerationLimitPxPerSecond2 = resolveOutputAccelerationLimit(aimBlend, releaseBlend)
-        val maxOutputStepPx = outputRateLimitPxPerSecond * dtSec
-        val targetTranslationX = outputTranslationX + (rawTx - outputTranslationX) * outputAlpha
-        val targetTranslationY = outputTranslationY + (rawTy - outputTranslationY) * outputAlpha
+        val outputStepDtSec = resolveOutputStepDeltaSec(dtSec)
+        val outputStepDeltaLimited = outputStepDtSec < dtSec - 0.0005f
+        val maxOutputStepPx = outputRateLimitPxPerSecond * outputStepDtSec
+        val unclampedTargetTranslationX = outputTranslationX + (rawTx - outputTranslationX) * outputAlpha
+        val unclampedTargetTranslationY = outputTranslationY + (rawTy - outputTranslationY) * outputAlpha
+        val aimMicroJitterClamp = applyAimMicroJitterClamp(
+            targetX = unclampedTargetTranslationX,
+            targetY = unclampedTargetTranslationY,
+            currentX = outputTranslationX,
+            currentY = outputTranslationY,
+            aimBlend = aimBlend,
+            releaseBlend = releaseBlend,
+            reAimBlend = activeReAimBlend,
+            softBoundaryActive = softRawX.active || softRawY.active,
+        )
+        val aimStillHold = applyAimStillHold(
+            targetX = aimMicroJitterClamp.targetX,
+            targetY = aimMicroJitterClamp.targetY,
+            currentX = outputTranslationX,
+            currentY = outputTranslationY,
+            rawStepX = rawTx - lastTransform.rawTranslationX,
+            rawStepY = rawTy - lastTransform.rawTranslationY,
+            rps = rps,
+            aimBlend = aimBlend,
+            releaseBlend = releaseBlend,
+            reAimBlend = activeReAimBlend,
+            softBoundaryActive = softRawX.active || softRawY.active,
+            dtSec = dtSec,
+        )
+        val visualStillGate = applyVisualStillGate(
+            targetX = aimStillHold.targetX,
+            targetY = aimStillHold.targetY,
+            currentX = outputTranslationX,
+            currentY = outputTranslationY,
+            rps = rps,
+            aimBlend = aimBlend,
+            releaseBlend = releaseBlend,
+            reAimBlend = activeReAimBlend,
+            softBoundaryActive = softRawX.active || softRawY.active,
+            motionTimestampNs = motionTimestampNs,
+            dtSec = dtSec,
+        )
+        val targetTranslationX = visualStillGate.targetX
+        val targetTranslationY = visualStillGate.targetY
         val outputX = updateOutputAxis(
             current = outputTranslationX,
             currentVelocity = outputVelocityX,
             target = targetTranslationX,
-            dtSec = dtSec,
+            dtSec = outputStepDtSec,
             maxVelocityPxPerSecond = outputRateLimitPxPerSecond,
             maxAccelerationPxPerSecond2 = outputAccelerationLimitPxPerSecond2,
         )
@@ -679,7 +923,7 @@ class GyroPreviewStabilizer(
             current = outputTranslationY,
             currentVelocity = outputVelocityY,
             target = targetTranslationY,
-            dtSec = dtSec,
+            dtSec = outputStepDtSec,
             maxVelocityPxPerSecond = outputRateLimitPxPerSecond,
             maxAccelerationPxPerSecond2 = outputAccelerationLimitPxPerSecond2,
         )
@@ -719,6 +963,26 @@ class GyroPreviewStabilizer(
             0f
         }
         outputRotationDegrees += (rawRotationDegrees - outputRotationDegrees) * outputAlpha
+        val residualReleaseActive = releaseBlend > 0.001f
+        val remainingCropMarginX = (maxDx - abs(finalTranslationX)).coerceAtLeast(0f)
+        val remainingCropMarginY = (maxDy - abs(finalTranslationY)).coerceAtLeast(0f)
+        val stateChanged =
+            this.reAimActive != lastTransform.reAimActive ||
+                activeReAimBlend > 0.001f && lastTransform.reAimBlend <= 0.001f ||
+                activeReAimBlend <= 0.001f && lastTransform.reAimBlend > 0.001f ||
+                residualReleaseActive != lastTransform.residualReleaseActive ||
+                aimMicroJitterClamp.active != lastTransform.aimMicroJitterClampActive ||
+                aimStillHold.active != lastTransform.aimStillHoldActive ||
+                visualStillGate.active != lastTransform.visualStillGateActive ||
+                softRawX.active != lastTransform.softBoundaryActiveX ||
+                softRawY.active != lastTransform.softBoundaryActiveY ||
+                outputX.velocityLimited != lastTransform.outputLimitedX ||
+                outputY.velocityLimited != lastTransform.outputLimitedY ||
+                outputX.accelerationLimited != lastTransform.outputAccelerationLimitedX ||
+                outputY.accelerationLimited != lastTransform.outputAccelerationLimitedY ||
+                translationClampedX != lastTransform.translationClampedX ||
+                translationClampedY != lastTransform.translationClampedY ||
+                reAimTrigger != lastTransform.reAimTrigger
 
         lastTransform = Transform(
             scale = scale,
@@ -728,7 +992,7 @@ class GyroPreviewStabilizer(
             rps = rps,
             aimBlend = aimBlend,
             baseAimBlend = baseAimBlend,
-            reAimActive = activeReAimBlend > 0.001f,
+            reAimActive = this.reAimActive,
             reAimBlend = activeReAimBlend,
             reAimStillMs = reAimStillDurationSec * 1000f,
             reAimTrigger = reAimTrigger,
@@ -743,11 +1007,20 @@ class GyroPreviewStabilizer(
             displayZoomRatio = displayZoomRatio.coerceAtLeast(1f),
             renderScale = finalRenderScale,
             effectiveZoom = effectiveZoom,
+            outputLowPassAlpha = outputAlpha,
+            aimAdaptiveLowPassBlend = aimAdaptiveLowPass.blend,
+            aimAdaptiveLowPassJitterPx = aimAdaptiveLowPass.jitterPx,
+            aimMicroJitterClampActive = aimMicroJitterClamp.active,
+            aimMicroJitterStepPx = aimMicroJitterClamp.stepPx,
+            aimMicroJitterStepChangePx = aimMicroJitterClamp.stepChangePx,
+            aimMicroJitterMaxStepChangePx = aimMicroJitterClamp.maxStepChangePx,
+            aimMicroJitterReverseAlignment = aimMicroJitterClamp.reverseAlignment,
+            aimMicroJitterStrongStepReversal = aimMicroJitterClamp.strongStepReversal,
             outputRateLimitPxPerSecond = outputRateLimitPxPerSecond,
             outputAccelerationLimitPxPerSecond2 = outputAccelerationLimitPxPerSecond2,
             outputVelocityX = outputVelocityX,
             outputVelocityY = outputVelocityY,
-            residualReleaseActive = releaseBlend > 0.001f,
+            residualReleaseActive = residualReleaseActive,
             residualReleaseBlend = releaseBlend,
             residualLevelRatio = residualLevelRatio,
             residualStillMs = residualStillDurationSec * 1000f,
@@ -758,13 +1031,36 @@ class GyroPreviewStabilizer(
             softBoundaryActiveY = softRawY.active,
             softBoundaryRatioX = softRawX.ratio,
             softBoundaryRatioY = softRawY.ratio,
+            unclampedRawTranslationX = unclampedRawTx,
+            unclampedRawTranslationY = unclampedRawTy,
             rawTranslationX = rawTx,
             rawTranslationY = rawTy,
             targetTranslationX = targetTranslationX,
             targetTranslationY = targetTranslationY,
+            unclampedTargetTranslationX = unclampedTargetTranslationX,
+            unclampedTargetTranslationY = unclampedTargetTranslationY,
             maxTranslationX = maxDx,
             maxTranslationY = maxDy,
+            remainingCropMarginX = remainingCropMarginX,
+            remainingCropMarginY = remainingCropMarginY,
             maxOutputStepPx = maxOutputStepPx,
+            outputStepDeltaMs = outputStepDtSec * 1000f,
+            outputStepDeltaLimited = outputStepDeltaLimited,
+            aimStillHoldActive = aimStillHold.active,
+            aimStillHoldBlend = aimStillHold.blend,
+            aimStillHoldStepPx = aimStillHold.stepPx,
+            aimStillHoldRawStepPx = aimStillHold.rawStepPx,
+            aimStillHoldMaxStepPx = aimStillHold.maxStepPx,
+            visualMotionValid = visualStillGate.visualValid,
+            visualMotionHitSearchBoundary = visualStillGate.visualHitSearchBoundary,
+            visualMotionAgeMs = visualStillGate.visualAgeMs,
+            visualMotionRawDx = visualStillGate.visualRawDx,
+            visualMotionRawDy = visualStillGate.visualRawDy,
+            visualMotionRawMag = visualStillGate.visualRawMag,
+            visualMotionScore = visualStillGate.visualScore,
+            visualStillGateActive = visualStillGate.active,
+            visualStillGateBlend = visualStillGate.blend,
+            visualStillGateTargetStepPx = visualStillGate.targetStepPx,
             outputLimitedX = outputX.velocityLimited,
             outputLimitedY = outputY.velocityLimited,
             outputAccelerationLimitedX = outputX.accelerationLimited,
@@ -780,15 +1076,30 @@ class GyroPreviewStabilizer(
             frameTargetOffsetMs = frameTargetOffsetMs,
             frameSyncEnabled = frameSyncEnabled,
             frameSamples = frameSamples,
-            frameDeltaMs = dtSec * 1000f,
+            frameDeltaMs = frameDeltaMs,
             frameLagMs = frameLagMs,
+            poseQueryTimestampNs = poseQueryTimestampNs,
+            gyroWindowStartTimestampNs = gyroWindowStartTimestampNs,
+            gyroWindowEndTimestampNs = gyroWindowEndTimestampNs,
+            gyroFirstSampleTimestampNs = gyroFirstSampleTimestampNs,
+            gyroLastSampleTimestampNs = gyroLastSampleTimestampNs,
+            gyroMaxGapMs = gyroMaxGapMs,
+            gyroExtrapolationMs = gyroExtrapolationMs,
+            stateChanged = stateChanged,
         )
         return lastTransform
     }
 
     private fun integrateGyroWindow(startTimestampNs: Long, endTimestampNs: Long): IntegratedGyro {
         if (endTimestampNs <= startTimestampNs || gyroSamples.isEmpty()) {
-            return IntegratedGyro(0f, 0f, 0f, 0)
+            return IntegratedGyro(
+                xRad = 0f,
+                yRad = 0f,
+                zRad = 0f,
+                samples = 0,
+                windowStartTimestampNs = startTimestampNs,
+                windowEndTimestampNs = endTimestampNs,
+            )
         }
 
         var previous: GyroSample? = null
@@ -797,6 +1108,20 @@ class GyroPreviewStabilizer(
         var xRad = 0f
         var yRad = 0f
         var zRad = 0f
+        var firstSampleTimestampNs = 0L
+        var lastSampleTimestampNs = 0L
+        var maxGapNs = 0L
+
+        fun observeSampleTimestamp(timestampNs: Long) {
+            if (timestampNs <= 0L) return
+            if (firstSampleTimestampNs == 0L) {
+                firstSampleTimestampNs = timestampNs
+            }
+            if (lastSampleTimestampNs > 0L) {
+                maxGapNs = max(maxGapNs, timestampNs - lastSampleTimestampNs)
+            }
+            lastSampleTimestampNs = timestampNs
+        }
 
         val iterator = gyroSamples.iterator()
         while (iterator.hasNext()) {
@@ -809,12 +1134,15 @@ class GyroPreviewStabilizer(
 
             val prev = previous
             if (prev == null) {
+                observeSampleTimestamp(sample.timestampNs)
                 previous = sample
                 cursorNs = sample.timestampNs.coerceAtLeast(startTimestampNs)
                 samples++
                 continue
             }
 
+            observeSampleTimestamp(prev.timestampNs)
+            observeSampleTimestamp(sample.timestampNs)
             val dtSec = ((sample.timestampNs - cursorNs).coerceAtLeast(0L)) / 1_000_000_000f
             xRad += prev.xRadPerSec * dtSec
             yRad += prev.yRadPerSec * dtSec
@@ -825,6 +1153,7 @@ class GyroPreviewStabilizer(
         }
 
         previous?.let { prev ->
+            observeSampleTimestamp(prev.timestampNs)
             if (cursorNs < endTimestampNs) {
                 val dtSec = (endTimestampNs - cursorNs) / 1_000_000_000f
                 xRad += prev.xRadPerSec * dtSec
@@ -833,7 +1162,18 @@ class GyroPreviewStabilizer(
             }
         }
 
-        return IntegratedGyro(xRad, yRad, zRad, samples)
+        return IntegratedGyro(
+            xRad = xRad,
+            yRad = yRad,
+            zRad = zRad,
+            samples = samples,
+            windowStartTimestampNs = startTimestampNs,
+            windowEndTimestampNs = endTimestampNs,
+            firstSampleTimestampNs = firstSampleTimestampNs,
+            lastSampleTimestampNs = lastSampleTimestampNs,
+            maxGapNs = maxGapNs,
+            extrapolationNs = (endTimestampNs - lastSampleTimestampNs).coerceAtLeast(0L),
+        )
     }
 
     private fun pruneGyroSamples(currentTimestampNs: Long) {
@@ -884,6 +1224,464 @@ class GyroPreviewStabilizer(
             active = true,
             ratio = ratio,
         )
+    }
+
+    private fun calculateSoftBoundaryOutputFade(ratioX: Float, ratioY: Float): Float {
+        val edgeRatio = max(ratioX, ratioY)
+        if (!config.softBoundaryEnabled) {
+            return if (edgeRatio > 1f) 0f else 1f
+        }
+        val startRatio = config.softBoundaryStartRatio.coerceIn(0.05f, 0.98f)
+        val t = ((edgeRatio - startRatio) / (1f - startRatio).coerceAtLeast(0.001f))
+            .coerceIn(0f, 1f)
+        return 1f - smoothStep(t)
+    }
+
+    private fun updateAimAdaptiveLowPass(
+        rawTx: Float,
+        rawTy: Float,
+        aimOutputAlphaBlend: Float,
+        dtSec: Float,
+    ): AimAdaptiveLowPassState {
+        if (!config.aimAdaptiveLowPassEnabled) {
+            hasAimRawTranslation = false
+            hasAimRawDelta = false
+            aimAdaptiveLowPassJitterPx = 0f
+            aimAdaptiveLowPassBlend = 0f
+            return AimAdaptiveLowPassState(
+                blend = aimAdaptiveLowPassBlend,
+                jitterPx = aimAdaptiveLowPassJitterPx,
+            )
+        }
+
+        val eligible = aimOutputAlphaBlend > 0.5f
+        if (!eligible) {
+            hasAimRawTranslation = false
+            hasAimRawDelta = false
+            aimAdaptiveLowPassJitterPx = 0f
+            aimAdaptiveLowPassBlend = moveToward(
+                current = aimAdaptiveLowPassBlend,
+                target = 0f,
+                step = AIM_ADAPTIVE_LOW_PASS_BLEND_OUT_PER_SECOND * dtSec.coerceAtLeast(0f),
+            )
+            return AimAdaptiveLowPassState(
+                blend = aimAdaptiveLowPassBlend,
+                jitterPx = aimAdaptiveLowPassJitterPx,
+            )
+        }
+
+        if (!hasAimRawTranslation) {
+            aimLastRawTranslationX = rawTx
+            aimLastRawTranslationY = rawTy
+            hasAimRawTranslation = true
+            return AimAdaptiveLowPassState(
+                blend = aimAdaptiveLowPassBlend,
+                jitterPx = 0f,
+            )
+        }
+
+        val rawDeltaX = rawTx - aimLastRawTranslationX
+        val rawDeltaY = rawTy - aimLastRawTranslationY
+        aimLastRawTranslationX = rawTx
+        aimLastRawTranslationY = rawTy
+
+        if (!hasAimRawDelta) {
+            aimLastRawDeltaX = rawDeltaX
+            aimLastRawDeltaY = rawDeltaY
+            hasAimRawDelta = true
+            return AimAdaptiveLowPassState(
+                blend = aimAdaptiveLowPassBlend,
+                jitterPx = 0f,
+            )
+        }
+
+        aimAdaptiveLowPassJitterPx = calculateAimAdaptiveJitterPx(
+            rawDeltaX = rawDeltaX,
+            rawDeltaY = rawDeltaY,
+            previousRawDeltaX = aimLastRawDeltaX,
+            previousRawDeltaY = aimLastRawDeltaY,
+        )
+        aimLastRawDeltaX = rawDeltaX
+        aimLastRawDeltaY = rawDeltaY
+
+        val jitterRange = (AIM_ADAPTIVE_LOW_PASS_FULL_JITTER_PX - AIM_ADAPTIVE_LOW_PASS_START_JITTER_PX)
+            .coerceAtLeast(0.001f)
+        val targetBlend = smoothStep(
+            ((aimAdaptiveLowPassJitterPx - AIM_ADAPTIVE_LOW_PASS_START_JITTER_PX) / jitterRange)
+                .coerceIn(0f, 1f),
+        ) * aimOutputAlphaBlend.coerceIn(0f, 1f)
+        val ratePerSecond = if (targetBlend > aimAdaptiveLowPassBlend) {
+            AIM_ADAPTIVE_LOW_PASS_BLEND_IN_PER_SECOND
+        } else {
+            AIM_ADAPTIVE_LOW_PASS_BLEND_OUT_PER_SECOND
+        }
+        aimAdaptiveLowPassBlend = moveToward(
+            current = aimAdaptiveLowPassBlend,
+            target = targetBlend,
+            step = ratePerSecond * dtSec.coerceAtLeast(0f),
+        )
+        return AimAdaptiveLowPassState(
+            blend = aimAdaptiveLowPassBlend,
+            jitterPx = aimAdaptiveLowPassJitterPx,
+        )
+    }
+
+    private fun calculateAimAdaptiveJitterPx(
+        rawDeltaX: Float,
+        rawDeltaY: Float,
+        previousRawDeltaX: Float,
+        previousRawDeltaY: Float,
+    ): Float {
+        val deltaMag = sqrt(rawDeltaX * rawDeltaX + rawDeltaY * rawDeltaY)
+        val previousDeltaMag = sqrt(previousRawDeltaX * previousRawDeltaX + previousRawDeltaY * previousRawDeltaY)
+        if (deltaMag < AIM_ADAPTIVE_LOW_PASS_MIN_DELTA_PX ||
+            previousDeltaMag < AIM_ADAPTIVE_LOW_PASS_MIN_DELTA_PX
+        ) {
+            return 0f
+        }
+
+        val dot = rawDeltaX * previousRawDeltaX + rawDeltaY * previousRawDeltaY
+        val reverseAlignment = (-dot / (deltaMag * previousDeltaMag)).coerceIn(0f, 1f)
+        if (reverseAlignment <= 0f) return 0f
+
+        return min(deltaMag, previousDeltaMag) * reverseAlignment
+    }
+
+    private fun applyAimMicroJitterClamp(
+        targetX: Float,
+        targetY: Float,
+        currentX: Float,
+        currentY: Float,
+        aimBlend: Float,
+        releaseBlend: Float,
+        reAimBlend: Float,
+        softBoundaryActive: Boolean,
+    ): AimMicroJitterClampState {
+        val requestedStepX = targetX - currentX
+        val requestedStepY = targetY - currentY
+        val requestedStepPx = calculateMagnitude(requestedStepX, requestedStepY)
+        val maxStepChangePx = AIM_MICRO_JITTER_CLAMP_STEP_CHANGE_PX
+        val eligible = AIM_MICRO_JITTER_CLAMP_ENABLED &&
+            maxStepChangePx > 0f &&
+            aimBlend >= AIM_MICRO_JITTER_CLAMP_MIN_AIM_BLEND &&
+            releaseBlend <= AIM_MICRO_JITTER_CLAMP_MAX_RELEASE_BLEND &&
+            reAimBlend <= AIM_MICRO_JITTER_CLAMP_MAX_RE_AIM_BLEND &&
+            !softBoundaryActive
+
+        if (!eligible) {
+            resetAimMicroJitterClampHistory()
+            return AimMicroJitterClampState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                stepPx = requestedStepPx,
+                stepChangePx = 0f,
+                maxStepChangePx = maxStepChangePx,
+                reverseAlignment = 0f,
+                strongStepReversal = false,
+            )
+        }
+
+        if (!hasAimMicroJitterStep) {
+            aimLastMicroJitterStepX = requestedStepX
+            aimLastMicroJitterStepY = requestedStepY
+            hasAimMicroJitterStep = true
+            return AimMicroJitterClampState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                stepPx = requestedStepPx,
+                stepChangePx = 0f,
+                maxStepChangePx = maxStepChangePx,
+                reverseAlignment = 0f,
+                strongStepReversal = false,
+            )
+        }
+
+        val stepChangeX = requestedStepX - aimLastMicroJitterStepX
+        val stepChangeY = requestedStepY - aimLastMicroJitterStepY
+        val stepChangePx = calculateMagnitude(stepChangeX, stepChangeY)
+        val reverseAlignment = calculateReverseAlignment(
+            x1 = requestedStepX,
+            y1 = requestedStepY,
+            x2 = aimLastMicroJitterStepX,
+            y2 = aimLastMicroJitterStepY,
+        )
+        val strongStepReversal = reverseAlignment >= AIM_MICRO_JITTER_CLAMP_REVERSAL_BYPASS_ALIGNMENT &&
+            requestedStepPx >= AIM_MICRO_JITTER_CLAMP_REVERSAL_MIN_STEP_PX &&
+            calculateMagnitude(aimLastMicroJitterStepX, aimLastMicroJitterStepY) >=
+                AIM_MICRO_JITTER_CLAMP_REVERSAL_MIN_STEP_PX
+        if (strongStepReversal) {
+            // A strong rebound should follow the new direction; slew-limiting it would keep old-direction output.
+            aimLastMicroJitterStepX = requestedStepX
+            aimLastMicroJitterStepY = requestedStepY
+            return AimMicroJitterClampState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                stepPx = requestedStepPx,
+                stepChangePx = stepChangePx,
+                maxStepChangePx = maxStepChangePx,
+                reverseAlignment = reverseAlignment,
+                strongStepReversal = true,
+            )
+        }
+        if (stepChangePx <= maxStepChangePx) {
+            aimLastMicroJitterStepX = requestedStepX
+            aimLastMicroJitterStepY = requestedStepY
+            return AimMicroJitterClampState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                stepPx = requestedStepPx,
+                stepChangePx = stepChangePx,
+                maxStepChangePx = maxStepChangePx,
+                reverseAlignment = reverseAlignment,
+                strongStepReversal = false,
+            )
+        }
+
+        val changeScale = maxStepChangePx / stepChangePx
+        val limitedStepX = aimLastMicroJitterStepX + stepChangeX * changeScale
+        val limitedStepY = aimLastMicroJitterStepY + stepChangeY * changeScale
+        aimLastMicroJitterStepX = limitedStepX
+        aimLastMicroJitterStepY = limitedStepY
+        return AimMicroJitterClampState(
+            targetX = currentX + limitedStepX,
+            targetY = currentY + limitedStepY,
+            active = true,
+            stepPx = calculateMagnitude(limitedStepX, limitedStepY),
+            stepChangePx = stepChangePx,
+            maxStepChangePx = maxStepChangePx,
+            reverseAlignment = reverseAlignment,
+            strongStepReversal = false,
+        )
+    }
+
+    private fun resetAimMicroJitterClampHistory() {
+        hasAimMicroJitterStep = false
+        aimLastMicroJitterStepX = 0f
+        aimLastMicroJitterStepY = 0f
+    }
+
+    private fun applyAimStillHold(
+        targetX: Float,
+        targetY: Float,
+        currentX: Float,
+        currentY: Float,
+        rawStepX: Float,
+        rawStepY: Float,
+        rps: Float,
+        aimBlend: Float,
+        releaseBlend: Float,
+        reAimBlend: Float,
+        softBoundaryActive: Boolean,
+        dtSec: Float,
+    ): AimStillHoldState {
+        val requestedStepX = targetX - currentX
+        val requestedStepY = targetY - currentY
+        val requestedStepPx = calculateMagnitude(requestedStepX, requestedStepY)
+        val rawStepPx = calculateMagnitude(rawStepX, rawStepY)
+        val maxStepPx = AIM_STILL_HOLD_MAX_STEP_PX
+        val maxRawStepPx = AIM_STILL_HOLD_MAX_RAW_STEP_PX
+        val canHold = AIM_STILL_HOLD_ENABLED &&
+            aimBlend >= AIM_STILL_HOLD_MIN_AIM_BLEND &&
+            releaseBlend <= AIM_MICRO_JITTER_CLAMP_MAX_RELEASE_BLEND &&
+            reAimBlend <= AIM_MICRO_JITTER_CLAMP_MAX_RE_AIM_BLEND &&
+            !softBoundaryActive
+
+        if (!canHold) {
+            aimStillHoldActive = false
+            aimStillHoldBlend = 0f
+            return AimStillHoldState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                blend = 0f,
+                stepPx = requestedStepPx,
+                rawStepPx = rawStepPx,
+                maxStepPx = maxStepPx,
+            )
+        }
+
+        val requestedStepRatio = requestedStepPx / maxStepPx.coerceAtLeast(0.001f)
+        val rawStepRatio = rawStepPx / maxRawStepPx.coerceAtLeast(0.001f)
+        val stepWindowRatio = max(requestedStepRatio, rawStepRatio)
+        val withinStillRps = if (aimStillHoldActive) {
+            rps <= AIM_STILL_HOLD_EXIT_RPS
+        } else {
+            rps <= AIM_STILL_HOLD_ENTER_RPS
+        }
+        val withinStepWindow = if (aimStillHoldActive) {
+            stepWindowRatio <= AIM_STILL_HOLD_SOFT_EXIT_STEP_RATIO
+        } else {
+            stepWindowRatio <= 1f
+        }
+        val shouldHold = withinStillRps && withinStepWindow
+
+        aimStillHoldActive = shouldHold
+        aimStillHoldBlend = moveToward(
+            current = aimStillHoldBlend,
+            target = if (shouldHold) 1f else 0f,
+            step = if (shouldHold) {
+                AIM_STILL_HOLD_BLEND_IN_PER_SECOND
+            } else {
+                AIM_STILL_HOLD_BLEND_OUT_PER_SECOND
+            } * dtSec.coerceAtLeast(0f),
+        )
+
+        val stepFade = 1f - smoothStep(
+            (stepWindowRatio - AIM_STILL_HOLD_FULL_STEP_RATIO) /
+                (AIM_STILL_HOLD_SOFT_EXIT_STEP_RATIO - AIM_STILL_HOLD_FULL_STEP_RATIO)
+                    .coerceAtLeast(0.001f),
+        )
+        val effectiveBlend = aimStillHoldBlend * stepFade
+
+        if (effectiveBlend <= 0.001f || requestedStepPx <= 0.001f) {
+            return AimStillHoldState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                blend = effectiveBlend,
+                stepPx = requestedStepPx,
+                rawStepPx = rawStepPx,
+                maxStepPx = maxStepPx,
+            )
+        }
+
+        val stepScale = lerp(1f, AIM_STILL_HOLD_STEP_SCALE, effectiveBlend)
+        return AimStillHoldState(
+            targetX = currentX + requestedStepX * stepScale,
+            targetY = currentY + requestedStepY * stepScale,
+            active = true,
+            blend = effectiveBlend,
+            stepPx = requestedStepPx * stepScale,
+            rawStepPx = rawStepPx,
+            maxStepPx = maxStepPx,
+        )
+    }
+
+    private fun applyVisualStillGate(
+        targetX: Float,
+        targetY: Float,
+        currentX: Float,
+        currentY: Float,
+        rps: Float,
+        aimBlend: Float,
+        releaseBlend: Float,
+        reAimBlend: Float,
+        softBoundaryActive: Boolean,
+        motionTimestampNs: Long,
+        dtSec: Float,
+    ): VisualStillGateState {
+        val requestedStepX = targetX - currentX
+        val requestedStepY = targetY - currentY
+        val requestedStepPx = calculateMagnitude(requestedStepX, requestedStepY)
+        val feedback = latestVisualMotionFeedback
+        val visualAgeMs = if (feedback != null && motionTimestampNs > 0L) {
+            abs(motionTimestampNs - feedback.timestampNs) / 1_000_000f
+        } else {
+            -1f
+        }
+        val visualRawDx = feedback?.rawDx ?: 0f
+        val visualRawDy = feedback?.rawDy ?: 0f
+        val visualRawMag = calculateMagnitude(visualRawDx, visualRawDy)
+        val visualValid = feedback?.valid == true
+        val visualHitSearchBoundary = feedback?.hitSearchBoundary == true
+        val visualScore = feedback?.score ?: 0f
+        val feedbackUsable = VISUAL_STILL_GATE_ENABLED &&
+            config.visualStillGateEnabled &&
+            visualValid &&
+            !visualHitSearchBoundary &&
+            visualAgeMs >= 0f &&
+            visualAgeMs <= VISUAL_STILL_GATE_MAX_FEEDBACK_AGE_MS
+        val eligible = feedbackUsable &&
+            aimBlend >= VISUAL_STILL_GATE_MIN_AIM_BLEND &&
+            releaseBlend <= AIM_MICRO_JITTER_CLAMP_MAX_RELEASE_BLEND &&
+            reAimBlend <= AIM_MICRO_JITTER_CLAMP_MAX_RE_AIM_BLEND &&
+            rps <= VISUAL_STILL_GATE_MAX_RPS &&
+            !softBoundaryActive
+
+        if (!feedbackUsable || !eligible || visualRawMag >= VISUAL_STILL_GATE_MOVING_RAW_BYPASS_PX) {
+            visualStillGateActive = false
+            visualStillGateBlend = 0f
+            return VisualStillGateState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                blend = 0f,
+                targetStepPx = requestedStepPx,
+                visualValid = visualValid,
+                visualHitSearchBoundary = visualHitSearchBoundary,
+                visualAgeMs = visualAgeMs,
+                visualRawDx = visualRawDx,
+                visualRawDy = visualRawDy,
+                visualRawMag = visualRawMag,
+                visualScore = visualScore,
+            )
+        }
+
+        val largeStep = if (visualStillGateActive) {
+            requestedStepPx >= VISUAL_STILL_GATE_TARGET_STEP_EXIT_PX
+        } else {
+            requestedStepPx >= VISUAL_STILL_GATE_TARGET_STEP_ENTER_PX
+        }
+        visualStillGateActive = visualRawMag <= VISUAL_STILL_GATE_STILL_RAW_PX && largeStep
+        val targetBlend = if (visualStillGateActive) 1f else 0f
+        val blendRate = if (targetBlend > visualStillGateBlend) {
+            VISUAL_STILL_GATE_BLEND_IN_PER_SECOND
+        } else {
+            VISUAL_STILL_GATE_BLEND_OUT_PER_SECOND
+        }
+        visualStillGateBlend = moveToward(
+            current = visualStillGateBlend,
+            target = targetBlend,
+            step = blendRate * dtSec.coerceAtLeast(0f),
+        )
+
+        if (visualStillGateBlend <= 0.001f || requestedStepPx <= 0.001f) {
+            return VisualStillGateState(
+                targetX = targetX,
+                targetY = targetY,
+                active = false,
+                blend = visualStillGateBlend,
+                targetStepPx = requestedStepPx,
+                visualValid = visualValid,
+                visualHitSearchBoundary = visualHitSearchBoundary,
+                visualAgeMs = visualAgeMs,
+                visualRawDx = visualRawDx,
+                visualRawDy = visualRawDy,
+                visualRawMag = visualRawMag,
+                visualScore = visualScore,
+            )
+        }
+
+        val stepScale = lerp(1f, VISUAL_STILL_GATE_STEP_SCALE, visualStillGateBlend)
+        return VisualStillGateState(
+            targetX = currentX + requestedStepX * stepScale,
+            targetY = currentY + requestedStepY * stepScale,
+            active = true,
+            blend = visualStillGateBlend,
+            targetStepPx = requestedStepPx,
+            visualValid = visualValid,
+            visualHitSearchBoundary = visualHitSearchBoundary,
+            visualAgeMs = visualAgeMs,
+            visualRawDx = visualRawDx,
+            visualRawDy = visualRawDy,
+            visualRawMag = visualRawMag,
+            visualScore = visualScore,
+        )
+    }
+
+    private fun calculateMagnitude(x: Float, y: Float): Float {
+        return sqrt(x * x + y * y)
+    }
+
+    private fun calculateReverseAlignment(x1: Float, y1: Float, x2: Float, y2: Float): Float {
+        val mag1 = calculateMagnitude(x1, y1)
+        val mag2 = calculateMagnitude(x2, y2)
+        if (mag1 <= 0.001f || mag2 <= 0.001f) return 0f
+        return (-(x1 * x2 + y1 * y2) / (mag1 * mag2)).coerceIn(0f, 1f)
     }
 
     private fun updateOutputAxis(
@@ -948,6 +1746,13 @@ class GyroPreviewStabilizer(
         )
     }
 
+    private fun resolveOutputStepDeltaSec(dtSec: Float): Float {
+        return min(
+            dtSec.coerceAtLeast(0.001f),
+            OUTPUT_RATE_LIMIT_MAX_DT_MS / 1000f,
+        )
+    }
+
     private fun limitCorrectionRad(
         correctionRad: Float,
         maxTranslationPx: Float,
@@ -975,6 +1780,7 @@ class GyroPreviewStabilizer(
             reAimStillDurationSec = 0f
             reAimActive = false
             lastReAimTrigger = ""
+            reAimEdgeFrames = 0
             return ""
         }
 
@@ -982,12 +1788,16 @@ class GyroPreviewStabilizer(
         val enterRatio = config.reAimResidualEnterRatio.coerceIn(0.05f, 0.98f)
         val exitRatio = min(config.reAimResidualExitRatio.coerceIn(0f, 0.95f), enterRatio - 0.01f)
             .coerceAtLeast(0f)
-        val edgeActive = lastTransform.softBoundaryActiveX ||
+        val boundaryActive = lastTransform.softBoundaryActiveX ||
             lastTransform.softBoundaryActiveY ||
             lastTransform.translationClampedX ||
-            lastTransform.translationClampedY ||
-            lastTransform.outputLimitedX ||
-            lastTransform.outputLimitedY
+            lastTransform.translationClampedY
+        reAimEdgeFrames = if (boundaryActive) {
+            min(reAimEdgeFrames + 1, RE_AIM_EDGE_CONFIRM_FRAMES)
+        } else {
+            0
+        }
+        val edgeActive = reAimEdgeFrames >= RE_AIM_EDGE_CONFIRM_FRAMES
         val rpsActive = rps >= rpsThreshold
         val residualActive = residualLevelRatio >= enterRatio
         if (rpsActive || residualActive || edgeActive) {
@@ -1149,8 +1959,7 @@ class GyroPreviewStabilizer(
         if (rps >= release) return 0f
 
         val t = ((rps - threshold) / (release - threshold)).coerceIn(0f, 1f)
-        val smoothT = t * t * (3f - 2f * t)
-        return 1f - smoothT
+        return 1f - smoothStep(t)
     }
 
     private fun resolveEffectiveZoom(
@@ -1198,9 +2007,64 @@ class GyroPreviewStabilizer(
         return start + (end - start) * t.coerceIn(0f, 1f)
     }
 
-    private companion object {
+    private fun smoothStep(t: Float): Float {
+        val x = t.coerceIn(0f, 1f)
+        return x * x * (3f - 2f * x)
+    }
+
+    private fun moveToward(current: Float, target: Float, step: Float): Float {
+        val safeStep = step.coerceAtLeast(0f)
+        return when {
+            target > current -> min(target, current + safeStep)
+            target < current -> max(target, current - safeStep)
+            else -> current
+        }.coerceIn(0f, 1f)
+    }
+
+    companion object {
+        const val OUTPUT_RATE_LIMIT_MAX_DT_MS = 33.4f
+
+        const val AIM_MICRO_JITTER_CLAMP_ENABLED = false
+        const val AIM_MICRO_JITTER_CLAMP_MIN_AIM_BLEND = 0.95f
+        const val AIM_MICRO_JITTER_CLAMP_MAX_RELEASE_BLEND = 0.001f
+        const val AIM_MICRO_JITTER_CLAMP_MAX_RE_AIM_BLEND = 0.001f
+        const val AIM_MICRO_JITTER_CLAMP_STEP_CHANGE_PX = 14f
+        private const val AIM_MICRO_JITTER_CLAMP_REVERSAL_MIN_STEP_PX = 4f
+        private const val AIM_MICRO_JITTER_CLAMP_REVERSAL_BYPASS_ALIGNMENT = 0.35f
+
+        const val AIM_STILL_HOLD_ENABLED = true
+        const val AIM_STILL_HOLD_MIN_AIM_BLEND = 0.95f
+        const val AIM_STILL_HOLD_ENTER_RPS = 0.005f
+        const val AIM_STILL_HOLD_EXIT_RPS = 0.0065f
+        const val AIM_STILL_HOLD_MAX_STEP_PX = 6f
+        const val AIM_STILL_HOLD_MAX_RAW_STEP_PX = 6f
+        const val AIM_STILL_HOLD_STEP_SCALE = 0.35f
+        const val AIM_STILL_HOLD_FULL_STEP_RATIO = 0.35f
+        const val AIM_STILL_HOLD_SOFT_EXIT_STEP_RATIO = 1.15f
+        private const val AIM_STILL_HOLD_BLEND_IN_PER_SECOND = 10f
+        private const val AIM_STILL_HOLD_BLEND_OUT_PER_SECOND = 14f
+
+        const val VISUAL_STILL_GATE_ENABLED = true
+        const val VISUAL_STILL_GATE_MIN_AIM_BLEND = 0.95f
+        const val VISUAL_STILL_GATE_MAX_FEEDBACK_AGE_MS = 70f
+        const val VISUAL_STILL_GATE_STILL_RAW_PX = 2f
+        const val VISUAL_STILL_GATE_MOVING_RAW_BYPASS_PX = 5f
+        const val VISUAL_STILL_GATE_TARGET_STEP_ENTER_PX = 4f
+        const val VISUAL_STILL_GATE_TARGET_STEP_EXIT_PX = 2.5f
+        const val VISUAL_STILL_GATE_MAX_RPS = 0.009f
+        const val VISUAL_STILL_GATE_STEP_SCALE = 0.20f
+        private const val VISUAL_STILL_GATE_BLEND_IN_PER_SECOND = 12f
+        private const val VISUAL_STILL_GATE_BLEND_OUT_PER_SECOND = 16f
+
         private val RAD_TO_DEGREES = 180f / PI.toFloat()
         private const val GYRO_BUFFER_DURATION_NS = 1_500_000_000L
         private const val MAX_FRAME_SYNC_DELTA_SEC = 0.080f
+        private const val MAX_FRAME_SYNC_GYRO_EXTRAPOLATION_NS = 50_000_000L
+        private const val MAX_FRAME_SYNC_GYRO_GAP_NS = 50_000_000L
+        private const val AIM_ADAPTIVE_LOW_PASS_MIN_DELTA_PX = 3f
+        private const val AIM_ADAPTIVE_LOW_PASS_START_JITTER_PX = 10f
+        private const val AIM_ADAPTIVE_LOW_PASS_FULL_JITTER_PX = 28f
+        private const val AIM_ADAPTIVE_LOW_PASS_BLEND_IN_PER_SECOND = 10f
+        private const val AIM_ADAPTIVE_LOW_PASS_BLEND_OUT_PER_SECOND = 4f
     }
 }

@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
+import android.hardware.camera2.params.DynamicRangeProfiles
+import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabilities
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.Image
@@ -37,17 +39,33 @@ data class CameraFrameTiming(
  * - TextureView Surface：预览显示
  * - ImageReader Surface (YUV_420_888)：检测分析
  *
- * 防抖：OIS 默认关闭；EIS 作为实验项由用户显式选择模式。
+ * 防抖：OIS 默认关闭；系统 EIS 固定关闭，自研补偿由显示层负责。
  */
 class Camera2Controller(private val context: Context) {
 
     companion object {
         private const val VIDEO_STABILIZATION_MODE_PREVIEW = 2
+        const val SHADING_MODE_AUTO = -1
+
+        fun shadingModeChoices(): List<Int> = listOf(
+            SHADING_MODE_AUTO,
+            CaptureRequest.SHADING_MODE_OFF,
+            CaptureRequest.SHADING_MODE_FAST,
+            CaptureRequest.SHADING_MODE_HIGH_QUALITY,
+        )
+
+        fun getDefaultShadingMode(): Int = SHADING_MODE_AUTO
+
+        fun shadingModeName(mode: Int): String = when (mode) {
+            SHADING_MODE_AUTO -> "AUTO"
+            CaptureRequest.SHADING_MODE_OFF -> "OFF"
+            CaptureRequest.SHADING_MODE_FAST -> "FAST"
+            CaptureRequest.SHADING_MODE_HIGH_QUALITY -> "QUALITY"
+            else -> "UNKNOWN($mode)"
+        }
 
         fun videoStabilizationModeChoices(): List<Int> = listOf(
             CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
-            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON,
-            VIDEO_STABILIZATION_MODE_PREVIEW,
         )
 
         fun getDefaultVideoStabilizationMode(): Int = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
@@ -76,6 +94,13 @@ class Camera2Controller(private val context: Context) {
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var pendingZoomRatio: Float = 1f
     private var oisRequested: Boolean = false
+    private var hdrPreviewRequested = false
+    private var pendingShadingMode = SHADING_MODE_AUTO
+    private var availableShadingModes = intArrayOf()
+    private var shadingCharacteristicsKnown = false
+    private var sensorInfoLensShadingApplied: Boolean? = null
+    private var lastShadingResult: Int? = null
+    @Volatile private var cameraGeneration = 0L
     private var pendingVideoStabilizationMode: Int = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
     private var availableVideoStabilizationModes: IntArray = intArrayOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
     private var lastActivePhysicalCameraId: String? = null
@@ -103,6 +128,12 @@ class Camera2Controller(private val context: Context) {
     var onActivePhysicalCameraChanged: ((String?) -> Unit)? = null
     var onVideoStabilizationStateChanged: ((Int, String) -> Unit)? = null
     var onFrameTimingChanged: ((CameraFrameTiming) -> Unit)? = null
+    var onShadingModeStateChanged: ((Int, String) -> Unit)? = null
+
+    /** 回调在分析线程运行，只借用图像；Image 的关闭仍由控制器负责。 */
+    @Volatile var onAnalysisImageAvailable: ((Image, Int) -> Unit)? = null
+    private var analysisThread: HandlerThread? = null
+    private var analysisHandler: Handler? = null
 
     val isActive: Boolean get() = cameraDevice != null
     private var surfaceTexture: SurfaceTexture? = null
@@ -127,9 +158,16 @@ class Camera2Controller(private val context: Context) {
     fun start() {
         cameraThread = HandlerThread("CameraThread").apply { start() }
         cameraHandler = Handler(cameraThread!!.looper)
+        analysisThread = HandlerThread("PreviewAnalysisThread").apply { start() }
+        analysisHandler = Handler(analysisThread!!.looper)
     }
 
     fun stop() {
+        onAnalysisImageAvailable = null
+        analysisThread?.quitSafely()
+        try { analysisThread?.join() } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        analysisThread = null
+        analysisHandler = null
         cameraThread?.quitSafely()
         try { cameraThread?.join() } catch (_: InterruptedException) {}
         cameraThread = null
@@ -141,12 +179,30 @@ class Camera2Controller(private val context: Context) {
         st.setDefaultBufferSize(previewSize.width, previewSize.height)
     }
 
+    /** 输出动态范围变更前必须关闭旧相机，并重建对应 HDR/SDR 的 GL 表面。 */
+    fun setHdrPreviewEnabled(enabled: Boolean) {
+        hdrPreviewRequested = enabled
+        if (enabled) pendingVideoStabilizationMode = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+    }
+
     @SuppressLint("MissingPermission")
     fun openCamera(
         lens: LensCandidate,
         surface: Surface,
         strictPhysical: Boolean = false,
     ) {
+        if (hdrPreviewRequested) {
+            if (strictPhysical) {
+                onError?.invoke("HDR 预览不支持校准采集")
+                return
+            }
+            val failure = HdrPreviewCapabilities.checkCamera(context, lens).exceptionOrNull()
+            if (failure != null) {
+                onError?.invoke(failure.message ?: "当前相机不支持 HDR 预览")
+                return
+            }
+        }
+        val generation = ++cameraGeneration
         currentLens = lens
         currentStrictPhysical = strictPhysical &&
             lens.physicalId != null &&
@@ -159,6 +215,7 @@ class Camera2Controller(private val context: Context) {
         sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         updateExposureCompensationCharacteristics(chars)
         updateVideoStabilizationCharacteristics(chars)
+        updateShadingCharacteristics(chars)
 
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         if (map != null) {
@@ -176,16 +233,22 @@ class Camera2Controller(private val context: Context) {
         manager.openCamera(lens.cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
                 Log.d("Camera2Ctrl", ">>> onOpened: ${camera.id}")
+                if (generation != cameraGeneration) {
+                    camera.close()
+                    return
+                }
                 cameraDevice = camera
                 createSession(camera, lens, surface, currentStrictPhysical)
             }
             override fun onDisconnected(camera: CameraDevice) {
                 camera.close()
+                if (generation != cameraGeneration) return
                 cameraDevice = null
                 onCameraClosed?.invoke()
             }
             override fun onError(camera: CameraDevice, error: Int) {
                 camera.close()
+                if (generation != cameraGeneration) return
                 cameraDevice = null
                 onError?.invoke("Camera error: $error")
             }
@@ -241,7 +304,7 @@ class Camera2Controller(private val context: Context) {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         closeLatestAnalysisImage()
         analysisImageReader?.close()
-        analysisImageReader = if (usePhysicalOutput) {
+        analysisImageReader = if (usePhysicalOutput || hdrPreviewRequested) {
             null
         } else {
             ImageReader.newInstance(
@@ -255,11 +318,24 @@ class Camera2Controller(private val context: Context) {
                         Log.w("Camera2Ctrl", "analysis image acquire failed: ${e.message}")
                         null
                     } ?: return@setOnImageAvailableListener
+                    if (reader !== analysisImageReader) {
+                        image.close()
+                        return@setOnImageAvailableListener
+                    }
+                    try {
+                        onAnalysisImageAvailable?.invoke(image, sensorOrientation)
+                    } catch (error: Exception) {
+                        Log.w("Camera2Ctrl", "visual motion analysis failed", error)
+                    }
                     synchronized(analysisImageLock) {
+                        if (reader !== analysisImageReader) {
+                            image.close()
+                            return@synchronized
+                        }
                         latestAnalysisImage?.close()
                         latestAnalysisImage = image
                     }
-                }, cameraHandler)
+                }, analysisHandler ?: cameraHandler)
             }
         }
 
@@ -268,8 +344,44 @@ class Camera2Controller(private val context: Context) {
             analysisImageReader?.surface?.let { addTarget(it) }
         }
 
-        if (usePhysicalOutput) createPhysicalSession(camera, lens, surface, strictPhysical)
+        if (hdrPreviewRequested && Build.VERSION.SDK_INT >= 33) createHdrSession(camera, lens, surface)
+        else if (usePhysicalOutput) createPhysicalSession(camera, lens, surface, strictPhysical)
         else createLogicalSession(camera, surface)
+    }
+
+    @androidx.annotation.RequiresApi(33)
+    private fun createHdrSession(camera: CameraDevice, lens: LensCandidate, surface: Surface) {
+        try {
+            val output = OutputConfiguration(surface).apply {
+                setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
+            }
+            camera.createCaptureSession(SessionConfiguration(
+                SessionConfiguration.SESSION_REGULAR, listOf(output),
+                java.util.concurrent.Executor { command -> cameraHandler?.post(command) },
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (cameraDevice !== camera || !hdrPreviewRequested) {
+                            session.close()
+                            return
+                        }
+                        Log.i("Camera2Ctrl", "hdr-preview: configured HLG10 camera=${lens.cameraId} " +
+                            "output=logical size=$previewSize yuv=false")
+                        captureSession = session
+                        startPreview(session)
+                    }
+
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        session.close()
+                        if (cameraDevice === camera && hdrPreviewRequested) {
+                            // 不在 HDR GL 表面上暗中重试 SDR，也不偷偷换成逻辑镜头。
+                            onError?.invoke("当前镜头或分辨率的 HLG10 会话被设备拒绝")
+                        }
+                    }
+                },
+            ))
+        } catch (error: Exception) {
+            onError?.invoke("HDR 预览创建失败：${error.message}")
+        }
     }
 
     @SuppressLint("NewApi")
@@ -289,8 +401,13 @@ class Camera2Controller(private val context: Context) {
             camera.createCaptureSession(SessionConfiguration(
                 SessionConfiguration.SESSION_REGULAR, configs, executor,
                 object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) { captureSession = session; startPreview(session) }
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (cameraDevice !== camera) { session.close(); return }
+                        captureSession = session
+                        startPreview(session)
+                    }
                     override fun onConfigureFailed(session: CameraCaptureSession) {
+                        if (cameraDevice !== camera) { session.close(); return }
                         if (strictPhysical) {
                             onError?.invoke("Physical session configuration failed")
                         } else {
@@ -313,8 +430,15 @@ class Camera2Controller(private val context: Context) {
         analysisImageReader?.surface?.let { surfaces.add(it) }
         camera.createCaptureSession(surfaces,
             object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) { captureSession = session; startPreview(session) }
-                override fun onConfigureFailed(session: CameraCaptureSession) { onError?.invoke("Session configuration failed") }
+                override fun onConfigured(session: CameraCaptureSession) {
+                    if (cameraDevice !== camera) { session.close(); return }
+                    captureSession = session
+                    startPreview(session)
+                }
+                override fun onConfigureFailed(session: CameraCaptureSession) {
+                    if (cameraDevice !== camera) { session.close(); return }
+                    onError?.invoke("Session configuration failed")
+                }
             }, cameraHandler)
     }
 
@@ -333,6 +457,12 @@ class Camera2Controller(private val context: Context) {
         request: CaptureRequest,
         result: TotalCaptureResult,
     ) {
+        val shadingResult = result.get(CaptureResult.SHADING_MODE)
+        if (shadingResult != lastShadingResult) {
+            lastShadingResult = shadingResult
+            Log.i("Camera2Ctrl", "lsc-result: request=${request.get(CaptureRequest.SHADING_MODE)}, " +
+                "result=$shadingResult frame=${result.frameNumber}")
+        }
         val requestedVideoMode = request.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE)
         val resultVideoMode = result.get(CaptureResult.CONTROL_VIDEO_STABILIZATION_MODE)
         val requestedOisMode = request.get(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE)
@@ -381,6 +511,7 @@ class Camera2Controller(private val context: Context) {
 
         applyStabilization(builder, lens, notifyUnsupported = true)
         applyExposureCompensation(builder)
+        applyShadingMode(builder, notify = true)
 
         // 初始 zoom。普通预览走父逻辑相机 zoom 范围；双摄 strictPhysical 保持物理会话范围。
         val usedControlZoom = applyPreferredZoom(builder, lens, pendingZoomRatio)
@@ -484,7 +615,92 @@ class Camera2Controller(private val context: Context) {
 
     fun getVideoStabilizationMode(): Int = pendingVideoStabilizationMode
 
+    fun getShadingMode(): Int = pendingShadingMode
+
+    fun getSensorInfoLensShadingApplied(): Boolean? = sensorInfoLensShadingApplied
+
+    fun getAvailableShadingModes(): List<Int> {
+        return availableShadingModes
+            .toList()
+            .distinct()
+            .sorted()
+    }
+
+    fun getSelectableShadingModes(): List<Int> {
+        if (availableShadingModes.isEmpty()) return listOf(SHADING_MODE_AUTO)
+        return shadingModeChoices().filter { mode ->
+            mode == SHADING_MODE_AUTO || mode in availableShadingModes
+        }
+    }
+
+    fun setShadingMode(mode: Int): Result<Int> {
+        if (mode !in shadingModeChoices()) {
+            return Result.failure(IllegalArgumentException("未知 Shading 模式: $mode"))
+        }
+        if (shadingCharacteristicsKnown && mode != SHADING_MODE_AUTO && mode !in availableShadingModes) {
+            return Result.failure(
+                IllegalStateException("当前镜头不支持 Shading ${shadingModeName(mode)}")
+            )
+        }
+
+        val previous = pendingShadingMode
+        pendingShadingMode = mode
+        val builder = previewRequestBuilder
+        val session = captureSession
+        if (builder == null || session == null) {
+            publishShadingModeState("pending")
+            return Result.success(mode)
+        }
+
+        return try {
+            applyShadingMode(builder, notify = false)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+            publishShadingModeState("set")
+            Result.success(mode)
+        } catch (e: Exception) {
+            pendingShadingMode = previous
+            applyShadingMode(builder, notify = false)
+            Log.w("Camera2Ctrl", "Shading request failed", e)
+            publishShadingModeState("failed")
+            Result.failure(e)
+        }
+    }
+
+    private fun applyShadingMode(builder: CaptureRequest.Builder, notify: Boolean = false) {
+        builder.set(CaptureRequest.SHADING_MODE, resolveShadingModeForRequest())
+        if (notify) publishShadingModeState("apply")
+    }
+
+    private fun resolveShadingModeForRequest(): Int? {
+        val requested = pendingShadingMode
+        if (requested == SHADING_MODE_AUTO) return null
+        if (requested !in availableShadingModes) return null
+        return requested
+    }
+
+    private fun updateShadingCharacteristics(chars: CameraCharacteristics) {
+        shadingCharacteristicsKnown = true
+        availableShadingModes = chars.get(CameraCharacteristics.SHADING_AVAILABLE_MODES) ?: intArrayOf()
+        sensorInfoLensShadingApplied = chars.get(CameraCharacteristics.SENSOR_INFO_LENS_SHADING_APPLIED)
+        lastShadingResult = null
+        if (pendingShadingMode != SHADING_MODE_AUTO && pendingShadingMode !in availableShadingModes) {
+            pendingShadingMode = SHADING_MODE_AUTO
+        }
+        publishShadingModeState("chars")
+    }
+
+    private fun publishShadingModeState(reason: String) {
+        val message = "lsc: mode=${shadingModeName(pendingShadingMode)}, reason=$reason, " +
+            "supported=${availableShadingModes.joinToString { shadingModeName(it) }}, " +
+            "lensShadingApplied=$sensorInfoLensShadingApplied"
+        Log.i("Camera2Ctrl", message)
+        onShadingModeStateChanged?.invoke(pendingShadingMode, message)
+    }
+
     fun setVideoStabilizationMode(mode: Int): Result<Int> {
+        if (mode != CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF) {
+            return Result.failure(IllegalStateException("系统 EIS 已禁用，请使用 OIS 或自研补偿"))
+        }
         val supportedModes = getAvailableVideoStabilizationModes()
         if (mode !in supportedModes) {
             return Result.failure(
@@ -543,7 +759,7 @@ class Camera2Controller(private val context: Context) {
         notifyUnsupported: Boolean,
     ) {
         val supportedVideoModes = getAvailableVideoStabilizationModes()
-        val requestedVideoMode = pendingVideoStabilizationMode
+        val requestedVideoMode = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
         val videoMode = if (requestedVideoMode in supportedVideoModes) {
             requestedVideoMode
         } else {
@@ -696,6 +912,8 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun closeCamera() {
+        cameraGeneration++
+        shadingCharacteristicsKnown = false
         val wasActive = cameraDevice != null
         try { captureSession?.close() } catch (_: Exception) {}
         captureSession = null
@@ -715,6 +933,7 @@ class Camera2Controller(private val context: Context) {
             request: CaptureRequest,
             result: TotalCaptureResult,
         ) {
+            if (session !== captureSession) return
             publishFrameTiming(result)
             publishActivePhysicalCameraId(result)
             publishStabilizationCaptureResult(request, result)

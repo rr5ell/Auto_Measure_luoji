@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [eis-hdr-lsc-sync-2026-09-15] - 2026-09-15
+
+作者：Codex Agent。
+
+### 变更
+- 同步 Auto_measure `2e14622` 的自研 EIS，包含瞄准低通、微步进平滑、重新瞄准边界确认及时间戳连续性修复；配置版本升级为 28，相关默认值随升级迁移。
+- 接入同帧 GL 图像/矩阵队列，以及默认关闭的 OpenCV 视觉静止门控；保留当前项目的逻辑相机、倍率与校准坐标模型。
+- 相机页顶部新增 HDR 开关和 LSC 模式按钮。HDR 使用 HLG10/10-bit GL，失败恢复 SDR；LSC 支持 AUTO/OFF/FAST/QUALITY、能力检查和持久化。
+- 修复根因：旧预览用固定时间节流提交矩阵，图像与补偿可能错帧；现在按相机时间戳配对，Compose 重组不能绕过配对。
+- HDR 重建预览增加会话代次与 Surface 身份检查，避免旧回调关闭新会话。
+- 按当前硬件约束，系统 EIS 固定 OFF；普通 HDR 预览同样禁止物理 Surface 绑定。
+
+### 验证
+- Debug APK 与测试 APK 已生成，6 项 JVM 测试通过；最终包设备回归 6 项通过、1 项因模拟器无 HLG 显示而跳过，360dp 小屏按钮及 LSC 持久化已验证。
+- 全量 Lint 仍有未改动模块的 8 项错误；具体分类与验证记录见 [同步说明](docs/eis-hdr-lsc-sync.md)。
+- 真机 HDR 显示、LSC 画质与长焦稳定收益待设备验证。
+
 ## [eis-yolo-filter-sync-2026-09-07] - 2026-09-07
 
 ### 变更

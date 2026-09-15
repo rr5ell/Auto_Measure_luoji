@@ -1,7 +1,11 @@
 # android-camera2-eis-experimental-toggle
 
-## Metadata
-- status: active
+## 元数据
+- 状态：deprecated（2026-09-15）；替代条目：`android-gyro-preview-stabilization`。
+- 当前规则：禁止启用系统 EIS；只允许 OIS 或应用层算法补偿。控制器拒绝 ON/PREVIEW。
+
+## 历史元数据
+- status: deprecated
 - tech: Android | Kotlin
 - tags: camera2, eis, video-stabilization, hardware-control, calibration-risk
 - canonical_code_paths:
@@ -14,7 +18,7 @@
 - last_updated: 2026-08-25
 - author: Codex Agent
 
-## 适用场景
+## 历史适用场景（已停用）
 - 需要与 `E:\StudioProjects\Auto_measure` 保持一致，提供 Camera2 EIS OFF/ON/PREVIEW 实验模式。
 - 需要在真机上验证厂商 EIS 对画面稳定、电子裁剪和坐标漂移的影响。
 
@@ -49,4 +53,4 @@
 - 未覆盖风险：不同厂商对 ON/PREVIEW 的裁剪幅度、回传 result 和坐标漂移差异，需要真机测量验证。
 
 ## 给 AI 的指令
-复用本条目时保持 EIS 默认 OFF。只有哥哥明确要求或用户在 UI 中显式选择实验模式时，才允许写入 ON/PREVIEW；涉及校准结果时必须提示并记录坐标漂移风险。
+禁止恢复本条目的 ON/PREVIEW 实验入口。系统 EIS 固定 OFF；自研补偿请复用 `android-gyro-preview-stabilization`。

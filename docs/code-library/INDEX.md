@@ -10,14 +10,14 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/update-eis-flag-threshold` |
+| 当前主要分支 | `feature/sync-eis-hdr-lsc` |
 
 ## 可复用能力
 
 | reuse_id | 能力 | 标签 | canonical code path | 状态 |
 |---|---|---|---|---|
 | android-camera2-ois-toggle | Camera2 OIS 显式开关 | android, kotlin, camera2, ois, stabilization | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
-| android-camera2-eis-experimental-toggle | Camera2 EIS 实验模式开关 | android, kotlin, camera2, eis, video-stabilization, hardware-control | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
+| android-camera2-eis-experimental-toggle | Camera2 EIS 实验模式开关 | android, kotlin, camera2, eis, video-stabilization, hardware-control | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | deprecated |
 | android-gyro-preview-stabilization | 应用层陀螺仪预览防抖 | android, kotlin, camera2, gyroscope, textureview, opengl, stabilization, calibration | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/GyroPreviewStabilizer.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt` | active |
 | android-camera2-calibration-ev-compensation | 校准期间 Camera2 AE 曝光补偿 | android, kotlin, camera2, ae, exposure-compensation, calibration | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
 | android-system-speech-hotword-loop | 中文语音热词识别循环 | android, kotlin, speech-recognition, restart-loop, hotword-matching | `app/src/main/java/com/example/auto_measure_luoji/feature/voice/domain/ChineseVoiceHotwordRecognizer.kt` | active |
@@ -38,6 +38,13 @@
 | android-camera2-active-physical-lens-display | 当前画面活跃物理镜头焦距显示 | android, kotlin, camera2, logical-multi-camera, active-physical-id, lens-display | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/data/LensScanner.kt` | active |
 | android-camera2-physical-preview-output-binding | 逻辑相机 Session 中绑定物理预览输出 | android, kotlin, camera2, logical-multi-camera, physical-output, fusion-avoidance | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | deprecated |
 
+## HDR 与 LSC
+
+| reuse_id | 能力 | 标准代码路径 | 状态 |
+|---|---|---|---|
+| android-camera2-hlg-preview | HLG10 逻辑相机预览与同帧 GL 显示 | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/hdr/HdrPreviewCapabilities.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/hdr/HlgPreviewGl.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt` | active |
+| android-camera2-lsc-toggle | LSC 能力检查、模式持久化及请求回退 | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | active |
+
 ## 参考资产
 
 - 全局资产 `flutter-sherpa-sensevoice-vad-hotwords`：`E:\StudioProjects\Speech2Text\docs\code-library\INDEX.md`
@@ -46,4 +53,4 @@
 
 ## 最后更新
 
-2026-09-07，Codex Agent。同步 Auto_measure 最新自研 EIS：新增输出加速度限幅、软边界限幅、重新瞄准释放、瞄准输出加速度和残留释放转速阈值；新增 YOLO 旗杆后处理单框阈值设置。普通预览仍保持父逻辑相机 Session，系统 Camera2 EIS 默认 OFF。
+2026-09-15，Codex Agent。同步源项目 `2e14622` 的自研 EIS 和默认参数，增加 HDR/LSC，系统 EIS 固定 OFF。

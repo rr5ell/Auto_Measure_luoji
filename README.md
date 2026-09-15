@@ -4,6 +4,10 @@ Android 自动测量工具应用。
 
 当前 Android 构建版本：`0.8.31 (831)`。
 
+## 本次更新（2026-09-15）
+
+已同步 Auto_measure `2e14622` 的自研 EIS 逻辑与默认参数。顶部提供 HDR 开关和 LSC 模式按钮；详细参数、兼容条件与验证步骤见 [同步说明](docs/eis-hdr-lsc-sync.md)。
+
 ## 技术栈
 
 - **语言**: Kotlin
@@ -52,7 +56,7 @@ app/src/main/java/com/example/auto_measure_luoji/
 - 后置镜头扫描与分类（TELE / WIDE / ULTRA_WIDE）
 - 自动锁定最大长焦镜头（eq35mm 最大）
 - 普通预览打开最大长焦候选所属父逻辑相机，保持纯逻辑相机 Session，不再用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface；实际活跃物理镜头由厂商 HAL 按逻辑多摄策略回传
-- 顶部固定区保留 `识别`、`校准` 和 `更多`，`识别` 放在首位，避免被其他按钮挤到不可见位置
+- 顶部固定区提供 `HDR`、`LSC` 和 `更多`，滚动区保留 `识别`、`校准`，`识别` 放在首位，避免被其他按钮挤到不可见位置
 - `广角/广角中` 收纳在 `更多` 菜单中，可在主界面切换到广角镜头；已在广角时再次点击会切回默认镜头，校准流程中禁用
 - 进入普通预览后直接放大到最大焦距对应的光学基准倍率 + `0.1x`，倍率滑块最低只能回到该上浮后的基准倍率，最高固定为 `24x`
 - 倍率滑块使用父逻辑相机 Camera2 `CONTROL_ZOOM_RATIO` 优先链路执行数码放大；请求超出设备 `CONTROL_ZOOM_RATIO_RANGE` 时回退 `SCALER_CROP_REGION`
@@ -65,12 +69,12 @@ app/src/main/java/com/example/auto_measure_luoji/
 - 当前镜头为长焦/非广角镜头时，普通校准保持当前逻辑相机倍率采集，且不得低于最大焦距对应的光学基准倍率 + `0.1x`
 - 普通校准和双镜头校准采集期间会把 Camera2 AE 曝光补偿切到 `-2.0 EV`，退出校准面板后恢复 `0 EV`
 - 双镜头广角 zoom 在 API 30+ 优先使用 CONTROL_ZOOM_RATIO，低版本或失败时回退 SCALER_CROP_REGION
-- `更多` 菜单提供 OIS 开关和 `防抖 EIS:OFF/ON/PREVIEW` 实验入口；当前镜头不支持或请求失败时显示 3 秒提示
+- `更多` 菜单提供 OIS 开关；系统 EIS 固定 OFF，控制器禁止 ON/PREVIEW 请求
 - `更多 -> 自研EIS` 提供应用层陀螺仪预览防抖：普通预览仍使用逻辑相机 Session，只在 TextureView/GL 显示层叠加缩放、平移和 Roll 矩阵，不改变双摄校准物理绑定逻辑
 - 自研 EIS 有效倍率按 `光学倍率 * Camera2 数码倍率 * 显示层倍率` 建模，纯 UI 放大、校准居中和防抖裁切会进入补偿计算；长焦静止瞄准时包含输出加速度限幅、软边界限幅、重新瞄准释放、大残留释放和 anti-windup 限幅回灌
 - `更多 -> 自研EIS参数` 可调整强度、跟随、裁切、方向反转、X/Y 互换、帧同步、倍率补偿、软边界、重新瞄准、瞄准稳定、Roll 补偿、诊断日志和 GL 逐帧预览实验；HUD 会显示 `display/render/release/residual/still/windup` 便于真机调参
 - `更多 -> 防抖标定` 会按相邻预览帧的亮度匹配估计实际位移，并和自研 EIS 补偿量对比，输出“反/少/多/准/弱”调参提示
-- 电子防抖 (EIS) 默认保持 OFF；用户在防抖弹窗中显式选择 ON/PREVIEW 时，会按设备支持模式写入 `CONTROL_VIDEO_STABILIZATION_MODE`，需要注意电子裁剪可能导致校准坐标漂移
+- 禁止启用系统电子防抖 (EIS)，仅使用 OIS 或应用层补偿；校准采集期间暂停应用层补偿
 
 ### 语音识别
 - 第三方语音包就绪后优先使用 Sherpa-ONNX SenseVoice + Silero VAD 本地识别，不再依赖系统语音服务。

@@ -1,5 +1,7 @@
 # Error Report
 
+本次 EIS、HDR、LSC 同步的问题根因、修复与验证见 [2026-09-15 错误报告](docs/ERROR_REPORT.md)。
+
 ## [2026-09-07] 自研 EIS 与 YOLO 旗杆阈值同步报告
 
 ### 发现的问题

@@ -11,7 +11,7 @@
 - 相关文档：
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- 最后更新：2026-09-07
+- 最后更新：2026-09-15
 - 作者：Codex Agent
 
 ## 适用场景
@@ -22,7 +22,7 @@
 - 需要在长焦边界、停稳后重新瞄准或残留释放阶段，通过软边界和加速度限幅减少补偿突变。
 
 ## 禁止场景
-- 禁止把本条目当作系统 Camera2 EIS 使用；不得默认写入 `CONTROL_VIDEO_STABILIZATION_MODE_ON/PREVIEW`。
+- 禁止启用 Camera2 系统 EIS；仅允许 OIS 或应用层物理补偿，所有请求固定 `CONTROL_VIDEO_STABILIZATION_MODE_OFF`。
 - 禁止在普通预览中使用 `OutputConfiguration.setPhysicalCameraId()` 绑定预览 Surface；该 API 只保留给双摄校准 `strictPhysical=true`。
 - 禁止在 GL 逐帧预览实验开启时继续运行 YOLO、绿光识别或 TextureView 截图校准。
 
@@ -30,11 +30,11 @@
 | 参数名 | 类型 | 默认值 | 说明 | 边界条件 |
 |---|---|---|---|---|
 | `strength` | Float | `0.75` | 基础补偿强度 | `0.0..1.5` |
-| `cropScale` | Float | `1.16` | 防抖预留裁切倍率 | `1.0..1.25` |
-| `maxShiftRatio` | Float | `0.075` | 最大平移占视图比例 | `0.0..0.10` |
+| `cropScale` | Float | `1.18` | 防抖预留裁切倍率 | `1.0..1.25` |
+| `maxShiftRatio` | Float | `0.08` | 最大平移占视图比例 | `0.0..0.10` |
 | `frameSyncEnabled` | Boolean | `true` | 是否使用 Camera2 帧时间驱动 | 关闭后由陀螺仪事件实时驱动 |
-| `frameTimestampOffsetMs` | Float | `0.0` | 帧时间补偿偏移 | `-80..80ms` |
-| `horizontalGain` / `verticalGain` | Float | `2.7 / 0.35` | 横纵轴增益 | `0.0..4.0` |
+| `frameTimestampOffsetMs` | Float | `5.0` | 帧时间补偿偏移 | `-80..80ms` |
+| `horizontalGain` / `verticalGain` | Float | `1.30 / 1.25` | 横纵轴增益 | `0.0..4.0` |
 | `rollCompensationEnabled` | Boolean | `false` | 是否补偿 Roll 旋转 | 默认关闭，避免过度旋转影响判断 |
 | `displayZoomRatio` | Float | `1.0` | Camera2 之外的显示层倍率，参与有效倍率建模 | 调用方传入，必须大于等于 `1.0` |
 | `renderScale` | Float | `cropScale` | 最终渲染缩放，用于计算可用裁切边界 | 不能小于 `cropScale` |
@@ -44,14 +44,22 @@
 | `softBoundaryStrength` | Float | `1.00` | 软边界衰减强度 | `0.0..8.0` |
 | `reAimEnabled` | Boolean | `true` | 停稳后残留较大时进入重新瞄准释放 | 禁止替代坐标校准 |
 | `reAimRpsThreshold` | Float | `0.012` | 判定停稳的陀螺仪转速阈值 | `0.001..0.300` |
-| `reAimResidualEnterRatio` / `reAimResidualExitRatio` | Float | `0.65 / 0.25` | 重新瞄准进入/退出残留比例 | 退出值必须小于进入值 |
+| `reAimResidualEnterRatio` / `reAimResidualExitRatio` | Float | `0.85 / 0.25` | 重新瞄准进入/退出残留比例 | 退出值必须小于进入值 |
 | `reAimStillMs` | Float | `250` | 满足停稳后的释放等待时间 | `0..2000ms` |
-| `reAimPathFollowPerSecond` | Float | `12.0` | 重新瞄准期间的路径跟随速度 | `0.2..30.0` |
-| `reAimBlendInPerSecond` / `reAimBlendOutPerSecond` | Float | `8.0 / 3.0` | 重新瞄准释放混入/混出速度 | `0.0..20.0` |
+| `reAimPathFollowPerSecond` | Float | `8.0` | 重新瞄准期间的路径跟随速度 | `0.2..30.0` |
+| `reAimBlendInPerSecond` / `reAimBlendOutPerSecond` | Float | `3.0 / 3.0` | 重新瞄准释放混入/混出速度 | `0.0..20.0` |
 | `aimOutputAccelerationLimitPxPerSecond2` | Float | `0` | 瞄准稳定阶段独立输出加速度限幅 | `0` 表示沿用基础限幅 |
-| `residualReleaseRpsThreshold` | Float | `0.030` | 大残留释放的停稳转速阈值 | `0.001..0.300` |
-| `residualReleaseEnabled` | Boolean | `true` | 静止瞄准且残留较大时加快释放补偿残留 | 禁止替代正常跟随参数调试 |
+| `residualReleaseRpsThreshold` | Float | `0.015` | 大残留释放的停稳转速阈值 | `0.001..0.300` |
+| `residualReleaseEnabled` | Boolean | `false` | 静止瞄准且残留较大时加快释放补偿残留 | 禁止替代正常跟随参数调试 |
 | `residualAntiWindupEnabled` | Boolean | `true` | 平移达到边界时回灌平滑状态，避免积分残留继续堆积 | 只作用于自研 EIS 模型 |
+
+| `aimOutputLowPassAlpha` | Float | `0.70` | 瞄准阶段输出低通 | `0.05..1.0` |
+| `aimAdaptiveLowPassEnabled` / `aimAdaptiveLowPassMinAlpha` | Boolean / Float | `false / 0.62` | 自适应低通 | 最小系数不得大于瞄准系数 |
+| `visualStillGateEnabled` | Boolean | `false` | 同帧 YUV 视觉静止门控 | GL/HDR 模式不启用 |
+
+## 本次同步
+- 源提交 `2e14622`；完整默认参数与验证见 [同步说明](../../eis-hdr-lsc-sync.md)。
+- 同帧复用 `FrameTransformQueue.kt`；视觉估计复用 `PreviewMotionEstimator.kt` 和 `SubpixelMotionTracker.kt`，不得另写同类算法。
 
 ## 复用方式
 - 普通预览继续打开父逻辑相机；只通过 `CameraScreen.applyPreviewTextureTransform()` 合成 UI 居中矩阵和自研 EIS 矩阵。

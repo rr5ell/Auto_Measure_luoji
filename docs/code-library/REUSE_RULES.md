@@ -4,8 +4,9 @@
 
 - 修改相机、校准、检测、语音等核心流程前，先查阅 `docs/code-library/INDEX.md`。
 - 优先增量修改已有类和函数，避免重新设计同类流程。
-- Android Camera2 EIS 默认必须保持 OFF；只有用户明确要求或在防抖弹窗中显式选择 ON/PREVIEW 时才允许写入 `CONTROL_VIDEO_STABILIZATION_MODE`，并需实机验证坐标漂移。
+- 禁止启用 Camera2 系统 EIS；仅允许 OIS 或应用层物理补偿，所有请求固定 `CONTROL_VIDEO_STABILIZATION_MODE_OFF`。
 - 自研 EIS 只能作为应用层显示矩阵防抖使用，不得把 `GyroPreviewStabilizer` 的集成改成默认开启 Camera2 系统 EIS。
+- HDR 必须联动 HLG10 会话与 10-bit GL 表面，不支持时恢复 SDR；LSC 必须校验实际逻辑相机能力。
 - 自研 EIS 不得改变普通预览的父逻辑相机 Session；普通预览继续禁止 `OutputConfiguration.setPhysicalCameraId()`，双摄校准 `strictPhysical=true` 例外不变。
 - 普通校准、双摄校准和绿光采集期间必须暂停或绕过自研 EIS 补偿，避免显示层坐标和采集坐标漂移。
 - 自研 EIS 补偿模型必须区分并记录 `opticalZoomBase`、`digitalZoomRatio`、`displayZoomRatio` 和 `renderScale`；纯 UI 放大或校准居中不能被误写成 Camera2 请求倍率。

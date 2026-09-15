@@ -67,6 +67,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.exifinterface)
+    implementation("org.opencv:opencv:4.12.0")
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     // LiteRT (YOLO 推理) — 替代 org.tensorflow，16KB 页面对齐
