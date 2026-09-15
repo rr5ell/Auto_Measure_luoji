@@ -751,6 +751,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var showShadingModeDialog by remember { mutableStateOf(false) }
     var cameraShadingText by remember { mutableStateOf("") }
     var hdrPreviewEnabled by remember { mutableStateOf(false) }
+    var hdrYoloAvailable by remember { mutableStateOf(false) }
     var hdrPreviewChecking by remember { mutableStateOf(false) }
     var hdrPreviewError by remember { mutableStateOf<String?>(null) }
     var hdrPreviousGlRender by remember { mutableStateOf(false) }
@@ -2486,6 +2487,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         gyroPreviewGlRenderEnabled = enabled || hdrPreviousGlRender
         gyroPreviewGlRenderEnabledInput = gyroPreviewGlRenderEnabled
         hdrPreviewEnabled = enabled
+        hdrYoloAvailable = false
         statusText = if (enabled) "正在启动 HLG10 HDR 预览" else "正在恢复 SDR 预览"
         Log.i("CameraScreen", "hdr-preview: requested=$enabled gl=$gyroPreviewGlRenderEnabled")
     }
@@ -3889,11 +3891,16 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         cameraController.onCameraOpened = {
             mainHandler.post {
                 isCameraReady = true
-                statusText = if (hdrPreviewEnabled) "HDR：HLG10" else "相机已打开"
+                hdrYoloAvailable = hdrPreviewEnabled && cameraController.analysisImageReader != null
+                statusText = if (hdrPreviewEnabled) {
+                    if (hdrYoloAvailable) "HDR：HLG10 | YOLO：SDR YUV"
+                    else "HDR：HLG10 | 当前设备不支持 HDR + YUV 识别"
+                } else "相机已打开"
             }
         }
         cameraController.onCameraClosed = {
             isCameraReady = false
+            hdrYoloAvailable = false
             activePhysicalCameraId = null
             activePhysicalLensReported = false
         }
@@ -4499,9 +4506,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     // GL 临时强制使用 YUV，不覆盖用户在 TextureView 下保存的数据源偏好。
     val effectiveYoloFrameSource = if (gyroPreviewGlRenderEnabled) YoloFrameSource.IMAGE_READER_YUV else yoloFrameSource
-    DisposableEffect(glPreviewViewRef, detectionEnabled, hdrPreviewEnabled, isCameraReady, selectedLens, currentEquivRatio) {
+    DisposableEffect(glPreviewViewRef, detectionEnabled, hdrPreviewEnabled, hdrYoloAvailable, isCameraReady, selectedLens, currentEquivRatio) {
         val view = glPreviewViewRef
-        view?.setDetectionEnabled(detectionEnabled && !hdrPreviewEnabled && isCameraReady)
+        view?.setDetectionEnabled(detectionEnabled && (!hdrPreviewEnabled || hdrYoloAvailable) && isCameraReady)
         onDispose { view?.setDetectionEnabled(false) }
     }
 
@@ -4529,8 +4536,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         yoloDetector,
         yoloTopDetectionEnabled,
         yoloTopConfidenceThreshold,
+        hdrYoloAvailable,
     ) {
-        if (!detectionEnabled || yoloDetector == null || hdrPreviewEnabled || !isCameraReady) {
+        if (!detectionEnabled || yoloDetector == null || (hdrPreviewEnabled && !hdrYoloAvailable) || !isCameraReady) {
             glDetectionExpiresNs = 0L
             showMeasurePrompt = false
             measureTrigger = false
@@ -4898,7 +4906,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     TopActionButton(
                         text = if (detectionEnabled) "识别中" else "识别",
                         active = detectionEnabled,
-                        enabled = !hdrPreviewEnabled && yoloDetector != null && isCameraReady,
+                        enabled = (!hdrPreviewEnabled || hdrYoloAvailable) && yoloDetector != null && isCameraReady,
                         accent = Color(0xFFFF9800),
                         onClick = { detectionEnabled = !detectionEnabled },
                     )

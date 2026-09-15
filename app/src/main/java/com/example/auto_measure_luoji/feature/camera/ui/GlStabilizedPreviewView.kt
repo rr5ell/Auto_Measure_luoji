@@ -56,14 +56,14 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
     private val detectionIds = AtomicLong()
 
     fun setDetectionEnabled(enabled: Boolean) {
-        queueEvent { previewRenderer.setDetectionEnabled(enabled && !hdrEnabled) }
+        queueEvent { previewRenderer.setDetectionEnabled(enabled) }
         requestRender()
     }
 
     /** 注册异步结果来源，不要求该 YUV 帧被 SurfaceTexture 消费过。 */
     suspend fun acquireDetectionFrame(timestampNs: Long, width: Int, height: Int, rotation: Int,
         capturedElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): GlDetectionTicket? {
-        if (hdrEnabled || timestampNs <= 0L || width <= 0 || height <= 0 ||
+        if (timestampNs <= 0L || width <= 0 || height <= 0 ||
             rotation !in listOf(0, 90, 180, 270)) return null
         val ticket = GlDetectionTicket(detectionIds.incrementAndGet(), timestampNs, width, height, rotation)
         var acquired = false

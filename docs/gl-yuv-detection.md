@@ -1,4 +1,4 @@
-# 普通 GL 与 YUV 异步识别
+# GL、HDR 与 YUV 异步识别
 
 日期：2026-09-15。作者：Codex Agent。
 
@@ -7,7 +7,7 @@
 - 在“更多 -> 自研EIS参数”开启 GL 并保存，然后点击顶部“识别”。
 - 普通 GL 运行时使用 YUV 图源；退出 GL 后恢复原有图源选择，不改写其偏好。
 - 保持现有 YOLO 模型、单框/多框阈值和 native YUV 预处理，不新增模型或依赖。
-- HDR 模式不开放 YOLO；GL 绿光检测和截图校准仍禁用。
+- HDR 在设备允许 HLG10 + STANDARD 双路输出时开放 YOLO。预览输出保持 HLG10，模型使用同一逻辑会话的 SDR YUV，不能把 HLG 原始像素送入现有模型。GL 绿光检测和截图校准仍禁用。
 - 预览和推理解耦：相机持续刷新，YOLO 专用线程独立处理，不固定推理图像、不排队积压模型任务。
 - 最新异步框最多保留 200 ms，随当前 GL 显示变换重投影；不做光流或目标运动预测，框可能短暂滞后，不代表当前帧精确识别。过期或空结果清框，测距提示和触发同时检查有效期。
 - 普通逻辑相机预览不绑定物理输出；系统 EIS 固定关闭，仅允许 OIS 或应用层算法补偿。
@@ -36,6 +36,13 @@ API 依据：[SurfaceTexture 采样矩阵](https://developer.android.com/referen
 - `GlAsyncDetectionStateTest` 覆盖双时钟超时、乱序、未来帧、空结果和模式重置。
 
 ## 本次验证
+
+- HDR 接入新增 `HdrStreamCombinationTest`，覆盖空约束、双向限制和未知配置；本轮 17 项 JVM 测试全部通过，Debug 包及仪器测试包构建成功。
+- 已扩展 `HdrPreviewInstrumentedTest`，用于在支持硬件上验证 HLG/10-bit、SDR YUV 模型调用和新鲜异步结果注册；本轮手机锁屏，未执行这项相机仪器测试，不能声称实际双路出帧或旗杆检出已通过。
+- 已更新连接手机上的应用并保留应用数据。HDR 双路会话、镜头切换、长时间负载及旗杆正样本等待解锁后核验；本轮未重跑全量 Lint。
+- 组合约束依据：[Android DynamicRangeProfiles](https://developer.android.com/reference/android/hardware/camera2/params/DynamicRangeProfiles#getProfileCaptureRequestConstraints(long))。能力声明只用于准入，不能代替实际会话验证。
+
+## 前次输入链路验证
 
 - 取消 GL 推理准入后的 Debug 包、测试包构建成功，14 项 JVM 测试与 2 项 API 36 模拟器仪器测试通过。
 - 新增从未被 GL 渲染的来源时间戳用例，确认仍可注册和投影异步框。相机模型测试先等待两帧确认预览已启动，再检测慢推理期间的连续性；无 GL 票据不再视为模型未运行。

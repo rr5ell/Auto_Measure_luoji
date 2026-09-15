@@ -9,6 +9,7 @@ import android.hardware.display.DisplayManager
 import android.opengl.EGL14
 import android.opengl.GLES20
 import android.os.Build
+import android.os.SystemClock
 import android.view.Display
 import android.view.Surface
 import androidx.test.core.app.ActivityScenario
@@ -20,6 +21,10 @@ import com.example.auto_measure_luoji.feature.camera.domain.RenderedPreviewFrame
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabilities
 import com.example.auto_measure_luoji.feature.camera.ui.FrameBoundPreviewTestActivity
+import com.example.auto_measure_luoji.feature.camera.ui.GlStabilizedPreviewView
+import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetectionBox
+import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -56,7 +61,9 @@ class HdrPreviewInstrumentedTest {
         val intent = Intent(context, FrameBoundPreviewTestActivity::class.java).putExtra("hdr_preview", true)
         try {
             ActivityScenario.launch<FrameBoundPreviewTestActivity>(intent).use { scenario ->
+                lateinit var preview: GlStabilizedPreviewView
                 scenario.onActivity { activity ->
+                    preview = activity.preview
                     activity.preview.onPreviewError = { errors.offer(it) }
                     activity.preview.onCameraSurfaceTextureAvailable = { textures.offer(it) }
                     activity.preview.setFrameSynchronized(true)
@@ -83,7 +90,51 @@ class HdrPreviewInstrumentedTest {
                     }
                     assertEquals(DataSpace.STANDARD_BT2020, DataSpace.getStandard(texture.dataSpace))
                     assertEquals(DataSpace.TRANSFER_HLG, DataSpace.getTransfer(texture.dataSpace))
-                    assertNull(controller.analysisImageReader)
+                    val analysisSupported = HdrPreviewCapabilities.checkYuvAnalysis(context, lens).isSuccess
+                    if (analysisSupported) {
+                        assertNotNull("HDR session did not create YUV input", controller.analysisImageReader)
+                        preview.setDetectionEnabled(true)
+                        YoloDetector(context, "bestV34_float32.tflite", "classes.txt", useGpu = false).use { model ->
+                            val source = controller.acquireLatestAnalysisImage() ?: error("HDR YUV input missing")
+                            source.use { image ->
+                                val captured = SystemClock.elapsedRealtimeNanos()
+                                val result = model.detectFromYuv(image, controller.sensorOrientation)
+                                assertTrue(result.timings.totalMs >= 0L)
+                                val ticket = runBlocking { preview.acquireDetectionFrame(image.timestamp,
+                                    image.width, image.height, controller.sensorOrientation, captured) }
+                                ticket?.let {
+                                    runBlocking { preview.presentDetection(it, result.detections.map { d ->
+                                        GlDetectionBox(d.box.left, d.box.top, d.box.right, d.box.bottom, d.label)
+                                    }) }
+                                }
+                            }
+                        }
+                        // 模型耗时不用于判定框是否可显示；用新帧合成确定性框验证 HDR 渲染准入。
+                        var accepted = false
+                        val deadline = SystemClock.elapsedRealtime() + 10_000L
+                        while (!accepted && SystemClock.elapsedRealtime() < deadline) {
+                            val source = controller.acquireLatestAnalysisImage()
+                            if (source == null) { Thread.sleep(20); continue }
+                            source.use { image ->
+                                val captured = SystemClock.elapsedRealtimeNanos()
+                                val ticket = runBlocking { preview.acquireDetectionFrame(image.timestamp,
+                                    image.width, image.height, controller.sensorOrientation, captured) } ?: return@use
+                                val w = if (controller.sensorOrientation % 180 == 0) image.width else image.height
+                                val h = if (controller.sensorOrientation % 180 == 0) image.height else image.width
+                                val presentation = runBlocking { preview.presentDetection(ticket,
+                                    listOf(GlDetectionBox(w * 0.25f, h * 0.25f, w * 0.75f, h * 0.75f, "旗杆测试"))) }
+                                accepted = presentation?.boxes?.size == 1
+                            }
+                        }
+                        assertTrue("HDR rejected all fresh detection results", accepted)
+                        frames.clear()
+                        val afterInference = frames.poll(10, TimeUnit.SECONDS) ?: error("HDR stopped after inference")
+                        assertTrue(afterInference.sourceTimestampNs > previousTimestamp)
+                        assertTrue("HDR overlay caused GL failure: $errors", errors.isEmpty())
+                        preview.setDetectionEnabled(false)
+                    } else {
+                        assertNull(controller.analysisImageReader)
+                    }
                     scenario.onActivity { activity ->
                         activity.preview.queueEvent {
                             val bits = IntArray(1)

@@ -304,7 +304,9 @@ class Camera2Controller(private val context: Context) {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         closeLatestAnalysisImage()
         analysisImageReader?.close()
-        analysisImageReader = if (usePhysicalOutput || hdrPreviewRequested) {
+        val hdrYuvSupported = !hdrPreviewRequested || HdrPreviewCapabilities.checkYuvAnalysis(context, lens)
+            .onFailure { Log.w("Camera2Ctrl", "hdr-yuv: unavailable: ${it.message}") }.isSuccess
+        analysisImageReader = if (usePhysicalOutput || !hdrYuvSupported) {
             null
         } else {
             ImageReader.newInstance(
@@ -355,8 +357,15 @@ class Camera2Controller(private val context: Context) {
             val output = OutputConfiguration(surface).apply {
                 setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
             }
+            // HLG10 只用于预览。模型沿用同一逻辑相机会话的 8-bit SDR YUV，不读取 HLG 编码像素。
+            val outputs = mutableListOf(output)
+            analysisImageReader?.surface?.let { analysisSurface ->
+                outputs.add(OutputConfiguration(analysisSurface).apply {
+                    setDynamicRangeProfile(DynamicRangeProfiles.STANDARD)
+                })
+            }
             camera.createCaptureSession(SessionConfiguration(
-                SessionConfiguration.SESSION_REGULAR, listOf(output),
+                SessionConfiguration.SESSION_REGULAR, outputs,
                 java.util.concurrent.Executor { command -> cameraHandler?.post(command) },
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
@@ -365,7 +374,7 @@ class Camera2Controller(private val context: Context) {
                             return
                         }
                         Log.i("Camera2Ctrl", "hdr-preview: configured HLG10 camera=${lens.cameraId} " +
-                            "output=logical size=$previewSize yuv=false")
+                            "output=logical size=$previewSize yuv=${analysisImageReader != null}")
                         captureSession = session
                         startPreview(session)
                     }

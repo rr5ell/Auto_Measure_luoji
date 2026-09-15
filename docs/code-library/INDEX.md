@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `fix/yolo-input-independent` |
+| 当前主要分支 | `feature/hdr-yuv-detection` |
 
 ## 可复用能力
 
@@ -55,4 +55,4 @@
 
 ## 最后更新
 
-2026-09-15，Codex Agent。先执行 YOLO，再注册 GL 结果，来源帧未被 GL 消费不得阻断模型；异步框保留来源时间戳并在 200 ms 后过期，系统 EIS 固定 OFF。
+2026-09-15，Codex Agent。接入 HLG10 预览与 STANDARD YUV 模型识别双路输出，先检查组合能力，复用后台 YOLO 与异步框；系统 EIS 固定 OFF。
