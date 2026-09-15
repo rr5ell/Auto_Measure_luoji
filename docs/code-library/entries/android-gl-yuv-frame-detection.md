@@ -27,14 +27,14 @@
 |---|---|---|
 | 预览纹理数 | 3 | 与模型任务无关，不固定推理纹理 |
 | 来源元数据 | 90 帧 | 只保存时间戳与采样矩阵 |
-| 元数据等待 | 100 ms | 只等待识别协程，不阻塞预览 |
+| 结果注册等待 | 100 ms | 在模型调用之后，不等待来源帧匹配 |
 | 结果有效期 | 200 ms | 相机时间和单调时间均检查 |
 | 提交等待 | 1000 ms | 无法提交时取消，不影响新票据 |
 | 最大检测框 | 100 | 与现有模型多框上限一致 |
 | 图源 | YUV | 仅运行时覆盖，不写回偏好 |
 
 ## 复用方式
-调用 acquireDetectionFrame 查询来源元数据 -> 现有 detectFromYuv -> presentDetection 发布异步结果，并在 finally 中 cancelDetectionFrame。GlAsyncDetectionState 负责最新结果及过期控制；GlDetectionCoordinates 使用当前采样矩阵和显示矩阵重投影原图框。
+取出 YUV 时记录 capturedElapsedNs -> 现有 detectFromYuv -> acquireDetectionFrame 注册来源并传递 capturedElapsedNs -> presentDetection 发布异步结果，并在 finally 中 cancelDetectionFrame。禁止以 GL 注册成功作为调用模型的前提；允许 YUV 来源帧从未被 GL 消费。GlAsyncDetectionState 负责最新结果及过期控制；GlDetectionCoordinates 使用当前采样矩阵和显示矩阵重投影原图框。
 
 ## 注意事项
 - 模型创建、推理、关闭必须在同一专用线程；GL 资源只能在 GL 线程使用。

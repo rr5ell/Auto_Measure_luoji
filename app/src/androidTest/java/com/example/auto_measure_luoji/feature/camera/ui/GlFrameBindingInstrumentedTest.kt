@@ -209,8 +209,17 @@ class GlFrameBindingInstrumentedTest {
                 preview.setDetectionEnabled(true)
                 assertNull("old result crossed detection generation",
                     runBlocking { preview.presentDetection(cancelled, emptyList()) })
-                assertNull("missing source metadata approximated",
-                    runBlocking { preview.acquireDetectionFrame(1_000_000_001L, 240, 426, 0) })
+                // YUV 帧可能从未被 GL 消费；异步显示不能再强求源时间戳精确命中。
+                submit(4_066_666_666L)
+                produce(4_066_666_666L, 0.2f)
+                frames.poll(5, TimeUnit.SECONDS) ?: error("skipped-source preview missing")
+                val skippedSource = runBlocking { preview.acquireDetectionFrame(4_050_000_000L, 240, 426, 0) }
+                    ?: error("unrendered YUV source was rejected")
+                val skippedPresentation = runBlocking { preview.presentDetection(skippedSource,
+                    listOf(GlDetectionBox(60f, 226f, 90f, 326f, ""))) }
+                    ?: error("unrendered YUV result missing")
+                assertEquals(4_050_000_000L, skippedPresentation.timestampNs)
+                assertEquals(4_066_666_666L, skippedPresentation.previewTimestampNs)
 
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
             } finally {

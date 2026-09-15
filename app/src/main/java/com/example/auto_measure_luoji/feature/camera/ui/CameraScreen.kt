@@ -4613,27 +4613,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     } else {
                                         try {
                                             val rotation = cameraController.sensorOrientation
+                                            val capturedElapsedNs = android.os.SystemClock.elapsedRealtimeNanos()
                                             sourceWidth = if (rotation == 90 || rotation == 270) image.height else image.width
                                             sourceHeight = if (rotation == 90 || rotation == 270) image.width else image.height
                                             val lensDebug = activeLensDebugText()
                                             sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation $lensDebug"
+                                            // YUV 必须先送入模型；GL 只处理结果显示，不拥有推理准入权。
+                                            Log.d("CameraScreen", "YOLO source: $sourceLabel timestamp=${image.timestamp}")
+                                            val inferred = withContext(yoloDispatcher) {
+                                                detector.detectFromYuv(image, rotation, postprocessOptions)
+                                            }
                                             if (gyroPreviewGlRenderEnabled) {
                                                 glTicket = detectionGlView?.acquireDetectionFrame(
-                                                    image.timestamp, image.width, image.height, rotation,
+                                                    image.timestamp, image.width, image.height, rotation, capturedElapsedNs,
                                                 )
                                             }
-                                            if (gyroPreviewGlRenderEnabled && glTicket == null) {
-                                                detectionPerfText = "等待 GL 帧元数据..."
-                                                showMeasurePrompt = false
-                                                measureTrigger = false
-                                                wasTargetInArea = false
-                                                null
-                                            } else {
-                                                Log.d("CameraScreen", "YOLO source: $sourceLabel timestamp=${image.timestamp}")
-                                                withContext(yoloDispatcher) {
-                                                    detector.detectFromYuv(image, rotation, postprocessOptions)
-                                                }
-                                            }
+                                            inferred
                                         } finally {
                                             image.close()
                                         }
@@ -4647,12 +4642,17 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 GlDetectionBox(it.box.left, it.box.top, it.box.right, it.box.bottom,
                                     "${it.label} ${"%.2f".format(it.score)}")
                             })
-                            if (glPresentation == null) {
+                        }
+                        if (result != null) {
+                            Log.d("CameraScreen", "YOLO completed: objects=${result.detections.size} " +
+                                "pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms " +
+                                "gl=$gyroPreviewGlRenderEnabled overlay=${glPresentation != null}")
+                            if (gyroPreviewGlRenderEnabled && glPresentation == null) {
                                 showMeasurePrompt = false
                                 measureTrigger = false
                                 wasTargetInArea = false
                                 glDetectionExpiresNs = 0L
-                                detectionPerfText = "GL 异步结果已过期"
+                                detectionPerfText = "YOLO ${result.detections.size}obj | inf=${result.timings.inferenceMs}ms | GL结果不可显示或已过期"
                             }
                         }
                         if (result != null && sourceWidth > 0 && sourceHeight > 0 &&

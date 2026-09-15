@@ -8,7 +8,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.opengl.GLUtils
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
@@ -61,24 +60,18 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         requestRender()
     }
 
-    /** 只查询来源帧的元数据，不固定纹理、不阻塞预览。 */
-    suspend fun acquireDetectionFrame(timestampNs: Long, width: Int, height: Int, rotation: Int): GlDetectionTicket? {
+    /** 注册异步结果来源，不要求该 YUV 帧被 SurfaceTexture 消费过。 */
+    suspend fun acquireDetectionFrame(timestampNs: Long, width: Int, height: Int, rotation: Int,
+        capturedElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): GlDetectionTicket? {
         if (hdrEnabled || timestampNs <= 0L || width <= 0 || height <= 0 ||
             rotation !in listOf(0, 90, 180, 270)) return null
         val ticket = GlDetectionTicket(detectionIds.incrementAndGet(), timestampNs, width, height, rotation)
         var acquired = false
         try {
-            acquired = withTimeoutOrNull(100L) {
-                var found = false
-                while (!found) {
-                    val ready = CompletableDeferred<Boolean>()
-                    queueEvent { previewRenderer.requestDetection(ticket, ready) }
-                    requestRender()
-                    found = ready.await()
-                    if (!found) delay(5L)
-                }
-                true
-            } == true
+            val ready = CompletableDeferred<Boolean>()
+            queueEvent { previewRenderer.requestDetection(ticket, capturedElapsedNs, ready) }
+            requestRender()
+            acquired = withTimeoutOrNull(100L) { ready.await() } == true
             return ticket.takeIf { acquired }
         } finally {
             if (!acquired) cancelDetectionFrame(ticket)
@@ -303,13 +296,16 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             detectionEnabled = enabled
         }
 
-        fun requestDetection(ticket: GlDetectionTicket, ready: CompletableDeferred<Boolean>) {
-            val metadata = frameMetadata.exact(ticket.timestampNs)
-            if (!detectionEnabled || failed || detectionWork != null || metadata == null) {
+        fun requestDetection(ticket: GlDetectionTicket, capturedElapsedNs: Long, ready: CompletableDeferred<Boolean>) {
+            if (!detectionEnabled || failed || detectionWork != null || capturedElapsedNs <= 0L) {
                 ready.complete(false)
                 return
             }
-            detectionWork = DetectionWork(ticket, metadata)
+            // SurfaceTexture 允许跳帧。异步框使用当前显示矩阵，不能以来源帧未渲染为由拒绝注册。
+            // 有来源元数据时取更早的时间，避免注册动作给慢推理结果续期。
+            val metadata = frameMetadata.exact(ticket.timestampNs)
+            detectionWork = DetectionWork(ticket, FrameMetadata(metadata?.sampling ?: identity,
+                minOf(metadata?.elapsedNs ?: capturedElapsedNs, capturedElapsedNs)))
             ready.complete(true)
         }
 

@@ -56,6 +56,13 @@ class GlYuvModelInstrumentedTest {
                     try {
                         controller.setSurfaceTexture(texture)
                         controller.openCamera(lens, surface)
+                        // 先确认相机/GL 已开始出帧，再测量推理期间是否继续推进。
+                        // 这只是测试启动屏障，不要求任何 YUV 时间戳与 GL 匹配。
+                        val previewDeadline = SystemClock.elapsedRealtime() + 15_000L
+                        while (previewFrames.get() < 2 && SystemClock.elapsedRealtime() < previewDeadline) {
+                            Thread.sleep(20)
+                        }
+                        assertTrue("camera preview did not start", previewFrames.get() >= 2)
                         val deadline = SystemClock.elapsedRealtime() + 30_000L
                         var presented = 0
                         var previousTimestamp = 0L
@@ -65,23 +72,28 @@ class GlYuvModelInstrumentedTest {
                             if (image == null) { Thread.sleep(20); continue }
                             image.use { frame ->
                                 val timestamp = frame.timestamp
+                                val capturedElapsedNs = SystemClock.elapsedRealtimeNanos()
+                                val before = previewFrames.get()
+                                val result = model.detectFromYuv(frame, controller.sensorOrientation)
+                                // 模型调用必须发生在 GL 注册之前；不能因缺少 GL 配对而跳过输入。
                                 val ticket = runBlocking { preview.acquireDetectionFrame(
-                                    timestamp, frame.width, frame.height, controller.sensorOrientation,
-                                ) } ?: return@use
+                                    timestamp, frame.width, frame.height, controller.sensorOrientation, capturedElapsedNs,
+                                ) }
                                 try {
-                                    val before = previewFrames.get()
-                                    val result = model.detectFromYuv(frame, controller.sensorOrientation)
                                     // 人为慢推理也不能让预览停住；过期模型结果允许丢弃。
                                     Thread.sleep(250)
                                     assertTrue("preview blocked by inference", previewFrames.get() > before)
-                                    val shown = runBlocking { preview.presentDetection(ticket, result.detections.map {
-                                        GlDetectionBox(it.box.left, it.box.top, it.box.right, it.box.bottom, it.label)
-                                    }) }
+                                    // GL 忙或结果过期均允许无框，但模型调用不能被跳过。
+                                    val shown = ticket?.let { registered -> runBlocking {
+                                        preview.presentDetection(registered, result.detections.map {
+                                            GlDetectionBox(it.box.left, it.box.top, it.box.right, it.box.bottom, it.label)
+                                        })
+                                    } }
                                     assertNull("expired inference result remained visible", shown)
                                     assertTrue(timestamp > previousTimestamp)
                                     previousTimestamp = timestamp
                                     presented++
-                                } finally { preview.cancelDetectionFrame(ticket) }
+                                } finally { ticket?.let { preview.cancelDetectionFrame(it) } }
                             }
                         }
                         assertEquals("未完成两帧异步 YUV 模型推理", 2, presented)
