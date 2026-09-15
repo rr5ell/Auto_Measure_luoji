@@ -78,7 +78,7 @@
 
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:assembleDebug --no-daemon`
-- 已覆盖边界：无陀螺仪自动拒绝开启、传感器注册异常回退、GL 模式禁用识别/截图校准、普通预览逻辑 Session 保持不变、显示层倍率参与补偿、软边界限幅、重新瞄准释放、残留释放和 anti-windup 诊断字段编译通过。
+- 已覆盖边界：无陀螺仪自动拒绝开启、传感器注册异常回退、GL 模式禁用绿光/截图校准、普通预览逻辑 Session 保持不变、显示层倍率参与补偿、软边界限幅、重新瞄准释放、残留释放和 anti-windup 诊断字段编译通过。普通 GL 的 YOLO 现由 `android-gl-yuv-frame-detection` 接入。
 - 未覆盖风险：不同机型陀螺仪坐标轴、rolling shutter 时间戳和 HAL active physical id 行为需要真机调参验证。
 
 ## 给 AI 的指令

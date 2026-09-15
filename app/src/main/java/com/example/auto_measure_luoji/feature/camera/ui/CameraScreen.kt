@@ -89,6 +89,10 @@ import com.example.auto_measure_luoji.feature.detection.ui.DetectionOverlay
 import com.example.auto_measure_luoji.feature.detection.ui.RecognitionArea
 import com.example.auto_measure_luoji.feature.voice.domain.ChineseVoiceHotwordRecognizer
 import com.example.auto_measure_luoji.feature.voice.domain.VoiceModelDownloadState
+import com.example.auto_measure_luoji.feature.camera.domain.gldetection.*
+import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1312,6 +1316,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     // 检测状态
     var modelLoadStatus by remember { mutableStateOf("未加载") }
     var yoloDetector by remember { mutableStateOf<YoloDetector?>(null) }
+    // GPU delegate 的创建、执行与释放固定在同一线程，不与 GL 渲染线程混用 EGL 上下文。
+    val yoloExecutor = remember { Executors.newSingleThreadExecutor { Thread(it, "YoloInference") } }
+    val yoloDispatcher = remember { yoloExecutor.asCoroutineDispatcher() }
+    val yoloModelRef = remember { AtomicReference<YoloDetector?>(null) }
     var yoloCaptureMode by remember { mutableStateOf(YoloCaptureMode.P1080) }
     var yoloFrameSource by remember {
         mutableStateOf(
@@ -1340,28 +1348,23 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var yoloFilterError by remember { mutableStateOf<String?>(null) }
 
     // 在后台线程加载模型（避免 Tasks.await 阻塞主线程）
-    LaunchedEffect(gyroPreviewGlRenderEnabled) {
-        if (gyroPreviewGlRenderEnabled) {
-            yoloDetector?.close()
-            yoloDetector = null
-            modelLoadStatus = "GL逐帧预览实验，未加载"
-            Log.i("CameraScreen", "gyro-preview-gl: YOLO model disabled")
-            return@LaunchedEffect
-        }
+    LaunchedEffect(Unit) {
         modelLoadStatus = "加载中..."
         Log.d("CameraScreen", "开始加载 YOLO 模型...")
         try {
-            val det = withContext(Dispatchers.Default) {
+            val det = withContext(yoloDispatcher) {
                 YoloDetector(
                     context = context,
                     modelAssetPath = "bestV34_float32.tflite",
                     labelsAssetPath = "classes.txt",
                     useGpu = true,
-                )
+                ).also { yoloModelRef.set(it) }
             }
             yoloDetector = det
             modelLoadStatus = "已加载 (${det.runtimeInfo})"
             Log.d("CameraScreen", "模型加载成功: ${det.runtimeInfo}")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CameraScreen", "模型加载失败", e)
             modelLoadStatus = "加载失败: ${e.message}"
@@ -3875,8 +3878,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         onDispose {
             cameraController.closeCamera(); cameraController.stop()
             if (bleManager.state == BleConnectionManager.State.CONNECTED) bleManager.disconnect()
-            yoloDetector?.close()
             yoloDetector = null
+            yoloExecutor.execute { yoloModelRef.getAndSet(null)?.close() }
+            yoloDispatcher.close()
         }
     }
 
@@ -4253,6 +4257,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
+                    glPreviewViewRef?.setDetectionEnabled(false)
                     glPreviewViewRef?.onPause()
                     hasPaused = true; cameraController.closeCamera(); isCameraReady = false
                 }
@@ -4491,35 +4496,56 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    // 检测帧处理循环：支持 TextureView.getBitmap() 和 ImageReader YUV 两种数据源。
+    // GL 临时强制使用 YUV，不覆盖用户在 TextureView 下保存的数据源偏好。
+    val effectiveYoloFrameSource = if (gyroPreviewGlRenderEnabled) YoloFrameSource.IMAGE_READER_YUV else yoloFrameSource
+    DisposableEffect(glPreviewViewRef, detectionEnabled, hdrPreviewEnabled, isCameraReady, selectedLens, currentEquivRatio) {
+        val view = glPreviewViewRef
+        view?.setDetectionEnabled(detectionEnabled && !hdrPreviewEnabled && isCameraReady)
+        onDispose { view?.setDetectionEnabled(false) }
+    }
+
+    // 检测帧处理循环：TextureView 保持原路径；GL 先固定同帧纹理，再推理并成对显示。
 
     LaunchedEffect(
         detectionEnabled,
         yoloCaptureMode,
-        yoloFrameSource,
+        effectiveYoloFrameSource,
+        gyroPreviewGlRenderEnabled,
+        hdrPreviewEnabled,
+        glPreviewViewRef,
+        isCameraReady,
+        selectedLens,
+        currentEquivRatio,
+        yoloDetector,
         yoloTopDetectionEnabled,
         yoloTopConfidenceThreshold,
     ) {
-        if (!detectionEnabled || yoloDetector == null) {
+        if (!detectionEnabled || yoloDetector == null || hdrPreviewEnabled || !isCameraReady) {
+            showMeasurePrompt = false
+            measureTrigger = false
+            wasTargetInArea = false
             detectionBoxes = emptyList()
             detectionPerfText = ""
             return@LaunchedEffect
         }
         detectionPerfText = "等待首帧..."
-        Log.d("CameraScreen", "detection loop started: source=${yoloFrameSource.label}")
+        Log.d("CameraScreen", "detection loop started: source=${effectiveYoloFrameSource.label} gl=$gyroPreviewGlRenderEnabled")
 
         try {
             while (detectionEnabled) {
                 if (!isCameraReady) { delay(10); continue }
                 val tv = textureViewRef
                 if (isProcessing) { delay(10); continue }
-                if (yoloFrameSource == YoloFrameSource.PREVIEW_BITMAP && (tv == null || !tv.isAvailable)) {
+                if (effectiveYoloFrameSource == YoloFrameSource.PREVIEW_BITMAP && (tv == null || !tv.isAvailable)) {
                     delay(10)
                     continue
                 }
                 if (isDetecting.get()) { delay(10); continue }
 
                 isDetecting.set(true)
+                val detectionGlView = glPreviewViewRef.takeIf { gyroPreviewGlRenderEnabled }
+                var glTicket: GlDetectionTicket? = null
+                var glPresentation: GlDetectionPresentation? = null
                 try {
                     val detector = yoloDetector
                     if (detector != null) {
@@ -4538,7 +4564,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         } else {
                             "多框>=${formatYoloConfidence(postprocessOptions.confidenceThreshold)}"
                         }
-                        val result = when (yoloFrameSource) {
+                        val result = when (effectiveYoloFrameSource) {
                             YoloFrameSource.PREVIEW_BITMAP -> {
                                 val snapshot = withContext(Dispatchers.Main) {
                                     tv?.getBitmap(captureMode.width, captureMode.height)
@@ -4552,7 +4578,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                         val lensDebug = activeLensDebugText()
                                         sourceLabel = "PreviewBitmap ${captureMode.label} ${snapshot.width}x${snapshot.height} $lensDebug"
                                         Log.d("CameraScreen", "YOLO source: $sourceLabel")
-                                        withContext(Dispatchers.Default) {
+                                        withContext(yoloDispatcher) {
                                             detector.detect(snapshot, postprocessOptions)
                                         }
                                     } finally {
@@ -4580,9 +4606,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                             sourceHeight = if (rotation == 90 || rotation == 270) image.width else image.height
                                             val lensDebug = activeLensDebugText()
                                             sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation $lensDebug"
-                                            Log.d("CameraScreen", "YOLO source: $sourceLabel")
-                                            withContext(Dispatchers.Default) {
-                                                detector.detectFromYuv(image, rotation, postprocessOptions)
+                                            if (gyroPreviewGlRenderEnabled) {
+                                                glTicket = detectionGlView?.acquireDetectionFrame(
+                                                    image.timestamp, image.width, image.height, rotation,
+                                                )
+                                            }
+                                            if (gyroPreviewGlRenderEnabled && glTicket == null) {
+                                                detectionPerfText = "等待同帧 GL 图像..."
+                                                showMeasurePrompt = false
+                                                measureTrigger = false
+                                                wasTargetInArea = false
+                                                null
+                                            } else {
+                                                Log.d("CameraScreen", "YOLO source: $sourceLabel timestamp=${image.timestamp}")
+                                                withContext(yoloDispatcher) {
+                                                    detector.detectFromYuv(image, rotation, postprocessOptions)
+                                                }
                                             }
                                         } finally {
                                             image.close()
@@ -4592,7 +4631,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             }
                         }
 
-                        if (result != null && sourceWidth > 0 && sourceHeight > 0) {
+                        if (result != null && glTicket != null && detectionGlView != null) {
+                            glPresentation = detectionGlView.presentDetection(glTicket!!, result.detections.map {
+                                GlDetectionBox(it.box.left, it.box.top, it.box.right, it.box.bottom,
+                                    "${it.label} ${"%.2f".format(it.score)}")
+                            })
+                            if (glPresentation == null) {
+                                showMeasurePrompt = false
+                                measureTrigger = false
+                                wasTargetInArea = false
+                                detectionPerfText = "GL 同帧结果已失效"
+                            }
+                        }
+                        if (result != null && sourceWidth > 0 && sourceHeight > 0 &&
+                            (!gyroPreviewGlRenderEnabled || glPresentation != null)) {
                             val totalMs = System.currentTimeMillis() - t0
                             Log.d(
                                 "CameraScreen",
@@ -4612,7 +4664,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 val dx = (viewW - srcW * scale) / 2f
                                 val dy = (viewH - srcH * scale) / 2f
 
-                                val mapped = result.detections.map { d ->
+                                val presented = glPresentation
+                                val mapped = presented?.boxes?.map { quad ->
+                                    RectF(quad.points.minOf { it.x }, quad.points.minOf { it.y },
+                                        quad.points.maxOf { it.x }, quad.points.maxOf { it.y }) to quad.label
+                                } ?: result.detections.map { d ->
                                     val r = RectF(
                                         d.box.left * scale + dx,
                                         d.box.top * scale + dy,
@@ -4621,7 +4677,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     )
                                     r to "${d.label} ${"%.2f".format(d.score)}"
                                 }
-                                detectionBoxes = mapped
+                                // GL 的四边形和标签已画入同帧 FBO，禁止 Compose 再次套用实时 wrapper 变换。
+                                detectionBoxes = if (presented == null) mapped else emptyList()
+                                if (presented != null) sourceLabel += " GL帧=${presented.timestampNs}"
                                 detectionPerfText = "$sourceLabel | $filterText | pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms total=${totalMs}ms | ${result.detections.size}obj"
                                 Log.d("CameraScreen", "detection done: objects=${result.detections.size}, total=${totalMs}ms")
 
@@ -4631,11 +4689,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 val areaHalfH = areaHeightPx / 2f
                                 val tx = wrapperTx; val ty = wrapperTy; val s = wrapperScale; val rot = wrapperRotation
                                 val pts = checkPoints
-                                val hasTargetInArea = mapped.any { (box, _) ->
+                                val hasTargetInArea = mapped.withIndex().any { (index, entry) ->
+                                    val (box, _) = entry
                                     fun isPointInside(pctW: Float, pctH: Float): Boolean {
                                         val px = box.left + box.width() * pctW
                                         val py = box.top + box.height() * pctH
-                                        val (cx, cy) = mapPreviewPointToScreen(
+                                        val glPoint = presented?.boxes?.get(index)?.point(pctW, pctH)
+                                        val (cx, cy) = if (glPoint != null) glPoint.x to glPoint.y else mapPreviewPointToScreen(
                                             x = px,
                                             y = py,
                                             centerX = screenCX,
@@ -4675,7 +4735,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 } catch (e: Exception) {
                     Log.e("CameraScreen", "检测异常", e)
                     detectionPerfText = "异常: ${e.message}"
+                    showMeasurePrompt = false
+                    measureTrigger = false
+                    wasTargetInArea = false
                 } finally {
+                    glTicket?.let { detectionGlView?.cancelDetectionFrame(it) }
                     isDetecting.set(false)
                 }
                 delay(10)
@@ -4819,7 +4883,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     TopActionButton(
                         text = if (detectionEnabled) "识别中" else "识别",
                         active = detectionEnabled,
-                        enabled = !gyroPreviewGlRenderEnabled && yoloDetector != null,
+                        enabled = !hdrPreviewEnabled && yoloDetector != null && isCameraReady,
                         accent = Color(0xFFFF9800),
                         onClick = { detectionEnabled = !detectionEnabled },
                     )
@@ -4989,8 +5053,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             },
                         )
                         ToolMenuItem(
-                            text = "YOLO源 ${yoloFrameSource.label}",
-                            active = yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV,
+                            text = "YOLO源 ${effectiveYoloFrameSource.label}",
+                            active = effectiveYoloFrameSource == YoloFrameSource.IMAGE_READER_YUV,
                             enabled = !gyroPreviewGlRenderEnabled,
                             accent = Color(0xFF03A9F4),
                             onClick = {
@@ -5013,7 +5077,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 "YOLO多框"
                             },
                             active = yoloTopDetectionEnabled,
-                            enabled = !gyroPreviewGlRenderEnabled,
+                            enabled = !hdrPreviewEnabled,
                             accent = Color(0xFFFF9800),
                             onClick = {
                                 toolsMenuExpanded = false

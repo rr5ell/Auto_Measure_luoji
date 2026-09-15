@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [gl-yuv-detection-2026-09-15] - 2026-09-15
+
+作者：Codex Agent。
+
+### 变更
+- 修复根因：GL 模式主动卸载模型且禁用识别按钮，原截图识别链路也无法从 GL 取图。现保持模型可用，并临时强制使用现有 YUV native 预处理链路。
+- 在推理前固定同时间戳 OES 图像与矩阵；推理完成后将检测框、标签和对应图像写入同一 FBO。等待期间保持上一对输出，不把旧框叠到新图像上。
+- 坐标使用原始缓冲区归一化、YUV 逆旋转、SurfaceTexture 采样逆矩阵和实际 GL 显示矩阵，保留 Roll 下四边形与框内判定点语义。
+- 模型创建、推理和释放改为同一专用线程；超时、模式切换、尺寸变化和过期结果均释放固定帧。
+- HDR 识别、GL 绿光及截图校准限制不变；图像更新速度受推理吞吐限制。验证见 [GL 同帧识别](docs/gl-yuv-detection.md)。
+
 ## [eis-hdr-lsc-sync-2026-09-15] - 2026-09-15
 
 作者：Codex Agent。

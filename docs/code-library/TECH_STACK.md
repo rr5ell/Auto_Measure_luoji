@@ -16,7 +16,7 @@
 | HDR 预览 | Android 13+ HLG10 + OpenGL ES 3 / RGB10_A2 | `feature/camera/domain/hdr/HdrPreviewCapabilities.kt`; `feature/camera/ui/hdr/HlgPreviewGl.kt` |
 | 视觉运动估计 | OpenCV `4.12.0`，LK/RANSAC | `app/build.gradle.kts`; `feature/camera/domain/PreviewMotionEstimator.kt` |
 | BLE | Android BLE API | `feature/bluetooth/domain/BleConnectionManager.kt` |
-| YOLO 推理 | LiteRT 1.4.2 + GMS TFLite fallback | `app/build.gradle.kts` |
+| YOLO 推理 | LiteRT 1.4.2 + GMS TFLite fallback；创建/推理/释放使用 YoloInference 专用线程 | `app/build.gradle.kts`; `feature/camera/ui/CameraScreen.kt` |
 | 语音热词 | Sherpa-ONNX SenseVoice + Silero VAD 优先，Android `SpeechRecognizer` fallback | `feature/voice/domain/ChineseVoiceHotwordRecognizer.kt`; `feature/voice/domain/SherpaOnnxHotwordRecognizer.kt` |
 | 语音模型下载 | HTTPS + HTTP Range 断点续传 + `.tar.bz2` 解压 | `feature/voice/domain/ThirdPartyVoiceModelDownloader.kt`; `AndroidManifest.xml` |
 | 压缩包解压 | Apache Commons Compress 1.28.0 | `app/build.gradle.kts` |

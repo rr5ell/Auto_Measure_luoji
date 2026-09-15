@@ -8,6 +8,8 @@ import android.view.Surface
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.auto_measure_luoji.feature.camera.domain.RenderedPreviewFrame
+import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetectionBox
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -97,6 +99,64 @@ class GlFrameBindingInstrumentedTest {
                     (outputBounds[2] - outputBounds[0]).toFloat(), 3f)
                 assertEquals((rawBounds[2] - rawBounds[0]).toFloat(),
                     (outputBounds[3] - outputBounds[1]).toFloat(), 3f)
+
+                // YUV 推理帧先固定到 GL，随后到来的六帧及未来矩阵不得替换它。
+                scenario.onActivity { it.preview.setDetectionEnabled(true) }
+                submit(2_000_000_000L, 15f)
+                produce(2_000_000_000L, 0.2f)
+                lateinit var preview: GlStabilizedPreviewView
+                scenario.onActivity { preview = it.preview }
+                val ticket = runBlocking { preview.acquireDetectionFrame(2_000_000_000L, 240, 426, 0) }
+                    ?: error("same YUV/GL frame was not reserved")
+                for (i in 1..6) {
+                    val ts = 2_000_000_000L + i * 33_333_333L
+                    submit(ts, 70f)
+                    produce(ts, 0.7f)
+                    Thread.sleep(40)
+                }
+                assertNull("unpaired camera frames advanced the detection output", frames.poll(150, TimeUnit.MILLISECONDS))
+                val presentation = runBlocking {
+                    preview.presentDetection(ticket, listOf(GlDetectionBox(60f, 226f, 90f, 326f, "")))
+                } ?: error("paired detection was not presented")
+                val detected = frames.poll(5, TimeUnit.SECONDS) ?: error("paired draw missing")
+                assertEquals(2_000_000_000L, presentation.timestampNs)
+                assertEquals(presentation.timestampNs, detected.sourceTimestampNs)
+                assertEquals(presentation.timestampNs, detected.transformTimestampNs)
+                assertTrue("future gray frame replaced pinned image", detected.raw.luma[20] < 100)
+                val white = bounds(detected.output.luma, detected.output.sampleWidth)
+                val points = presentation.boxes.single().points
+                val sx = detected.output.sampleWidth.toFloat() / presentation.viewWidth
+                val sy = detected.output.sampleHeight.toFloat() / presentation.viewHeight
+                assertEquals(points.minOf { it.x } * sx, white[0].toFloat(), 3f)
+                assertEquals(points.minOf { it.y } * sy, white[1].toFloat(), 3f)
+                assertEquals(points.maxOf { it.x } * sx, white[2].toFloat(), 3f)
+                assertEquals(points.maxOf { it.y } * sy, white[3].toFloat(), 3f)
+                assertNull("consumed ticket reused", runBlocking { preview.presentDetection(ticket, emptyList()) })
+
+                submit(3_000_000_000L)
+                produce(3_000_000_000L, 0.3f)
+                val cancelled = runBlocking { preview.acquireDetectionFrame(3_000_000_000L, 240, 426, 0) }
+                    ?: error("second ticket unavailable")
+                preview.setDetectionEnabled(false)
+                preview.setDetectionEnabled(true)
+                assertNull("old result crossed detection generation",
+                    runBlocking { preview.presentDetection(cancelled, emptyList()) })
+                assertNull("missing OES frame was approximated",
+                    runBlocking { preview.acquireDetectionFrame(1_000_000_001L, 240, 426, 0) })
+
+                submit(4_000_000_000L)
+                produce(4_000_000_000L, 0.2f)
+                val labelTicket = runBlocking { preview.acquireDetectionFrame(4_000_000_000L, 240, 426, 0) }
+                    ?: error("label frame unavailable")
+                val labeledPresentation = runBlocking { preview.presentDetection(labelTicket,
+                    listOf(GlDetectionBox(60f, 226f, 90f, 326f, "旗杆 0.99"))) } ?: error("label draw missing")
+                val labeled = frames.poll(5, TimeUnit.SECONDS) ?: error("label pixels missing")
+                val top = labeledPresentation.boxes.single().points.minOf { it.y } *
+                    labeled.output.sampleHeight / labeledPresentation.viewHeight
+                assertTrue("label was not drawn above the object into the same FBO",
+                    labeled.output.luma.indices.any { it / labeled.output.sampleWidth < top - 4f &&
+                        labeled.output.luma[it] > 200 })
+
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
             } finally {
                 EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)

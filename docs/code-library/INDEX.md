@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/sync-eis-hdr-lsc` |
+| 当前主要分支 | `feature/gl-yuv-detection` |
 
 ## 可复用能力
 
@@ -39,6 +39,8 @@
 | android-camera2-physical-preview-output-binding | 逻辑相机 Session 中绑定物理预览输出 | android, kotlin, camera2, logical-multi-camera, physical-output, fusion-avoidance | `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/Camera2Controller.kt`; `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/CameraScreen.kt` | deprecated |
 
 ## HDR 与 LSC
+
+- [android-gl-yuv-frame-detection](entries/android-gl-yuv-frame-detection.md)：普通 GL 的 YUV 同帧识别、纹理固定、采样逆映射与检测框同 FBO 绘制；标准路径为 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/gldetection/GlDetectionCoordinates.kt` 和 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt`。
 
 | reuse_id | 能力 | 标准代码路径 | 状态 |
 |---|---|---|---|

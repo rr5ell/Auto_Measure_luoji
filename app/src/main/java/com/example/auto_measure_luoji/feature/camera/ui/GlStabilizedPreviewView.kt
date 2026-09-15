@@ -2,6 +2,15 @@ package com.example.auto_measure_luoji.feature.camera.ui
 
 import android.content.Context
 import android.graphics.SurfaceTexture
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.opengl.GLUtils
+import com.example.auto_measure_luoji.feature.camera.domain.gldetection.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicLong
 import android.hardware.DataSpace
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
@@ -44,6 +53,45 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
     private val previewRenderer = CameraPreviewRenderer(hdrEnabled)
     private val diagnosticRecordingRequested = AtomicBoolean(false)
     private var cameraSurfaceTexture: SurfaceTexture? = null
+    private val detectionIds = AtomicLong()
+
+    fun setDetectionEnabled(enabled: Boolean) {
+        queueEvent { previewRenderer.setDetectionEnabled(enabled && !hdrEnabled) }
+        requestRender()
+    }
+
+    /** 只预留同时间戳图像；SurfaceTexture 跳过的帧不能用邻帧顶替。 */
+    suspend fun acquireDetectionFrame(timestampNs: Long, width: Int, height: Int, rotation: Int): GlDetectionTicket? {
+        if (hdrEnabled || timestampNs <= 0L || width <= 0 || height <= 0 ||
+            rotation !in listOf(0, 90, 180, 270)) return null
+        val ticket = GlDetectionTicket(detectionIds.incrementAndGet(), timestampNs, width, height, rotation)
+        val ready = CompletableDeferred<Boolean>()
+        var acquired = false
+        queueEvent { previewRenderer.requestDetection(ticket, ready) }
+        requestRender()
+        try {
+            acquired = withTimeoutOrNull(500L) { ready.await() } == true
+            return ticket.takeIf { acquired }
+        } finally {
+            if (!acquired) cancelDetectionFrame(ticket)
+        }
+    }
+
+    suspend fun presentDetection(ticket: GlDetectionTicket, boxes: List<GlDetectionBox>): GlDetectionPresentation? {
+        val shown = CompletableDeferred<GlDetectionPresentation?>()
+        queueEvent { previewRenderer.completeDetection(ticket, boxes.take(100).toList(), shown) }
+        requestRender()
+        return try {
+            withTimeoutOrNull(1000L) { shown.await() }
+        } finally {
+            cancelDetectionFrame(ticket)
+        }
+    }
+
+    fun cancelDetectionFrame(ticket: GlDetectionTicket) {
+        queueEvent { previewRenderer.cancelDetection(ticket) }
+        requestRender()
+    }
 
     var onCameraSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
         set(value) {
@@ -211,7 +259,84 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         private var failed = false
         private var hdrDataSpace = 0
         private var hdrFullRange = false
-        private data class CapturedFrame(val timestampNs: Long, val target: RenderTarget)
+        private data class CapturedFrame(
+            val timestampNs: Long,
+            val target: RenderTarget,
+            val sampling: FloatArray,
+            val realtimeTransform: PreviewTransform,
+        )
+        private data class DetectionWork(
+            val ticket: GlDetectionTicket,
+            val ready: CompletableDeferred<Boolean>,
+            var frame: CapturedFrame? = null,
+            var transform: PreviewTransform? = null,
+            var boxes: List<GlDetectionBox>? = null,
+            var shown: CompletableDeferred<GlDetectionPresentation?>? = null,
+        )
+        private var detectionEnabled = false
+        private var detectionWork: DetectionWork? = null
+        private var boxProgram = 0
+        private var labelTexture = 0
+        private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 28f; color = Color.WHITE }
+        private var labelBitmap: Bitmap? = null
+
+        fun setDetectionEnabled(enabled: Boolean) {
+            if (detectionEnabled == enabled) return
+            clearDetection()
+            detectionEnabled = enabled
+            renderedTimestampNs = 0L
+            // 关闭识别时不能继续保留已经烘焙了旧检测框的输出。
+            if (!enabled) hasOutput = false
+        }
+
+        fun requestDetection(ticket: GlDetectionTicket, ready: CompletableDeferred<Boolean>) {
+            if (!detectionEnabled || failed || detectionWork != null) {
+                ready.complete(false)
+                return
+            }
+            detectionWork = DetectionWork(ticket, ready)
+        }
+
+        fun completeDetection(ticket: GlDetectionTicket, boxes: List<GlDetectionBox>,
+            shown: CompletableDeferred<GlDetectionPresentation?>) {
+            val work = detectionWork
+            if (!detectionEnabled || work?.ticket != ticket || work.frame == null || work.boxes != null) {
+                shown.complete(null)
+                return
+            }
+            work.boxes = boxes
+            work.shown = shown
+        }
+
+        fun cancelDetection(ticket: GlDetectionTicket) {
+            if (detectionWork?.ticket == ticket) clearDetection()
+        }
+
+        private fun clearDetection(forget: Boolean = false) {
+            detectionWork?.let { work ->
+                work.ready.complete(false)
+                work.shown?.complete(null)
+                work.frame?.target?.let { if (forget) it.forget() else spareTargets.addLast(it) }
+            }
+            detectionWork = null
+        }
+
+        private fun bindDetection() {
+            val work = detectionWork ?: return
+            if (work.frame != null) return
+            val frame = capturedFrames.firstOrNull { it.timestampNs == work.ticket.timestampNs }
+            if (frame == null) {
+                if (textureTimestampNs > work.ticket.timestampNs) clearDetection()
+                return
+            }
+            val exactTransform = if (frameSynchronized) pendingTransforms.exact(frame.timestampNs)
+                else frame.realtimeTransform
+            if (exactTransform == null) return
+            capturedFrames.remove(frame)
+            work.frame = frame
+            work.transform = exactTransform
+            work.ready.complete(true)
+        }
         private val capturedFrames = java.util.ArrayDeque<CapturedFrame>()
         private val spareTargets = java.util.ArrayDeque<RenderTarget>()
         private val identity = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
@@ -243,6 +368,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 hdrDataSpace = 0
                 Log.i(TAG, "hdr-preview: renderer=HLG10 rgbBits=${bits[0]} fbo=RGB10_A2")
             }
+            clearDetection(forget = true)
+            boxProgram = 0
+            labelTexture = 0
             outputTarget.forget()
             rawTarget.forget()
             sampleTarget.forget()
@@ -264,6 +392,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+            clearDetection()
             viewportWidth = width
             viewportHeight = height
             renderedTimestampNs = 0L
@@ -319,6 +448,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                         validateHdrDataSpace(texture)
                     }
                     if (previousTimestamp > 0L && textureTimestampNs < previousTimestamp) {
+                        clearDetection()
                         pendingTransforms.clear()
                         renderedTimestampNs = 0L
                         capturedFrames.forEach { spareTargets.addLast(it.target) }
@@ -331,7 +461,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                         } else if (spareTargets.isNotEmpty()) spareTargets.removeFirst() else RenderTarget(hdrEnabled)
                         target.ensure(viewportWidth, viewportHeight)
                         renderOes(target, PreviewTransform(viewWidth = viewportWidth.toFloat(), viewHeight = viewportHeight.toFloat()))
-                        capturedFrames.addLast(CapturedFrame(textureTimestampNs, target))
+                        capturedFrames.addLast(CapturedFrame(textureTimestampNs, target,
+                            surfaceTextureMatrix.copyOf(), synchronized(transformLock) { transform }))
                     }
                 }
             } catch (e: RuntimeException) {
@@ -340,19 +471,34 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 return
             }
 
-            val captured = if (frameSynchronized) {
+            bindDetection()
+            val detection = detectionWork?.takeIf { it.frame != null && it.boxes != null }
+            val captured = if (detectionEnabled) detection?.frame else if (frameSynchronized) {
                 capturedFrames.lastOrNull { pendingTransforms.exact(it.timestampNs) != null }
             } else capturedFrames.peekLast()
-            val currentTransform = if (frameSynchronized && captured != null) {
+            val currentTransform = if (detectionEnabled) detection?.transform else if (frameSynchronized && captured != null) {
                 pendingTransforms.exact(captured.timestampNs)
             } else {
                 synchronized(transformLock) { transform }
             }
             val alreadyRendered = captured == null && capturedFrames.isEmpty()
             var diagnostic: RenderedPreviewFrame? = null
+            var presentation: GlDetectionPresentation? = null
             if (captured != null && currentTransform != null && captured.timestampNs > renderedTimestampNs) {
                 outputTarget.ensure(viewportWidth, viewportHeight)
                 renderCaptured(captured.target, outputTarget, currentTransform)
+                if (detection != null) {
+                    try {
+                        val coordinates = GlDetectionCoordinates(captured.sampling, displayMatrix,
+                            viewportWidth, viewportHeight, detection.ticket)
+                        val mapped = detection.boxes.orEmpty().map { coordinates.box(it) }
+                        drawDetectionBoxes(mapped)
+                        presentation = GlDetectionPresentation(captured.timestampNs, viewportWidth, viewportHeight, mapped)
+                    } catch (error: IllegalArgumentException) {
+                        Log.w(TAG, "gl-yuv: invalid coordinates", error)
+                        clearDetection()
+                    }
+                }
                 renderedTimestampNs = captured.timestampNs
                 hasOutput = true
                 drawSequence++
@@ -387,7 +533,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                         "unmatched=$unmatchedDraws repeated=$repeatedDraws dropped=$droppedTextureFrames")
                 }
                 val drawnTimestampNs = captured.timestampNs
-                while (capturedFrames.isNotEmpty() && capturedFrames.first.timestampNs <= drawnTimestampNs) {
+                while (!detectionEnabled && capturedFrames.isNotEmpty() && capturedFrames.first.timestampNs <= drawnTimestampNs) {
                     val consumed = capturedFrames.removeFirst()
                     if (consumed.timestampNs != drawnTimestampNs) droppedTextureFrames++
                     spareTargets.addLast(consumed.target)
@@ -405,6 +551,11 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             if (outputTarget.textureId != 0 && hasOutput) {
                 drawTexture(outputTarget.textureId, false, identity, identity)
+            }
+            if (presentation != null) {
+                Log.d(TAG, "gl-yuv: presented timestamp=${presentation.timestampNs} boxes=${presentation.boxes.size}")
+                detection?.shown?.complete(presentation)
+                clearDetection()
             }
             diagnostic?.let { if (diagnosticConsumer?.invoke(it) != true) diagnosticDrops++ }
             if (hdrEnabled) {
@@ -476,6 +627,67 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             drawTexture(input.textureId, false, identity, displayMatrix)
         }
 
+
+        /** 框和文字写入图像的同一个 FBO，避免 Compose 与 GL 两个提交时钟造成错帧。 */
+        private fun drawDetectionBoxes(boxes: List<GlDetectionQuad>) {
+            if (boxes.isEmpty()) return
+            if (boxProgram == 0) boxProgram = createProgram(
+                "attribute vec4 aPosition; void main(){gl_Position=aPosition;}",
+                "precision mediump float; void main(){gl_FragColor=vec4(0.1,1.0,0.3,1.0);}",
+            )
+            for (box in boxes) {
+                val vertices = box.points.flatMap { listOf(
+                    2f * it.x / viewportWidth - 1f, 1f - 2f * it.y / viewportHeight,
+                ) }.toFloatArray()
+                val buffer = floatBufferOf(*vertices)
+                GLES20.glUseProgram(boxProgram)
+                val position = GLES20.glGetAttribLocation(boxProgram, "aPosition")
+                GLES20.glEnableVertexAttribArray(position)
+                GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, FLOAT_STRIDE_BYTES, buffer)
+                GLES20.glLineWidth(3f)
+                GLES20.glDrawArrays(GLES20.GL_LINE_LOOP, 0, 4)
+                GLES20.glDisableVertexAttribArray(position)
+
+                if (box.label.isBlank()) continue
+                // 仅上传一块复用的小文字纹理，不对全分辨率预览执行 GPU -> CPU 回读。
+                val bitmap = labelBitmap ?: Bitmap.createBitmap(512, 48, Bitmap.Config.ARGB_8888).also { labelBitmap = it }
+                bitmap.eraseColor(Color.TRANSPARENT)
+                val text = box.label.take(48)
+                val labelWidth = (labelPaint.measureText(text) + 12f).coerceIn(20f, 512f)
+                Canvas(bitmap).apply {
+                    drawRect(0f, 0f, labelWidth, 48f, Paint().apply { color = 0xCC000000.toInt() })
+                    drawText(text, 6f, 33f, labelPaint)
+                }
+                if (labelTexture == 0) {
+                    val id = IntArray(1)
+                    GLES20.glGenTextures(1, id, 0)
+                    labelTexture = id[0]
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, labelTexture)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+                } else {
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, labelTexture)
+                    GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
+                }
+                val left = box.points.minOf { it.x }.coerceIn(0f, (viewportWidth - labelWidth).coerceAtLeast(0f))
+                val top = (box.points.minOf { it.y } - 48f).coerceIn(0f, (viewportHeight - 48f).coerceAtLeast(0f))
+                // 文字位图左上角为原点；NDC 为左下角，采样矩阵单独翻转 Y。
+                val vertex = identity.copyOf().apply {
+                    this[0] = 512f / viewportWidth; this[5] = 48f / viewportHeight
+                    this[12] = 2f * (left + 256f) / viewportWidth - 1f
+                    this[13] = 1f - 2f * (top + 24f) / viewportHeight
+                }
+                val sample = identity.copyOf().apply { this[5] = -1f; this[13] = 1f }
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                drawTexture(labelTexture, false, sample, vertex)
+                GLES20.glDisable(GLES20.GL_BLEND)
+            }
+        }
+
         private fun readLuma(target: RenderTarget): PreviewMotionEstimator.LumaFrame {
             val width = PreviewMotionEstimator.DEFAULT_SAMPLE_WIDTH
             val height = (width.toFloat() * viewportHeight / viewportWidth).roundToInt().coerceAtLeast(1)
@@ -503,6 +715,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
 
         fun setFrameSynchronized(enabled: Boolean) {
             if (frameSynchronized == enabled) return
+            clearDetection()
             frameSynchronized = enabled
             pendingTransforms.clear()
             renderedTimestampNs = 0L
@@ -538,6 +751,13 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         }
 
         fun releaseCameraTexture() {
+            clearDetection()
+            labelBitmap?.recycle()
+            labelBitmap = null
+            if (boxProgram != 0) GLES20.glDeleteProgram(boxProgram)
+            if (labelTexture != 0) GLES20.glDeleteTextures(1, intArrayOf(labelTexture), 0)
+            boxProgram = 0
+            labelTexture = 0
             val texture = surfaceTexture ?: return
             surfaceTexture = null
             outputTarget.release()

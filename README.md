@@ -8,6 +8,8 @@ Android 自动测量工具应用。
 
 已同步 Auto_measure `2e14622` 的自研 EIS 逻辑与默认参数。顶部提供 HDR 开关和 LSC 模式按钮；详细参数、兼容条件与验证步骤见 [同步说明](docs/eis-hdr-lsc-sync.md)。
 
+普通 GL 现可开启 YOLO 识别，运行时自动使用 YUV 图源，不改写原有图源偏好。图像、检测框和标签按同时间戳成对显示，因此识别开启后的 GL 更新速度受模型耗时影响。HDR 识别、GL 绿光和截图校准仍未开放。详见 [GL 同帧识别](docs/gl-yuv-detection.md)。
+
 ## 技术栈
 
 - **语言**: Kotlin
