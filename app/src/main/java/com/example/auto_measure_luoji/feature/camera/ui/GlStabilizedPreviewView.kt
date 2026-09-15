@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.opengl.GLUtils
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
@@ -60,17 +61,24 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         requestRender()
     }
 
-    /** 只预留同时间戳图像；SurfaceTexture 跳过的帧不能用邻帧顶替。 */
+    /** 只查询来源帧的元数据，不固定纹理、不阻塞预览。 */
     suspend fun acquireDetectionFrame(timestampNs: Long, width: Int, height: Int, rotation: Int): GlDetectionTicket? {
         if (hdrEnabled || timestampNs <= 0L || width <= 0 || height <= 0 ||
             rotation !in listOf(0, 90, 180, 270)) return null
         val ticket = GlDetectionTicket(detectionIds.incrementAndGet(), timestampNs, width, height, rotation)
-        val ready = CompletableDeferred<Boolean>()
         var acquired = false
-        queueEvent { previewRenderer.requestDetection(ticket, ready) }
-        requestRender()
         try {
-            acquired = withTimeoutOrNull(500L) { ready.await() } == true
+            acquired = withTimeoutOrNull(100L) {
+                var found = false
+                while (!found) {
+                    val ready = CompletableDeferred<Boolean>()
+                    queueEvent { previewRenderer.requestDetection(ticket, ready) }
+                    requestRender()
+                    found = ready.await()
+                    if (!found) delay(5L)
+                }
+                true
+            } == true
             return ticket.takeIf { acquired }
         } finally {
             if (!acquired) cancelDetectionFrame(ticket)
@@ -82,7 +90,11 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         queueEvent { previewRenderer.completeDetection(ticket, boxes.take(100).toList(), shown) }
         requestRender()
         return try {
-            withTimeoutOrNull(1000L) { shown.await() }
+            withTimeoutOrNull(1000L) { shown.await() }?.also { result ->
+                // 即使相机停止出帧，也安排一次重绘清掉过期框；不阻塞 GL 线程。
+                val delayMs = ((result.expiresElapsedNs - SystemClock.elapsedRealtimeNanos()) / 1_000_000L + 1L).coerceAtLeast(1L)
+                mainHandler.postDelayed({ requestRender() }, delayMs)
+            }
         } finally {
             cancelDetectionFrame(ticket)
         }
@@ -256,6 +268,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         private val outputTarget = RenderTarget(hdrEnabled)
         private val rawTarget = RenderTarget(hdrEnabled)
         private val sampleTarget = RenderTarget()
+        private val diagnosticOutputTarget = RenderTarget()
         private var failed = false
         private var hdrDataSpace = 0
         private var hdrFullRange = false
@@ -265,14 +278,18 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             val sampling: FloatArray,
             val realtimeTransform: PreviewTransform,
         )
+        private data class FrameMetadata(
+            val sampling: FloatArray,
+            val elapsedNs: Long,
+        )
         private data class DetectionWork(
             val ticket: GlDetectionTicket,
-            val ready: CompletableDeferred<Boolean>,
-            var frame: CapturedFrame? = null,
-            var transform: PreviewTransform? = null,
-            var boxes: List<GlDetectionBox>? = null,
-            var shown: CompletableDeferred<GlDetectionPresentation?>? = null,
+            val metadata: FrameMetadata,
         )
+        private val frameMetadata = FrameTransformQueue<FrameMetadata>()
+        private var displayedSampling: FloatArray? = null
+        private var displayedTransform: PreviewTransform? = null
+        private val asyncDetection = GlAsyncDetectionState()
         private var detectionEnabled = false
         private var detectionWork: DetectionWork? = null
         private var boxProgram = 0
@@ -284,58 +301,60 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             if (detectionEnabled == enabled) return
             clearDetection()
             detectionEnabled = enabled
-            renderedTimestampNs = 0L
-            // 关闭识别时不能继续保留已经烘焙了旧检测框的输出。
-            if (!enabled) hasOutput = false
         }
 
         fun requestDetection(ticket: GlDetectionTicket, ready: CompletableDeferred<Boolean>) {
-            if (!detectionEnabled || failed || detectionWork != null) {
+            val metadata = frameMetadata.exact(ticket.timestampNs)
+            if (!detectionEnabled || failed || detectionWork != null || metadata == null) {
                 ready.complete(false)
                 return
             }
-            detectionWork = DetectionWork(ticket, ready)
+            detectionWork = DetectionWork(ticket, metadata)
+            ready.complete(true)
         }
 
         fun completeDetection(ticket: GlDetectionTicket, boxes: List<GlDetectionBox>,
             shown: CompletableDeferred<GlDetectionPresentation?>) {
             val work = detectionWork
-            if (!detectionEnabled || work?.ticket != ticket || work.frame == null || work.boxes != null) {
+            if (!detectionEnabled || work?.ticket !== ticket) {
                 shown.complete(null)
                 return
             }
-            work.boxes = boxes
-            work.shown = shown
+            detectionWork = null
+            val accepted = asyncDetection.offer(
+                GlAsyncDetectionState.Result(ticket, work.metadata.elapsedNs, boxes),
+                renderedTimestampNs, SystemClock.elapsedRealtimeNanos(),
+            )
+            shown.complete(if (accepted) detectionPresentation() else null)
         }
 
         fun cancelDetection(ticket: GlDetectionTicket) {
-            if (detectionWork?.ticket == ticket) clearDetection()
+            if (detectionWork?.ticket === ticket) detectionWork = null
         }
 
-        private fun clearDetection(forget: Boolean = false) {
-            detectionWork?.let { work ->
-                work.ready.complete(false)
-                work.shown?.complete(null)
-                work.frame?.target?.let { if (forget) it.forget() else spareTargets.addLast(it) }
-            }
+        private fun clearDetection() {
             detectionWork = null
+            asyncDetection.clear()
         }
 
-        private fun bindDetection() {
-            val work = detectionWork ?: return
-            if (work.frame != null) return
-            val frame = capturedFrames.firstOrNull { it.timestampNs == work.ticket.timestampNs }
-            if (frame == null) {
-                if (textureTimestampNs > work.ticket.timestampNs) clearDetection()
-                return
+        private fun detectionPresentation(): GlDetectionPresentation? {
+            if (!detectionEnabled) return null
+            val result = asyncDetection.current(renderedTimestampNs, SystemClock.elapsedRealtimeNanos()) ?: return null
+            val sampling = displayedSampling ?: return null
+            val frame = displayedTransform ?: return null
+            return try {
+                val matrix = FloatArray(16)
+                buildDisplayMatrix(frame, matrix)
+                // 原图框在短时窗口内沿用，只更新当前显示裁切/镜像/EIS。
+                // 这不是目标运动预测，来源时间戳与当前预览时间戳必须分开保留。
+                val coordinates = GlDetectionCoordinates(sampling, matrix, viewportWidth, viewportHeight, result.ticket)
+                GlDetectionPresentation(result.ticket.timestampNs, viewportWidth, viewportHeight,
+                    result.boxes.map { coordinates.box(it) }, renderedTimestampNs, result.expiresElapsedNs)
+            } catch (error: IllegalArgumentException) {
+                asyncDetection.clear()
+                Log.w(TAG, "gl-yuv: invalid asynchronous coordinates", error)
+                null
             }
-            val exactTransform = if (frameSynchronized) pendingTransforms.exact(frame.timestampNs)
-                else frame.realtimeTransform
-            if (exactTransform == null) return
-            capturedFrames.remove(frame)
-            work.frame = frame
-            work.transform = exactTransform
-            work.ready.complete(true)
         }
         private val capturedFrames = java.util.ArrayDeque<CapturedFrame>()
         private val spareTargets = java.util.ArrayDeque<RenderTarget>()
@@ -368,12 +387,16 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 hdrDataSpace = 0
                 Log.i(TAG, "hdr-preview: renderer=HLG10 rgbBits=${bits[0]} fbo=RGB10_A2")
             }
-            clearDetection(forget = true)
+            clearDetection()
+            frameMetadata.clear()
+            displayedSampling = null
+            displayedTransform = null
             boxProgram = 0
             labelTexture = 0
             outputTarget.forget()
             rawTarget.forget()
             sampleTarget.forget()
+            diagnosticOutputTarget.forget()
             capturedFrames.clear()
             spareTargets.clear()
             pendingTransforms.clear()
@@ -393,6 +416,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
             clearDetection()
+            frameMetadata.clear()
+            displayedSampling = null
+            displayedTransform = null
             viewportWidth = width
             viewportHeight = height
             renderedTimestampNs = 0L
@@ -449,6 +475,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                     }
                     if (previousTimestamp > 0L && textureTimestampNs < previousTimestamp) {
                         clearDetection()
+                        frameMetadata.clear()
+                        displayedSampling = null
+                        displayedTransform = null
                         pendingTransforms.clear()
                         renderedTimestampNs = 0L
                         capturedFrames.forEach { spareTargets.addLast(it.target) }
@@ -461,8 +490,10 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                         } else if (spareTargets.isNotEmpty()) spareTargets.removeFirst() else RenderTarget(hdrEnabled)
                         target.ensure(viewportWidth, viewportHeight)
                         renderOes(target, PreviewTransform(viewWidth = viewportWidth.toFloat(), viewHeight = viewportHeight.toFloat()))
+                        val sampling = surfaceTextureMatrix.copyOf()
+                        frameMetadata.offer(textureTimestampNs, FrameMetadata(sampling, SystemClock.elapsedRealtimeNanos()))
                         capturedFrames.addLast(CapturedFrame(textureTimestampNs, target,
-                            surfaceTextureMatrix.copyOf(), synchronized(transformLock) { transform }))
+                            sampling, synchronized(transformLock) { transform }))
                     }
                 }
             } catch (e: RuntimeException) {
@@ -471,35 +502,23 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 return
             }
 
-            bindDetection()
-            val detection = detectionWork?.takeIf { it.frame != null && it.boxes != null }
-            val captured = if (detectionEnabled) detection?.frame else if (frameSynchronized) {
+            // 预览只受相机帧及 EIS 同帧矩阵驱动，永远不等待 YOLO 结果。
+            val captured = if (frameSynchronized) {
                 capturedFrames.lastOrNull { pendingTransforms.exact(it.timestampNs) != null }
             } else capturedFrames.peekLast()
-            val currentTransform = if (detectionEnabled) detection?.transform else if (frameSynchronized && captured != null) {
+            val currentTransform = if (frameSynchronized && captured != null) {
                 pendingTransforms.exact(captured.timestampNs)
             } else {
                 synchronized(transformLock) { transform }
             }
             val alreadyRendered = captured == null && capturedFrames.isEmpty()
             var diagnostic: RenderedPreviewFrame? = null
-            var presentation: GlDetectionPresentation? = null
             if (captured != null && currentTransform != null && captured.timestampNs > renderedTimestampNs) {
                 outputTarget.ensure(viewportWidth, viewportHeight)
                 renderCaptured(captured.target, outputTarget, currentTransform)
-                if (detection != null) {
-                    try {
-                        val coordinates = GlDetectionCoordinates(captured.sampling, displayMatrix,
-                            viewportWidth, viewportHeight, detection.ticket)
-                        val mapped = detection.boxes.orEmpty().map { coordinates.box(it) }
-                        drawDetectionBoxes(mapped)
-                        presentation = GlDetectionPresentation(captured.timestampNs, viewportWidth, viewportHeight, mapped)
-                    } catch (error: IllegalArgumentException) {
-                        Log.w(TAG, "gl-yuv: invalid coordinates", error)
-                        clearDetection()
-                    }
-                }
                 renderedTimestampNs = captured.timestampNs
+                displayedSampling = captured.sampling
+                displayedTransform = currentTransform
                 hasOutput = true
                 drawSequence++
                 if (diagnosticsEnabled) {
@@ -513,7 +532,13 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                             rotationDegrees = 0f,
                         ))
                         val raw = readLuma(rawTarget)
-                        val output = readLuma(outputTarget)
+                        // 诊断开关才创建额外目标；正常预览没有全尺寸回读或额外合成 FBO。
+                        diagnosticOutputTarget.ensure(viewportWidth, viewportHeight)
+                        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, diagnosticOutputTarget.framebufferId)
+                        GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+                        drawTexture(outputTarget.textureId, false, identity, identity)
+                        drawDetectionBoxes(detectionPresentation()?.boxes.orEmpty())
+                        val output = readLuma(diagnosticOutputTarget)
                         diagnostic = RenderedPreviewFrame(
                             sourceTimestampNs = captured.timestampNs,
                             transformTimestampNs = if (frameSynchronized) currentTransform.sourceTimestampNs else 0L,
@@ -533,7 +558,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                         "unmatched=$unmatchedDraws repeated=$repeatedDraws dropped=$droppedTextureFrames")
                 }
                 val drawnTimestampNs = captured.timestampNs
-                while (!detectionEnabled && capturedFrames.isNotEmpty() && capturedFrames.first.timestampNs <= drawnTimestampNs) {
+                while (capturedFrames.isNotEmpty() && capturedFrames.first.timestampNs <= drawnTimestampNs) {
                     val consumed = capturedFrames.removeFirst()
                     if (consumed.timestampNs != drawnTimestampNs) droppedTextureFrames++
                     spareTargets.addLast(consumed.target)
@@ -552,11 +577,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             if (outputTarget.textureId != 0 && hasOutput) {
                 drawTexture(outputTarget.textureId, false, identity, identity)
             }
-            if (presentation != null) {
-                Log.d(TAG, "gl-yuv: presented timestamp=${presentation.timestampNs} boxes=${presentation.boxes.size}")
-                detection?.shown?.complete(presentation)
-                clearDetection()
-            }
+            // 检测框独立画到屏幕，不烘焙到预览缓存，过期/关闭时一帧即可清除。
+            if (hasOutput) drawDetectionBoxes(detectionPresentation()?.boxes.orEmpty())
             diagnostic?.let { if (diagnosticConsumer?.invoke(it) != true) diagnosticDrops++ }
             if (hdrEnabled) {
                 val error = GLES20.glGetError()
@@ -628,7 +650,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         }
 
 
-        /** 框和文字写入图像的同一个 FBO，避免 Compose 与 GL 两个提交时钟造成错帧。 */
+        /** 在 GL 线程合成异步框与标签；图像刷新不等待此结果。 */
         private fun drawDetectionBoxes(boxes: List<GlDetectionQuad>) {
             if (boxes.isEmpty()) return
             if (boxProgram == 0) boxProgram = createProgram(
@@ -763,6 +785,10 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             outputTarget.release()
             rawTarget.release()
             sampleTarget.release()
+            diagnosticOutputTarget.release()
+            frameMetadata.clear()
+            displayedSampling = null
+            displayedTransform = null
             capturedFrames.forEach { it.target.release() }
             spareTargets.forEach { it.release() }
             capturedFrames.clear()

@@ -33,6 +33,8 @@ data class GlDetectionPresentation(
     val viewWidth: Int,
     val viewHeight: Int,
     val boxes: List<GlDetectionQuad>,
+    val previewTimestampNs: Long = timestampNs,
+    val expiresElapsedNs: Long = 0L,
 )
 
 /**

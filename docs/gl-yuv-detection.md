@@ -1,4 +1,4 @@
-# 普通 GL 与 YUV 同帧识别
+# 普通 GL 与 YUV 异步识别
 
 日期：2026-09-15。作者：Codex Agent。
 
@@ -8,21 +8,21 @@
 - 普通 GL 运行时使用 YUV 图源；退出 GL 后恢复原有图源选择，不改写其偏好。
 - 保持现有 YOLO 模型、单框/多框阈值和 native YUV 预处理，不新增模型或依赖。
 - HDR 模式不开放 YOLO；GL 绿光检测和截图校准仍禁用。
-- 严格同帧模式按推理速度更新画面，推理期间保留上一对图像与框。它不是在满速新预览上跟踪旧检测框，也不承诺相机满帧率。
+- 预览和推理解耦：相机持续刷新，YOLO 专用线程独立处理，不固定推理图像、不排队积压模型任务。
+- 最新异步框最多保留 200 ms，随当前 GL 显示变换重投影；不做光流或目标运动预测，框可能短暂滞后，不代表当前帧精确识别。过期或空结果清框，测距提示和触发同时检查有效期。
 - 普通逻辑相机预览不绑定物理输出；系统 EIS 固定关闭，仅允许 OIS 或应用层算法补偿。
 
 ## 数据与坐标
 
-1. ImageReader 取出最新 YUV 帧，保留 Image.timestamp。
-2. GL 在三个待选纹理缓存中寻找相同时间戳，固定一张纹理，并保存其采样矩阵和对应显示矩阵。纹理最多额外固定一张，不按推理耗时无限堆积。
-3. 找不到匹配帧时等待不超过 500 ms；被 SurfaceTexture 跳过的帧直接丢弃，不使用邻帧替代。
-4. 模型在专用 YoloInference 线程创建、运行和释放。Image 始终在 finally 中关闭。
-5. 将模型返回的旋转后原图坐标逆旋转到 YUV 缓冲区，归一化后应用该帧 SurfaceTexture 采样矩阵的逆，再应用实际 GL 显示矩阵。
-6. 对框的四个角分别映射，保留旋转四边形。框内百分比判定点由原框角插值，不使用旋转后外接矩形代替。
-7. 框、标签和对应图像写入同一个 FBO，一起提交。Compose 不再对 GL 框叠加实时 wrapper 变换。
-8. 完成提交后释放固定帧。取消、前后台切换、镜头/倍率切换和尺寸变化会让未完成票据失效；已使用票据不能重复提交。
+1. ImageReader 取出最新 YUV 帧，保留 Image.timestamp，沿用 native 预处理。
+2. GL 缓存最多 90 帧的时间戳和采样元数据，不固定整张纹理。来源元数据最多等待 100 ms，等待只影响识别协程，不影响 GL 刷新。
+3. 预览只按照最新可用相机图像及对应 EIS 矩阵显示。识别开关不再参与预览帧选择。
+4. YOLO 在 YoloInference 专用线程创建、运行和释放；任一时刻只有一个推理任务。Image 在 finally 中关闭。
+5. 模型结果保留来源时间戳，使用当前采样逆矩阵及当前显示矩阵重投影框的四角；不把显示重投影误称为目标跟踪。
+6. 框和标签独立合成到屏幕，不烘焙进预览缓存；关闭/过期时无需新图像即可清除。诊断开关才使用额外合成 FBO。
+7. 相机时间戳差和单调时钟均需小于 200 ms；单调时钟从来源帧进入 GL 缓存时计时，包含推理耗时，不在收到结果后续期。未来、乱序、重复或过期结果被拒绝；新空结果立即替换旧框。镜头、倍率、模式、尺寸及生命周期切换清理结果。
 
-坐标前提：YUV 和 OES 来自同一逻辑会话，使用相同流尺寸、视场和时间戳。矩阵包含采样边缘裁切、镜像、方向、基础缩放、自研 EIS 与 Roll；不能额外重复 centerCrop。厂商不同流的融合差异仍需真机用已知目标验证。
+坐标前提：YUV 和 OES 来自同一逻辑会话，使用相同流尺寸、视场和时间戳。矩阵包含当前采样边缘裁切、镜像、方向、基础缩放、自研 EIS 与 Roll；不能额外重复 centerCrop，也不包含两帧之间目标自身或相机运动的估计。厂商不同流的融合差异仍需真机用已知目标验证。
 
 API 依据：[SurfaceTexture 采样矩阵](https://developer.android.com/reference/android/graphics/SurfaceTexture#getTransformMatrix(float[]))、[Image 时间戳](https://developer.android.com/reference/android/media/Image#getTimestamp())。
 
@@ -30,9 +30,23 @@ API 依据：[SurfaceTexture 采样矩阵](https://developer.android.com/referen
 
 - 单元测试：`gradlew.bat :app:testDebugUnitTest --offline --no-daemon`。
 - 构建：`gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest --offline --no-daemon`。
-- GL 像素回归：`GlFrameBindingInstrumentedTest`，检查精确帧配对、迟到矩阵、固定帧跨六帧保留、框与白色矩形像素边界、同 FBO 中文标签像素及旧票据拒绝。
-- 模型链路回归：`GlYuvModelInstrumentedTest`，真实相机 YUV -> 现有模型 CPU 推理 -> 同时间戳 GL 输出；至少两帧。
+- GL 像素回归：`GlFrameBindingInstrumentedTest`，保留相机/EIS 同帧测试，新增无推理结果时六帧持续前进、拒绝过期推理、异步框与中文标签、空结果清框和旧票据拒绝。
+- 模型链路回归：`GlYuvModelInstrumentedTest`，相机 YUV -> 现有 CPU 模型，故意延迟 250 ms，确认预览继续更新并丢弃过期结果；至少两次推理。
 - 数学回归：`GlDetectionCoordinatesTest`，覆盖 0/90/180/270 度、镜像、采样裁切、平移、Roll、矩阵快照与非法输入。
+- `GlAsyncDetectionStateTest` 覆盖双时钟超时、乱序、未来帧、空结果和模式重置。
+
+## 本次验证
+
+- Debug APK 和测试 APK 构建成功，14 项 JVM 测试全部通过。
+- API 36 模拟器两项仪器测试通过：GL 像素回归与真实相机 YUV/现有 CPU 模型慢推理回归。延迟 250 ms 时预览继续更新，过期结果被拒绝。
+- 合成像素测试使用 240x426 渲染表面，预热屏幕文字和诊断 FBO 后检查标签与清框。软件 GPU 首次文字合成/诊断耗时约 4 秒，曾导致测试来源帧过期；没有放宽正式代码的 200 ms 限制。该测试证明功能，不代表冷启动或真机帧率。
+- 全量 Lint 仍被原有 8 项错误阻断（权限、Fragment 版本及相机特性声明），另有 62 项警告和 1 项提示；本轮没有新增 Lint 错误。
+- 本轮无真机连接，未安装到手机。真实旗杆运动下的框滞后、长焦精度、GPU 资源竞争及持续帧率仍需真机验证。
+
+## 历史验证
+
+以下为严格同帧旧方案（`a068a9d`）的记录，不代表本轮异步性能：
+
 - 构建成功，10 项 JVM 测试全部通过。
 - 已连接真机 SM-S9480（Android API 36、1080x2340、450 dpi）安装本轮 Debug 包；同帧 GL 像素测试与真实相机模型闭环测试均通过。
 - 实际相机页验证普通 GL 下“识别”按钮可用、YUV 推理持续输出、前后台切换恢复；关闭 GL 后自动恢复原“预览截图”图源，重新开启 GL 后恢复强制 YUV。

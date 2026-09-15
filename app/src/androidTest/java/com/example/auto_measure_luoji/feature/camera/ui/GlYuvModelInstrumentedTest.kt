@@ -21,13 +21,14 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class GlYuvModelInstrumentedTest {
-    @Test fun ordinaryCameraYuvRunsModelAndPresentsItsExactGlFrame() {
+    @Test fun ordinaryCameraYuvRunsModelWithoutStoppingPreview() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
         val lens = SelectLensUseCase()(LensScanner(context).scan()) ?: error("没有后置相机")
         val textures = LinkedBlockingQueue<SurfaceTexture>()
         val errors = LinkedBlockingQueue<String>()
+        val previewFrames = java.util.concurrent.atomic.AtomicInteger()
         val controller = Camera2Controller(context)
         controller.start()
         controller.onError = { errors.offer(it) }
@@ -36,10 +37,14 @@ class GlYuvModelInstrumentedTest {
                 lateinit var preview: GlStabilizedPreviewView
                 scenario.onActivity {
                     preview = it.preview
+                    preview.layoutParams = android.widget.FrameLayout.LayoutParams(240, 426)
                     preview.onCameraSurfaceTextureAvailable = { st -> textures.offer(st) }
                     preview.onPreviewError = { message -> errors.offer(message) }
                     preview.setFrameSynchronized(true)
                     preview.setDetectionEnabled(true)
+                    preview.setDiagnosticRecording(true)
+                    preview.canAcceptDiagnosticFrame = { true }
+                    preview.onDiagnosticFrame = { previewFrames.incrementAndGet(); true }
                     controller.onFrameTimingChanged = { timing ->
                         preview.setPreviewTransform(1.18f, 7f, -4f, 2f, 240f, 426f, timing.sensorTimestampNs)
                     }
@@ -64,19 +69,22 @@ class GlYuvModelInstrumentedTest {
                                     timestamp, frame.width, frame.height, controller.sensorOrientation,
                                 ) } ?: return@use
                                 try {
+                                    val before = previewFrames.get()
                                     val result = model.detectFromYuv(frame, controller.sensorOrientation)
+                                    // 人为慢推理也不能让预览停住；过期模型结果允许丢弃。
+                                    Thread.sleep(250)
+                                    assertTrue("preview blocked by inference", previewFrames.get() > before)
                                     val shown = runBlocking { preview.presentDetection(ticket, result.detections.map {
                                         GlDetectionBox(it.box.left, it.box.top, it.box.right, it.box.bottom, it.label)
-                                    }) } ?: error("模型结果未显示")
-                                    assertEquals(timestamp, shown.timestampNs)
-                                    assertTrue(shown.timestampNs > previousTimestamp)
-                                    assertEquals(result.detections.size, shown.boxes.size)
-                                    previousTimestamp = shown.timestampNs
+                                    }) }
+                                    assertNull("expired inference result remained visible", shown)
+                                    assertTrue(timestamp > previousTimestamp)
+                                    previousTimestamp = timestamp
                                     presented++
                                 } finally { preview.cancelDetectionFrame(ticket) }
                             }
                         }
-                        assertEquals("未完成两帧 YUV -> 模型 -> GL 闭环", 2, presented)
+                        assertEquals("未完成两帧异步 YUV 模型推理", 2, presented)
                         assertNotNull(controller.analysisImageReader)
                     } finally {
                         controller.closeCamera()

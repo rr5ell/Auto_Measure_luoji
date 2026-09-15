@@ -43,7 +43,7 @@
 - 普通 SDR/HDR 预览均使用父逻辑相机 Session，禁止绑定物理预览 Surface；物理绑定仅保留给双摄校准。
 - HDR 复用 HLG10、BT.2020 HLG EGL 表面、RGB10_A2 缓存及源项目 GL 同帧队列。HDR 不等于多曝光融合。
 - HDR 开启前检查 Android 13+、相机 10-bit/HLG10 能力、屏幕 HLG 能力和 GPU 扩展；失败恢复 SDR 及开启 HDR 前的 GL 选择。
-- HDR 期间禁用 YOLO、绿光及截图校准，且关闭 YUV 分析输出。后续普通 GL 已接通 [YUV 同帧识别](gl-yuv-detection.md)；GL 绿光及截图校准仍禁用。
+- HDR 期间禁用 YOLO、绿光及截图校准，且关闭 YUV 分析输出。后续普通 GL 已接通 [YUV 异步识别](gl-yuv-detection.md)；GL 绿光及截图校准仍禁用。
 - TextureView 与 GL 都按 SENSOR_TIMESTAMP 匹配矩阵；GL 同时缓存图像，TextureView 只在匹配可见纹理时提交。
 - 可选视觉门控复用 OpenCV 4.12.0 的 LK/RANSAC 实现，使用独立分析线程和严格同时间戳反馈；无纹理、分析失败不能判成静止。
 - LSC 能力来自实际打开的逻辑相机。不支持的模式禁用；切换失败恢复上一请求，不把传感器固有校正误报为可关闭。

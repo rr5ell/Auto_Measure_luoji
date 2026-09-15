@@ -10,7 +10,7 @@
 - 自研 EIS 不得改变普通预览的父逻辑相机 Session；普通预览继续禁止 `OutputConfiguration.setPhysicalCameraId()`，双摄校准 `strictPhysical=true` 例外不变。
 - 普通校准、双摄校准和绿光采集期间必须暂停或绕过自研 EIS 补偿，避免显示层坐标和采集坐标漂移。
 - 自研 EIS 补偿模型必须区分并记录 `opticalZoomBase`、`digitalZoomRatio`、`displayZoomRatio` 和 `renderScale`；纯 UI 放大或校准居中不能被误写成 Camera2 请求倍率。
-- 普通 GL 的 YOLO 仅允许 YUV 同帧识别：必须先固定相同时间戳纹理，使用其采样逆矩阵与显示矩阵，将框画入同一个 FBO；禁止邻帧近似、最新矩阵回填或重复 Compose 变换。HDR YOLO、GL 绿光和截图校准仍禁止。
+- 普通 GL 的 YOLO 使用异步 YUV 识别；预览禁止等待推理或固定纹理。来源元数据必须精确匹配，旧框最多 200 ms，并与当前 GL 变换重投影；禁止声称异步框是当前帧精确结果，禁止重复 Compose 变换。HDR YOLO、GL 绿光和截图校准仍禁止。
 - 大体积模型、缓存、构建产物、密钥和真实用户隐私数据不得登记到代码资产库。
 - 绿光识别校准链路优先传入归一化图片 bytes：预览帧先缩放到 `1080x1920`，再编码为 PNG/JPEG 等完整图片格式，禁止把无宽高/stride 元数据的裸帧直接传入 bytes 入口。
 - 绿光新旧算法对比识别只做调试验证入口，默认单次触发并保存两组图片，禁止改成无节流连续保存；对比必须使用同一帧输入。

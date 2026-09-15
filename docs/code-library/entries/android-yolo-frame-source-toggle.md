@@ -36,7 +36,7 @@
 
 ## 2026-09-15 普通 GL 接入
 - 普通 GL 临时强制使用 YUV 图源，退出后恢复已保存的 TextureView 图源，不覆盖偏好。
-- GL 同帧坐标、纹理固定和渲染以 `android-gl-yuv-frame-detection` 为准；禁止把此条目的中心裁切映射直接套到 GL。
+- GL 来源元数据、异步坐标映射与结果过期策略以 `android-gl-yuv-frame-detection` 为准；预览不固定推理纹理，禁止把此条目的中心裁切映射直接套到 GL。
 - 模型创建、执行与关闭固定在同一 YoloInference 线程。HDR 仍禁用识别，且没有 YUV 分析流。
 - 当前系统 EIS 固定 OFF；下方历史“显式 ON/PREVIEW”说明已失效。
 

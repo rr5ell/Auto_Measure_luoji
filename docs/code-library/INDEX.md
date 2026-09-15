@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/gl-yuv-detection` |
+| 当前主要分支 | `feature/async-gl-preview` |
 
 ## 可复用能力
 
@@ -40,7 +40,7 @@
 
 ## HDR 与 LSC
 
-- [android-gl-yuv-frame-detection](entries/android-gl-yuv-frame-detection.md)：普通 GL 的 YUV 同帧识别、纹理固定、采样逆映射与检测框同 FBO 绘制；标准路径为 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/gldetection/GlDetectionCoordinates.kt` 和 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt`。
+- [android-gl-yuv-frame-detection](entries/android-gl-yuv-frame-detection.md)：普通 GL 的 YUV 异步识别、来源元数据、采样逆映射及 200 ms 结果过期策略；标准路径为 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/gldetection/GlDetectionCoordinates.kt`、`app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/gldetection/GlAsyncDetectionState.kt` 和 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt`。
 
 | reuse_id | 能力 | 标准代码路径 | 状态 |
 |---|---|---|---|
@@ -55,4 +55,4 @@
 
 ## 最后更新
 
-2026-09-15，Codex Agent。同步源项目 `2e14622` 的自研 EIS 和默认参数，增加 HDR/LSC，系统 EIS 固定 OFF。
+2026-09-15，Codex Agent。GL 预览与 YOLO 解耦，异步框保留来源时间戳并在 200 ms 后过期；系统 EIS 固定 OFF。

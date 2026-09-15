@@ -1374,6 +1374,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var detectionBoxes by remember { mutableStateOf<List<Pair<RectF, String>>>(emptyList()) }
     var detectionPerfText by remember { mutableStateOf("") }
     var showMeasurePrompt by remember { mutableStateOf(false) }
+    var glDetectionExpiresNs by remember { mutableLongStateOf(0L) }
     val isDetecting = remember { AtomicBoolean(false) }
     // 测距触发：检测循环中上升沿设为 true，测距启动后设为 false
     var measureTrigger by remember { mutableStateOf(false) }
@@ -4504,7 +4505,16 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         onDispose { view?.setDetectionEnabled(false) }
     }
 
-    // 检测帧处理循环：TextureView 保持原路径；GL 先固定同帧纹理，再推理并成对显示。
+    LaunchedEffect(glDetectionExpiresNs, gyroPreviewGlRenderEnabled, detectionEnabled) {
+        if (!gyroPreviewGlRenderEnabled || !detectionEnabled || glDetectionExpiresNs == 0L) return@LaunchedEffect
+        val remaining = glDetectionExpiresNs - android.os.SystemClock.elapsedRealtimeNanos()
+        delay(((remaining + 999_999L) / 1_000_000L).coerceAtLeast(0L))
+        showMeasurePrompt = false
+        measureTrigger = false
+        wasTargetInArea = false
+    }
+
+    // GL 持续预览，YOLO 专用线程独立推理；这里只发布最新且未过期的结果。
 
     LaunchedEffect(
         detectionEnabled,
@@ -4521,6 +4531,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         yoloTopConfidenceThreshold,
     ) {
         if (!detectionEnabled || yoloDetector == null || hdrPreviewEnabled || !isCameraReady) {
+            glDetectionExpiresNs = 0L
             showMeasurePrompt = false
             measureTrigger = false
             wasTargetInArea = false
@@ -4612,7 +4623,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                                 )
                                             }
                                             if (gyroPreviewGlRenderEnabled && glTicket == null) {
-                                                detectionPerfText = "等待同帧 GL 图像..."
+                                                detectionPerfText = "等待 GL 帧元数据..."
                                                 showMeasurePrompt = false
                                                 measureTrigger = false
                                                 wasTargetInArea = false
@@ -4640,7 +4651,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 showMeasurePrompt = false
                                 measureTrigger = false
                                 wasTargetInArea = false
-                                detectionPerfText = "GL 同帧结果已失效"
+                                glDetectionExpiresNs = 0L
+                                detectionPerfText = "GL 异步结果已过期"
                             }
                         }
                         if (result != null && sourceWidth > 0 && sourceHeight > 0 &&
@@ -4677,9 +4689,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     )
                                     r to "${d.label} ${"%.2f".format(d.score)}"
                                 }
-                                // GL 的四边形和标签已画入同帧 FBO，禁止 Compose 再次套用实时 wrapper 变换。
+                                // 异步框由 GL 合成，Compose 不重复套用显示变换。
                                 detectionBoxes = if (presented == null) mapped else emptyList()
-                                if (presented != null) sourceLabel += " GL帧=${presented.timestampNs}"
+                                if (presented != null) {
+                                    glDetectionExpiresNs = presented.expiresElapsedNs
+                                    sourceLabel += " GL异步 age=${(presented.previewTimestampNs - presented.timestampNs) / 1_000_000L}ms"
+                                }
                                 detectionPerfText = "$sourceLabel | $filterText | pre=${result.timings.preprocessMs}ms inf=${result.timings.inferenceMs}ms post=${result.timings.postprocessMs}ms total=${totalMs}ms | ${result.detections.size}obj"
                                 Log.d("CameraScreen", "detection done: objects=${result.detections.size}, total=${totalMs}ms")
 
@@ -5229,6 +5244,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         LaunchedEffect(measureTrigger) {
             if (measureTrigger) {
                 measureTrigger = false
+                if (gyroPreviewGlRenderEnabled &&
+                    android.os.SystemClock.elapsedRealtimeNanos() >= glDetectionExpiresNs) return@LaunchedEffect
                 if (detectionEnabled && isBleConnected && !isDeviceMeasuring) {
                     scope.launch {
                         isDeviceMeasuring = true
