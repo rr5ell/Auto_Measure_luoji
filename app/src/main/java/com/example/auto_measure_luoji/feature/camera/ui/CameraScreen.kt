@@ -2481,15 +2481,19 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         synchronized(gyroPreviewFrameTimingHistory) { gyroPreviewFrameTimingHistory.clear() }
         gyroPreviewTransform = GyroPreviewStabilizer.Transform.Identity
         gyroPreviewLastMatrixUpdateMs = 0L
-        detectionEnabled = false
+        // Preserve the user's recognition intent; session readiness pauses inference during the switch.
         detectionBoxes = emptyList()
+        detectionPerfText = ""
+        glDetectionExpiresNs = 0L
         showMeasurePrompt = false
+        measureTrigger = false
+        wasTargetInArea = false
         gyroPreviewGlRenderEnabled = enabled || hdrPreviousGlRender
         gyroPreviewGlRenderEnabledInput = gyroPreviewGlRenderEnabled
         hdrPreviewEnabled = enabled
         hdrYoloAvailable = false
         statusText = if (enabled) "正在启动 HLG10 HDR 预览" else "正在恢复 SDR 预览"
-        Log.i("CameraScreen", "hdr-preview: requested=$enabled gl=$gyroPreviewGlRenderEnabled")
+        Log.i("CameraScreen", "hdr-preview: requested=$enabled gl=$gyroPreviewGlRenderEnabled detection=$detectionEnabled")
     }
 
     fun toggleHdrPreview() {
@@ -4622,18 +4626,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                         try {
                                             val rotation = cameraController.sensorOrientation
                                             val capturedElapsedNs = android.os.SystemClock.elapsedRealtimeNanos()
-                                            sourceWidth = if (rotation == 90 || rotation == 270) image.height else image.width
-                                            sourceHeight = if (rotation == 90 || rotation == 270) image.width else image.height
+                                            // Session teardown may close the Image while inference is suspended.
+                                            val timestampNs = image.timestamp
+                                            val imageWidth = image.width
+                                            val imageHeight = image.height
+                                            sourceWidth = if (rotation == 90 || rotation == 270) imageHeight else imageWidth
+                                            sourceHeight = if (rotation == 90 || rotation == 270) imageWidth else imageHeight
                                             val lensDebug = activeLensDebugText()
-                                            sourceLabel = "ImageReaderYUV ${image.width}x${image.height} rot=$rotation $lensDebug"
+                                            sourceLabel = "ImageReaderYUV ${imageWidth}x${imageHeight} rot=$rotation $lensDebug"
                                             // YUV 必须先送入模型；GL 只处理结果显示，不拥有推理准入权。
-                                            Log.d("CameraScreen", "YOLO source: $sourceLabel timestamp=${image.timestamp}")
+                                            Log.d("CameraScreen", "YOLO source: $sourceLabel timestamp=$timestampNs")
                                             val inferred = withContext(yoloDispatcher) {
                                                 detector.detectFromYuv(image, rotation, postprocessOptions)
                                             }
                                             if (gyroPreviewGlRenderEnabled) {
                                                 glTicket = detectionGlView?.acquireDetectionFrame(
-                                                    image.timestamp, image.width, image.height, rotation, capturedElapsedNs,
+                                                    timestampNs, imageWidth, imageHeight, rotation, capturedElapsedNs,
                                                 )
                                             }
                                             inferred

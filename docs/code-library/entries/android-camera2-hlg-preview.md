@@ -9,8 +9,9 @@
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\hdr\HdrPreviewCapabilities.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\hdr\HlgPreviewGl.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\GlStabilizedPreviewView.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
 - 相关文档：E:\StudioProjects\Auto_Measure_luoji\docs\eis-hdr-lsc-sync.md
-- 最后更新：2026-09-15
+- 最后更新：2026-09-16
 - 作者：Codex Agent
 
 ## 适用场景
@@ -32,6 +33,8 @@
 - 后台调用 `HdrPreviewCapabilities.checkCamera()` 和 `HlgPreviewGl.checkSupport()`。
 - 模型分析需调用 `checkYuvAnalysis()` 双向检查 HLG10/STANDARD 约束；空约束是无限制。允许时由 Camera2Controller 创建 HLG10 预览与 STANDARD YUV 输出，加入同一请求。
 - `CameraScreen.applyHdrPreviewMode()` 同时切换相机会话及 GL View，关闭时恢复先前 GL 选择。
+- 切换保留 `detectionEnabled` 用户意图，由相机就绪状态与 HDR 分析流可用性暂停/恢复推理；只清除框、性能文本、有效期及测距触发。不能用关闭识别开关代替暂停推理。
+- YUV 的时间戳和尺寸在异步推理前快照；推理返回后不能再读取可能已被会话关闭释放的 Image 元数据。
 - 复用 `FrameTransformQueue` 精确匹配，不使用临近时间戳回退。
 
 ## 注意事项
@@ -40,6 +43,7 @@
 
 ## 测试与验证
 - `HdrStreamCombinationTest`：组合准入边界；`HdrPreviewInstrumentedTest`：不支持屏幕、HLG 色彩标记、10-bit 精度、同帧输出、SDR YUV 模型调用及异步检测框注册。
+- `HdrDetectionToggleInstrumentedTest`：实际相机页面 SDR/HDR 双向切换保留识别状态、恢复模型结果，关闭状态不被自动开启。
 - 真正 HLG 输出测试在不支持硬件时跳过，不能据此宣称 HDR 实机画质已通过。
 - 构建与测试结果见关联文档。
 

@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/hdr-yuv-detection` |
+| 当前主要分支 | `fix/hdr-detection-state` |
 
 ## 可复用能力
 
@@ -55,4 +55,4 @@
 
 ## 最后更新
 
-2026-09-15，Codex Agent。接入 HLG10 预览与 STANDARD YUV 模型识别双路输出，先检查组合能力，复用后台 YOLO 与异步框；系统 EIS 固定 OFF。
+2026-09-16，Codex Agent。HDR 切换保留识别意图并清理瞬态结果；推理前快照 YUV 帧元数据，避免会话关闭后读取失效图像。模型和阈值不变，系统 EIS 固定 OFF。

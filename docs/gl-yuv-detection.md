@@ -1,6 +1,6 @@
 # GL、HDR 与 YUV 异步识别
 
-日期：2026-09-15。作者：Codex Agent。
+日期：2026-09-16。作者：Codex Agent。
 
 ## 使用与边界
 
@@ -8,13 +8,14 @@
 - 普通 GL 运行时使用 YUV 图源；退出 GL 后恢复原有图源选择，不改写其偏好。
 - 保持现有 YOLO 模型、单框/多框阈值和 native YUV 预处理，不新增模型或依赖。
 - HDR 在设备允许 HLG10 + STANDARD 双路输出时开放 YOLO。预览输出保持 HLG10，模型使用同一逻辑会话的 SDR YUV，不能把 HLG 原始像素送入现有模型。GL 绿光检测和截图校准仍禁用。
+- 切换 HDR 保留识别意图，不再把识别开关关闭。会话重建时清理旧结果并暂停推理；新会话就绪且分析流可用后自动恢复。原来关闭识别时保持关闭。
 - 预览和推理解耦：相机持续刷新，YOLO 专用线程独立处理，不固定推理图像、不排队积压模型任务。
 - 最新异步框最多保留 200 ms，随当前 GL 显示变换重投影；不做光流或目标运动预测，框可能短暂滞后，不代表当前帧精确识别。过期或空结果清框，测距提示和触发同时检查有效期。
 - 普通逻辑相机预览不绑定物理输出；系统 EIS 固定关闭，仅允许 OIS 或应用层算法补偿。
 
 ## 数据与坐标
 
-1. ImageReader 取出最新 YUV 帧，保留 Image.timestamp，沿用 native 预处理。
+1. ImageReader 取出最新 YUV 帧，推理前快照时间戳与尺寸，沿用 native 预处理。异步推理返回后不再读取可能随会话关闭而失效的 Image 元数据。
 2. 先调用 YOLO，再注册 GL 异步结果，禁止把 GL 元数据匹配作为推理前提。GL 最多缓存 90 帧的元数据作为时间参考，但允许来源 YUV 帧从未被预览消费；注册最多等待 100 ms，不重试查找匹配图像。
 3. 预览只按照最新可用相机图像及对应 EIS 矩阵显示。识别开关不再参与预览帧选择。
 4. YOLO 在 YoloInference 专用线程创建、运行和释放；任一时刻只有一个推理任务。Image 在 finally 中关闭。
@@ -36,6 +37,14 @@ API 依据：[SurfaceTexture 采样矩阵](https://developer.android.com/referen
 - `GlAsyncDetectionStateTest` 覆盖双时钟超时、乱序、未来帧、空结果和模式重置。
 
 ## 本次验证
+
+- 2026-09-16，SM-S9480 真机复现 HDR 自动关闭识别；手动再次开启后 YUV/LOCAL_GPU 连续运行，用户现场确认可以识别。采样日志筛选阈值为 0.25，未修改模型或阈值。
+- 修复后 17 项 JVM 测试通过，Debug APK 与测试 APK 构建成功，已保留数据更新手机。
+- 分组执行 5 项真机仪器测试通过：`HdrDetectionToggleInstrumentedTest`、`HdrPreviewInstrumentedTest`（2 项）、`GlYuvModelInstrumentedTest`、`GlFrameBindingInstrumentedTest`。HDR 页面双向切换保留识别状态并恢复结果，原来关闭时不自动开启；实际 HLG/10-bit、YUV 模型调用及新鲜异步框准入通过。
+- 首次混合执行在普通 GL 测试退出时停顿，终止后分组运行通过；退出停顿根因尚未确认，不声称完整混合套件稳定通过。
+- 本次未重跑全量 Lint；真实目标检出由用户现场确认，不等于量化检出率或运动坐标精度通过。合成框仍只用于确定性显示测试；长期负载及完整 Image 所有权竞态需后续专项验证。
+
+## 前次 HDR 接入验证
 
 - HDR 接入新增 `HdrStreamCombinationTest`，覆盖空约束、双向限制和未知配置；本轮 17 项 JVM 测试全部通过，Debug 包及仪器测试包构建成功。
 - 已扩展 `HdrPreviewInstrumentedTest`，用于在支持硬件上验证 HLG/10-bit、SDR YUV 模型调用和新鲜异步结果注册；本轮手机锁屏，未执行这项相机仪器测试，不能声称实际双路出帧或旗杆检出已通过。
