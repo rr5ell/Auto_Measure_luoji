@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [hdr-yolo-settings-2026-09-16] - 2026-09-16
+
+作者：Codex Agent。
+
+### 修复
+- 根因：HDR 的 YUV 模型识别已接通，但“YOLO单框/YOLO多框”菜单仍沿用 `!hdrPreviewEnabled` 禁用条件。
+- 移除阈值入口的旧限制，继续复用原有阈值校验、保存与模型参数传递；不修改用户阈值或默认值。
+- GL/HDR 的图源切换、截图校准与绿光识别仍禁用，避免开放尚未适配的功能。
+- 扩展 HDR 页面回归，覆盖阈值入口、保存后继续识别及图源禁用边界。
+- 验证：17 项 JVM 测试通过，Debug 包与测试包构建成功；SM-S9480 上扩展后的 HDR 页面仪器测试通过，已保留数据安装修复包。本轮未重跑全量 Lint。
+
 ## [hdr-detection-state-2026-09-16] - 2026-09-16
 
 作者：Codex Agent。

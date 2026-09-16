@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `fix/hdr-detection-state` |
+| 当前主要分支 | `fix/hdr-yolo-settings` |
 
 ## 可复用能力
 
@@ -55,4 +55,4 @@
 
 ## 最后更新
 
-2026-09-16，Codex Agent。HDR 切换保留识别意图并清理瞬态结果；推理前快照 YUV 帧元数据，避免会话关闭后读取失效图像。模型和阈值不变，系统 EIS 固定 OFF。
+2026-09-16，Codex Agent。恢复 HDR 下 YOLO 阈值/单框策略设置入口，保留 GL 图源和校准限制；不改变模型和阈值数值，系统 EIS 固定 OFF。

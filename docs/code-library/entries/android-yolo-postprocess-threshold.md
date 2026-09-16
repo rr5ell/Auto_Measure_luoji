@@ -11,7 +11,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- 最后更新：2026-09-07
+- 最后更新：2026-09-16
 - 作者：Codex Agent
 
 ## 适用场景
@@ -43,11 +43,13 @@
 - 检测状态文本会显示 `单框>=阈值` 或 `多框>=阈值`，现场验证先确认该文本。
 - 单框模式仍先按阈值筛候选，再执行 NMS，最后只保留最高置信度结果。
 - YUV native 预处理和 Kotlin fallback 不处理阈值，阈值只作用在模型输出解析之后。
+- HDR 使用 SDR YUV 分析流时同样复用阈值设置；设置入口不依赖 HDR 开关，不应把未适配的截图图源限制套到模型后处理参数上。禁止启用系统 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。
 
 ## 测试与验证
 - 测试命令：`git diff --check`
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin --no-daemon`
 - 测试命令：`.\gradlew.bat :app:assembleDebug --no-daemon`
+- 真机回归：`HdrDetectionToggleInstrumentedTest` 检查 HDR 下阈值入口可点击、对话框可保存、识别仍运行，并检查图源切换仍禁用；不主动改变用户阈值。
 - 已覆盖边界：PreviewBitmap/YUV 调用点统一传参、阈值输入范围校验、关闭单框时回到原始多框阈值。
 - 未覆盖风险：阈值对不同距离、光照和旗杆尺寸的实际召回率需要真机采样验证。
 

@@ -5108,7 +5108,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 "YOLO多框"
                             },
                             active = yoloTopDetectionEnabled,
-                            enabled = !hdrPreviewEnabled,
                             accent = Color(0xFFFF9800),
                             onClick = {
                                 toolsMenuExpanded = false

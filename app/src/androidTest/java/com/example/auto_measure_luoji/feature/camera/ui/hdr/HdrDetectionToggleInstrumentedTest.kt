@@ -5,6 +5,9 @@ import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasText
@@ -51,6 +54,15 @@ class HdrDetectionToggleInstrumentedTest {
 
             compose.onNodeWithContentDescription("HDR 预览").performClick()
             waitForHdr()
+            waitForRecognition("识别中")
+            waitForInference()
+
+            compose.onNodeWithText("更多").performClick()
+            compose.onNodeWithText("YOLO源 ", substring = true).assertIsNotEnabled()
+            compose.onNode(hasText("YOLO单框", substring = true) or hasText("YOLO多框"))
+                .assertIsEnabled().performClick()
+            compose.onNodeWithText("YOLO识别阈值").assertIsDisplayed()
+            compose.onNodeWithText("保存").assertIsEnabled().performClick()
             waitForRecognition("识别中")
             waitForInference()
 
