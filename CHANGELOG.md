@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.32] - 2026-09-17
+
+作者：Codex Agent。
+
+### 发布
+- 构建版本递增为 `0.8.32 (832)`，用于蒲公英测试分发，避免与上一版 `0.8.31 (831)` 混淆。
+- 包含 GL 预览与后台 YOLO 解耦、HDR 的 SDR YUV 模型输入、切换保留识别状态和 HDR 阈值设置入口修复。
+- 本次仅调整发布版本，不改变模型、阈值、相机参数或系统 EIS 配置。
+- Debug APK 构建成功，单元测试任务通过（复用已有 17 项通过结果）；本次未重跑真机或全量 Lint。
+- 蒲公英解析成功，平台确认 `Auto_Measure_luoji 0.8.32 (832)`；[下载页面](https://www.pgyer.com/automeasureluoji)。
+- APK SHA-256：`D464E3FADBF3957E10804BFCB9C12780298E5489AEFCE91FE7F22692C4E84C87`。
+
 ## [hdr-yolo-settings-2026-09-16] - 2026-09-16
 
 作者：Codex Agent。

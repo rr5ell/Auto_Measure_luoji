@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `fix/hdr-yolo-settings` |
+| 当前主要分支 | `release/pgyer-0-8-32` |
 
 ## 可复用能力
 
@@ -55,4 +55,4 @@
 
 ## 最后更新
 
-2026-09-16，Codex Agent。恢复 HDR 下 YOLO 阈值/单框策略设置入口，保留 GL 图源和校准限制；不改变模型和阈值数值，系统 EIS 固定 OFF。
+2026-09-17，Codex Agent。构建版本递增为 0.8.32 (832)，复用现有蒲公英上传脚本；沿用已验证的 HDR 阈值入口修复，不改变核心算法。
