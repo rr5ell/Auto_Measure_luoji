@@ -76,6 +76,7 @@ class GlFrameBindingInstrumentedTest {
                 }
                 assertTrue("GL warmup failed", warmed)
                 frames.clear()
+                preview.queueEvent { preview.previewFrameRate.reset(0L) }
                 submit(1_000_000_000L)
                 produce(1_000_000_000L, 0.2f)
                 val first = frames.poll(5, TimeUnit.SECONDS) ?: error("first draw missing")
@@ -93,6 +94,12 @@ class GlFrameBindingInstrumentedTest {
                 assertTrue(second.raw.luma[20] > first.raw.luma[20] + 30)
                 submit(1_033_333_333L, 50f)
                 assertNull("same image changed compensation twice", frames.poll(250, TimeUnit.MILLISECONDS))
+                val fpsSamples = LinkedBlockingQueue<Double>()
+                preview.queueEvent { fpsSamples.offer(preview.previewFrameRate.sample(1_000_000_000L)!!) }
+                assertEquals(2.0, fpsSamples.poll(5, TimeUnit.SECONDS)!!, 0.001)
+                preview.requestRender()
+                preview.queueEvent { fpsSamples.offer(preview.previewFrameRate.sample(2_000_000_000L)!!) }
+                assertEquals(0.0, fpsSamples.poll(5, TimeUnit.SECONDS)!!, 0.001)
                 produce(1_066_666_666L, 0.6f)
                 val third = frames.poll(5, TimeUnit.SECONDS) ?: error("future pair missing")
                 assertEquals(1_066_666_666L, third.transformTimestampNs)

@@ -24,6 +24,7 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import com.example.auto_measure_luoji.feature.camera.domain.FrameTransformQueue
+import com.example.auto_measure_luoji.feature.camera.domain.previewfps.PreviewFrameRate
 import com.example.auto_measure_luoji.feature.camera.domain.GyroPreviewStabilizer
 import com.example.auto_measure_luoji.feature.camera.domain.PreviewMotionEstimator
 import com.example.auto_measure_luoji.feature.camera.domain.RenderedPreviewFrame
@@ -50,7 +51,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
     private val hdrEnabled: Boolean = false,
 ) : GLSurfaceView(context, attrs) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val previewRenderer = CameraPreviewRenderer(hdrEnabled)
+    val previewFrameRate = PreviewFrameRate()
+    private val previewRenderer = CameraPreviewRenderer(hdrEnabled, previewFrameRate)
     private val diagnosticRecordingRequested = AtomicBoolean(false)
     private var cameraSurfaceTexture: SurfaceTexture? = null
     private val detectionIds = AtomicLong()
@@ -209,7 +211,10 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
-    private class CameraPreviewRenderer(private val hdrEnabled: Boolean) : Renderer {
+    private class CameraPreviewRenderer(
+        private val hdrEnabled: Boolean,
+        private val previewFrameRate: PreviewFrameRate,
+    ) : Renderer {
         var onSurfaceTextureCreated: ((SurfaceTexture) -> Unit)? = null
         var onSurfaceTextureReleased: ((SurfaceTexture) -> Unit)? = null
         var onFailure: ((String) -> Unit)? = null
@@ -429,7 +434,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         override fun onDrawFrame(gl: GL10?) {
             if (failed) return
             try {
+                val previousSequence = drawSequence
                 drawFrame()
+                if (drawSequence != previousSequence) previewFrameRate.onFrame(renderedTimestampNs)
             } catch (error: RuntimeException) {
                 fail(error)
             }

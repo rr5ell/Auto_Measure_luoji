@@ -77,6 +77,7 @@ import com.example.auto_measure_luoji.feature.camera.domain.Camera2Controller
 import com.example.auto_measure_luoji.feature.camera.domain.GyroPreviewStabilizer
 import com.example.auto_measure_luoji.feature.camera.domain.CameraFrameTiming
 import com.example.auto_measure_luoji.feature.camera.domain.FrameTransformQueue
+import com.example.auto_measure_luoji.feature.camera.domain.previewfps.PreviewFrameRate
 import com.example.auto_measure_luoji.feature.camera.domain.PreviewMotionEstimator
 import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabilities
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
@@ -1251,6 +1252,21 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var laserCompareText by remember { mutableStateOf("") }
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
     var glPreviewViewRef by remember { mutableStateOf<GlStabilizedPreviewView?>(null) }
+    var texturePreviewFrameRate by remember { mutableStateOf<PreviewFrameRate?>(null) }
+    var previewFpsText by remember { mutableStateOf("预览 FPS：--") }
+    val activePreviewFrameRate = if (gyroPreviewGlRenderEnabled) glPreviewViewRef?.previewFrameRate else texturePreviewFrameRate
+    LaunchedEffect(isCameraReady, selectedLens, hdrPreviewEnabled, gyroPreviewGlRenderEnabled, activePreviewFrameRate) {
+        previewFpsText = "预览 FPS：--"
+        val counter = activePreviewFrameRate ?: return@LaunchedEffect
+        counter.reset(android.os.SystemClock.elapsedRealtimeNanos())
+        if (!isCameraReady) return@LaunchedEffect
+        while (true) {
+            delay(1_000)
+            counter.sample(android.os.SystemClock.elapsedRealtimeNanos())?.let { fps ->
+                previewFpsText = "预览 FPS：${String.format(java.util.Locale.US, "%.1f", fps)}"
+            }
+        }
+    }
     var previewSurfaceTextureRef by remember { mutableStateOf<SurfaceTexture?>(null) }
     var wrapperRef by remember { mutableStateOf<FrameLayout?>(null) }
 
@@ -4825,6 +4841,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             glPreviewViewRef = glView
                             textureViewRef = null
                         } else {
+                            val frameRate = PreviewFrameRate()
+                            texturePreviewFrameRate = frameRate
                             val tv = TextureView(ctx).apply {
                                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
@@ -4843,6 +4861,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                         return true
                                     }
                                     override fun onSurfaceTextureUpdated(st: SurfaceTexture) {
+                                        frameRate.onFrame(st.timestamp)
                                         if (!canApplyGyroPreviewStabilization() || !gyroPreviewFrameSyncEnabled) return
                                         val transform = gyroPreviewTransformHistory.exact(st.timestamp) ?: return
                                         handleGyroPreviewTransform(transform, android.os.SystemClock.elapsedRealtime(), st.timestamp)
@@ -5223,6 +5242,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     .filter { it.isNotBlank() }
                     .joinToString("\n")
                 StatusHud(
+                    fpsText = previewFpsText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -7004,6 +7024,7 @@ private fun ToolMenuItem(
 
 @Composable
 private fun StatusHud(
+    fpsText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7014,7 +7035,6 @@ private fun StatusHud(
     modifier: Modifier = Modifier,
 ) {
     val lines = listOf(statusText, lensText, gyroText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
-    if (lines.isEmpty()) return
 
     Column(
         modifier = modifier
@@ -7023,6 +7043,15 @@ private fun StatusHud(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
+        Text(
+            text = fpsText,
+            color = Color(0xFFA5D6A7),
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         lines.take(6).forEachIndexed { index, text ->
             Text(
                 text = text,

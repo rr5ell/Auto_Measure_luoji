@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `release/pgyer-0-8-32` |
+| 当前主要分支 | `feature/preview-fps` |
 
 ## 可复用能力
 
@@ -40,6 +40,8 @@
 
 ## HDR 与 LSC
 
+- [android-preview-fps](entries/android-preview-fps.md)：普通预览与 GL/HDR 共用的新画面 FPS 统计，标准路径 `feature/camera/domain/previewfps/PreviewFrameRate.kt`。
+
 - [android-gl-yuv-frame-detection](entries/android-gl-yuv-frame-detection.md)：普通 GL 的 YUV 异步识别、来源元数据、采样逆映射及 200 ms 结果过期策略；标准路径为 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/gldetection/GlDetectionCoordinates.kt`、`app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/gldetection/GlAsyncDetectionState.kt` 和 `app/src/main/java/com/example/auto_measure_luoji/feature/camera/ui/GlStabilizedPreviewView.kt`。
 
 | reuse_id | 能力 | 标准代码路径 | 状态 |
@@ -55,4 +57,4 @@
 
 ## 最后更新
 
-2026-09-17，Codex Agent。构建版本递增为 0.8.32 (832)，复用现有蒲公英上传脚本；沿用已验证的 HDR 阈值入口修复，不改变核心算法。
+2026-09-18，Codex Agent。新增预览 FPS 计数与状态区显示，分别接入 TextureView 与 GL/HDR；不改变系统 EIS 或相机请求帧率。
