@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.34] - 2026-09-20
+
+作者：Codex Agent。
+
+### 测试分发
+- 版本递增为 `0.8.34 (834)`，包含自动 HDR 四次主面板同步采样、双向停判、故障暂停保留自动开关及显式恢复。
+- 已知问题：HDR/SDR 切换时仍可能出现 `CameraDevice was already closed`；本次按要求分发当前代码，不宣称已修复相机会话竞争。
+
+### 验证与发布
+- Debug APK 构建及签名校验通过，包名和版本确认为 `com.example.auto_measure_luoji`、`0.8.34 (834)`；单元测试任务通过，复用 54 项通过的缓存结果。
+- 蒲公英解析完成，确认 `Auto_Measure_luoji 0.8.34 (834)`；[下载页面](https://www.pgyer.com/automeasureluoji)。本轮未安装真机或执行新的设备回归。
+- APK SHA256：`54AD1C8652139858B95F2E0CAD96A18784C17D43EBE7A0E4BF26889E36AC22F5`。
+
 ## [auto-hdr-visible-samples-2026-09-20] - 2026-09-20
 
 作者：Codex Agent。
