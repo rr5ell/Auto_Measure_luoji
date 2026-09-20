@@ -205,4 +205,93 @@ class AutoHdrPolicyTest {
         policy.resetConfirmation()
         assertEquals(10, policy.remainingSeconds(1_000_000_000L))
     }
+
+    @Test fun cooldownMustBeFollowedByFourNewDisplayedReadings() {
+        for (hdr in listOf(false, true)) {
+            val policy = AutoHdrPolicy()
+            val exposure = if (hdr) 1_000_000L else 100_000L
+            val direction = if (hdr) "关闭" else "开启"
+            policy.transitionCompleted(0L, defaults)
+            for (index in 0..19) {
+                val now = index * 500_000_000L
+                assertNull(policy.decide(true, false, hdr, frame(exposure, now), defaults, now))
+                assertNull(policy.confirmationText)
+            }
+            // 到期时即使数据仍新鲜，停判期间收到的曝光也不得算作第一条。
+            assertNull(policy.decide(true, false, hdr, frame(exposure, 9_999_999_999L), defaults, 10_000_000_000L))
+            assertNull(policy.confirmationText)
+            for (index in 0..3) {
+                val now = 10_500_000_000L + index * 500_000_000L
+                val decision = policy.decide(true, false, hdr, frame(exposure, now), defaults, now)
+                assertEquals("${direction}确认 ${index + 1}/4", policy.confirmationText)
+                if (index < 3) assertNull(decision) else assertEquals(!hdr, decision)
+            }
+        }
+    }
+
+    @Test fun faultPauseDiscardsSamplesAndRecoveryRequiresFourNewReadings() {
+        for (hdr in listOf(false, true)) {
+            val policy = AutoHdrPolicy()
+            val exposure = if (hdr) 1_000_000L else 100_000L
+            for (index in 0..2) {
+                val now = index * 500_000_000L
+                assertNull(policy.decide(true, false, hdr, frame(exposure, now), defaults, now))
+            }
+            for (index in 3..10) {
+                val now = index * 500_000_000L
+                assertNull(policy.decide(true, true, hdr, frame(exposure, now), defaults, now))
+                assertNull(policy.confirmationText)
+            }
+            for (index in 0..3) {
+                val now = 5_500_000_000L + index * 500_000_000L
+                val decision = policy.decide(true, false, hdr, frame(exposure, now), defaults, now)
+                if (index < 3) assertNull(decision) else assertEquals(!hdr, decision)
+            }
+        }
+    }
+
+    @Test fun fourDisplayedReadingsShowProgressForBothDirections() {
+        for (hdr in listOf(false, true)) {
+            val policy = AutoHdrPolicy()
+            val exposure = if (hdr) 1_000_000L else 100_000L
+            val direction = if (hdr) "关闭" else "开启"
+            assertNull(policy.confirmationText)
+            for (index in 0..3) {
+                val now = index * 500_000_000L
+                val reading = frame(exposure, now)
+                val decision = policy.decide(true, false, hdr, reading, defaults, now)
+                assertEquals("$direction" + "确认 ${index + 1}/4", policy.confirmationText)
+                if (index < 3) assertNull(decision) else assertEquals(!hdr, decision)
+                // 在下一次主面板更新之前再次读取同一帧，不得增加进度。
+                assertNull(policy.decide(true, false, hdr, reading, defaults, now + 250_000_000L))
+                assertEquals("$direction" + "确认 ${index + 1}/4", policy.confirmationText)
+            }
+            assertTrue(policy.canApplyConfirmedDecision(!hdr, hdr, frame(exposure, 1_500_000_000L), defaults, 1_500_000_000L))
+        }
+    }
+
+    @Test fun neitherOpeningNorClosingCanBeApprovedWithOnlyThreeReadings() {
+        for (hdr in listOf(false, true)) {
+            val policy = AutoHdrPolicy()
+            val exposure = if (hdr) 1_000_000L else 100_000L
+            for (index in 0..2) {
+                val now = index * 500_000_000L
+                assertNull(policy.decide(true, false, hdr, frame(exposure, now), defaults, now))
+            }
+            assertFalse(policy.canApplyConfirmedDecision(!hdr, hdr, frame(exposure, 1_000_000_000L), defaults, 1_000_000_000L))
+            assertNull(policy.confirmationText)
+        }
+    }
+
+    @Test fun visibleConfirmationClearsWhenConditionBreaksOrAutomaticStops() {
+        val policy = AutoHdrPolicy()
+        policy.decide(true, false, false, frame(100_000L, 0), defaults, 0)
+        assertEquals("开启确认 1/4", policy.confirmationText)
+        policy.decide(true, false, false, frame(1_000_000L, 500_000_000L), defaults, 500_000_000L)
+        assertNull(policy.confirmationText)
+        policy.decide(true, false, false, frame(100_000L, 1_000_000_000L), defaults, 1_000_000_000L)
+        assertEquals("开启确认 1/4", policy.confirmationText)
+        policy.decide(false, false, false, frame(100_000L, 1_500_000_000L), defaults, 1_500_000_000L)
+        assertNull(policy.confirmationText)
+    }
 }

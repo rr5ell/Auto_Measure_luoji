@@ -25,6 +25,8 @@ fun AutoHdrDialog(
     onHdrChanged: (Boolean) -> Unit,
     onSave: (AutoHdrSettings) -> Unit,
     onDismiss: () -> Unit,
+    onRetry: (() -> Unit)? = null,
+    canRetry: Boolean = false,
 ) {
     var lower by remember { mutableStateOf(settings.lowerMs.toString()) }
     var upper by remember { mutableStateOf(settings.upperMs.toString()) }
@@ -47,6 +49,9 @@ fun AutoHdrDialog(
                         modifier = Modifier.semantics { contentDescription = "HDR 预览" })
                 }
                 Text(status)
+                if (automatic && onRetry != null) {
+                    TextButton(onClick = onRetry, enabled = canRetry) { Text("重新判断") }
+                }
                 OutlinedTextField(value = lower, onValueChange = { lower = it; error = null },
                     label = { Text("开启：曝光小于（ms）") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())

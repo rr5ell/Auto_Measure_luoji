@@ -31,6 +31,11 @@ class AutoHdrPolicy {
     private var candidateTarget: Boolean? = null
     private var candidateCount = 0
 
+    val confirmationText: String?
+        get() = candidateTarget?.let {
+            "${if (it) "开启" else "关闭"}确认 $candidateCount/$REQUIRED_SAMPLES"
+        }
+
     fun resetConfirmation() {
         candidateTarget = null
         candidateCount = 0

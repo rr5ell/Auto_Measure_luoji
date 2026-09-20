@@ -51,6 +51,25 @@ class AutoHdrDialogInstrumentedTest {
         compose.onNodeWithContentDescription("HDR 预览").assertIsOn().assertIsNotEnabled()
     }
 
+    @Test fun faultPausePreservesAutomaticSwitchAndRetryRespectsReadiness() {
+        var retried = false
+        var ready by mutableStateOf(false)
+        compose.setContent {
+            MaterialTheme {
+                AutoHdrDialog(AutoHdrSettings(), true, false, true, "HDR：已关闭（自动，故障暂停）",
+                    { fail("故障恢复不得修改自动模式") }, {}, {}, {},
+                    onRetry = { retried = true }, canRetry = ready)
+            }
+        }
+        compose.onNodeWithContentDescription("自动 HDR 开关").assertIsOn()
+        compose.onNodeWithContentDescription("HDR 预览").assertIsNotEnabled()
+        compose.onNodeWithText("重新判断").assertIsNotEnabled()
+        compose.runOnIdle { ready = true }
+        compose.onNodeWithText("重新判断").assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(retried) }
+        compose.onNodeWithContentDescription("自动 HDR 开关").assertIsOn()
+    }
+
     @Test fun preferencesPersistAndInvalidStorageFallsBack() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val prefs = context.getSharedPreferences("auto_hdr_test_only", Context.MODE_PRIVATE)
