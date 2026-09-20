@@ -14,6 +14,7 @@
 | Camera | Android Camera2 API + TextureView/GL 预览 | `feature/camera/domain/Camera2Controller.kt`; `feature/camera/ui/CameraScreen.kt`; `feature/camera/ui/GlStabilizedPreviewView.kt` |
 | 应用层预览防抖 | Android SensorManager gyroscope + TextureView matrix / OpenGL OES texture | `feature/camera/domain/GyroPreviewStabilizer.kt`; `feature/camera/ui/CameraScreen.kt`; `feature/camera/ui/GlStabilizedPreviewView.kt` |
 | HDR 预览 | Android 13+ HLG10 + OpenGL ES 3 / RGB10_A2 | `feature/camera/domain/hdr/HdrPreviewCapabilities.kt`; `feature/camera/ui/hdr/HlgPreviewGl.kt` |
+| 低光增强能力诊断 | Android 15+ / API 35，只读亮度范围 | `feature/camera/domain/lowlight/LowLightBoostCharacteristics.kt`；compileSdk 来源 `app/build.gradle.kts` |
 | 视觉运动估计 | OpenCV `4.12.0`，LK/RANSAC | `app/build.gradle.kts`; `feature/camera/domain/PreviewMotionEstimator.kt` |
 | BLE | Android BLE API | `feature/bluetooth/domain/BleConnectionManager.kt` |
 | YOLO 推理 | LiteRT 1.4.2 + GMS TFLite fallback；创建/推理/释放使用 YoloInference 专用线程 | `app/build.gradle.kts`; `feature/camera/ui/CameraScreen.kt` |

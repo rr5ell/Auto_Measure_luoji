@@ -4,7 +4,9 @@ Android 自动测量工具应用。
 
 相机状态区显示实时“预览 FPS”，每秒更新，支持普通 TextureView 和 GL/HDR。只统计新画面的更新次数，不是相机请求帧率或 YOLO 推理速度；停帧显示 0，尚未就绪显示 `--`。
 
-当前 Android 构建版本：`0.8.32 (832)`。
+当前 Android 构建版本：`0.8.33 (833)`。
+
+主面板在 FPS 下方显示“低光增强范围”，标明当前读取的是逻辑相机还是物理镜头及其 ID。Android 15+ 读取 `CONTROL_LOW_LIGHT_BOOST_INFO_LUMINANCE_RANGE`，单位 `lx`；缺失时显示“未提供”，旧系统显示“需 Android 15+”。这是静态能力区间，不是实时照度，也不代表低光增强已开启；仅记录日志，不修改相机请求。详见 [能力读取条目](docs/code-library/entries/android-camera2-low-light-luminance.md)。
 
 ## 本次更新（2026-09-15）
 

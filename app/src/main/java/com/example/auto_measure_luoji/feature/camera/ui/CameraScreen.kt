@@ -751,6 +751,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
     var showShadingModeDialog by remember { mutableStateOf(false) }
     var cameraShadingText by remember { mutableStateOf("") }
+    var lowLightBoostText by remember { mutableStateOf("低光增强范围：未读取") }
     var hdrPreviewEnabled by remember { mutableStateOf(false) }
     var hdrYoloAvailable by remember { mutableStateOf(false) }
     var hdrPreviewChecking by remember { mutableStateOf(false) }
@@ -3993,6 +3994,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 cameraShadingText = msg
             }
         }
+        cameraController.onLowLightBoostInfoChanged = {
+            mainHandler.post {
+                // 读取当前快照，避免旧回调在镜头切换/关闭后把上一会话的区间写回来。
+                lowLightBoostText = cameraController.lowLightBoostInfo?.panelText ?: "低光增强范围：未读取"
+            }
+        }
         cameraController.setShadingMode(cameraShadingMode)
         cameraController.onFrameTimingChanged = { timing ->
             mainHandler.post {
@@ -5274,6 +5281,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     .joinToString("\n")
                 StatusHud(
                     fpsText = previewFpsText,
+                    lowLightBoostText = lowLightBoostText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -7056,6 +7064,7 @@ private fun ToolMenuItem(
 @Composable
 private fun StatusHud(
     fpsText: String,
+    lowLightBoostText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7082,6 +7091,13 @@ private fun StatusHud(
             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = lowLightBoostText,
+            color = Color(0xFFFFD54F),
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "低光增强亮度范围" },
         )
         lines.take(6).forEachIndexed { index, text ->
             Text(
