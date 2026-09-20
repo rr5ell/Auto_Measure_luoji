@@ -1,0 +1,55 @@
+# android-camera2-auto-hdr-exposure
+
+## 元数据
+- 状态：active
+- 技术栈：Android、Kotlin、Camera2、Jetpack Compose
+- 标签：camera2, hdr, exposure, state-machine, preferences
+- 标准代码路径：
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\autohdr\AutoHdrPolicy.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\autohdr\AutoHdrPreferences.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\autohdr\AutoHdrDialog.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
+- 相关资产：android-camera2-exposure-display、android-camera2-hlg-preview
+- 最后更新：2026-09-20
+- 作者：Codex Agent
+
+## 适用场景
+- 按用户规定的实际曝光阈值切换现有 HLG10 预览，不通过图像亮度或 TYPE_LIGHT 决策。
+
+## 禁止场景
+- 禁止启用 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。
+- 不得绕过 HDR 相机/显示能力检查；不得在后台、校准、测距、统计或未就绪时切换。
+- 绿光对比和防抖标定运行中也禁止切换，避免触发旧流程的状态清理。
+- 不得将 HDR 预览效果等同于 YOLO 输入效果；模型仍按既有 SDR YUV 管线运行。
+
+## 核心参数
+| 参数名 | 类型 | 默认值 | 说明 | 边界条件 |
+|---|---|---|---|---|
+| 自动开关 | Boolean | false | 记忆用户选择 | 自动开启时禁用手动 HDR |
+| lowerMs | Double | 0.3 | 曝光严格小于此值开启 | 有限正数，须小于上限 |
+| upperMs | Double | 25.0 | 曝光严格大于此值开启 | 有限且大于下限 |
+| cooldownSeconds | Int | 10 | 成功开启或关闭后的停判 | 1~3600 秒 |
+| 决策轮询 | Long | 250 ms | 仅检查元数据 | 停判、业务锁优先，不排队决定 |
+| 曝光时效 | Long | 2 秒 | 复用 ExposureReading.isFresh | 缺失、非正、过期均保持当前模式 |
+
+## 复用方式
+- AutoHdrPolicy.decide 返回 null 表示不切换，true/false 表示请求目标；未完成的切换由界面单独锁定。
+- 仅在 onCameraOpened 确认目标会话成功时调用 transitionCompleted；切换申请、参数编辑、暂停恢复不能重新计算当前窗口。
+- 停判结束重新读取曝光；关闭区间包含两端边界。后台时间计入单调时钟，回到前台仍须有新鲜曝光。
+- 能力检查结果使用参数版本、镜头、前台/业务状态和最新曝光复核；失败停止自动开关并提示，不自动反复重试。
+- 参数和开关复用既有 camera_screen_settings；不修改模型或其他相机偏好。关闭自动开关只取消自动控制，不强制关闭 HDR。
+
+## 注意事项
+- 默认没有额外亮度滞回或多帧持续判定，严格遵守阈值加停判规则；HDR 改变曝光后仍可能在不同停判窗口间往返，需真机场景评估。
+- 主面板专行显示成功开关、切换中、模式、停判倒计时；日志 tag 为 AutoHdr，保留原始曝光用于排查边界。
+- 修改参数只影响后续决策和下一次成功切换的停判时长，不缩短正在执行的窗口。
+
+## 测试与验证
+- 命令：`gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --offline --no-daemon`。
+- AutoHdrPolicyTest：精确阈值、开/关 10 秒窗口、最新条件、缺失/过期数据、业务锁、自定义设置和非法输入。
+- AutoHdrDialogInstrumentedTest：手动互斥、忙碌锁、参数校验与独立偏好存储；HdrDetectionToggleInstrumentedTest 验证新入口的识别保持。
+- 未覆盖风险：真实曝光变化、设备会话失败、亮暗环境长时间往返和校准精度，均需真机验证。
+- 2026-09-20：Debug 应用、设备测试包编译及 39 项单元测试通过。ADB 无设备，面板和 HDR 真机测试未执行，本轮未重跑全量 Lint。
+
+## 给 AI 的指令
+优先复用本状态机与现有 HDR 切换流程。不得另建 HDR 管线，不得将停判改为持续累积旧条件。

@@ -30,6 +30,7 @@
 ## 复用方式
 - Camera2Controller.latestExposureReading 只提供当前会话代次快照；closeCamera 清空。
 - 使用 ExposureReading.panelText(nowNs) 统一格式和时效检查；日志 tag 为 CameraExposure。
+- ExposureReading.isFresh(nowNs) 也供 `android-camera2-auto-hdr-exposure` 复用，统一 2 秒时效；本条目的读取与显示保持只读，HDR 决策由独立状态机负责。
 - 严格物理模式在 API 28+ 使用 physicalCameraResults；其他模式报告逻辑相机结果。
 
 ## 测试与验证

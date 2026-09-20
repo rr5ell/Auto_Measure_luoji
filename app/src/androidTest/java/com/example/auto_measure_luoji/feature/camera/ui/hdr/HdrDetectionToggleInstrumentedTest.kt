@@ -6,6 +6,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
@@ -24,6 +25,7 @@ import com.example.auto_measure_luoji.MainActivity
 import com.example.auto_measure_luoji.feature.camera.data.LensScanner
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabilities
+import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -47,12 +49,16 @@ class HdrDetectionToggleInstrumentedTest {
             Manifest.permission.BLUETOOTH_CONNECT)) {
             instrumentation.uiAutomation.grantRuntimePermission(context.packageName, permission)
         }
+        val prefs = context.getSharedPreferences("camera_screen_settings", Context.MODE_PRIVATE)
+        val originalAuto = AutoHdrPreferences.loadEnabled(prefs)
+        AutoHdrPreferences.saveEnabled(prefs, false)
+        try {
         ActivityScenario.launch(MainActivity::class.java).use {
             waitForRecognition("识别")
             compose.onNodeWithText("识别").performClick()
             waitForInference()
 
-            compose.onNodeWithContentDescription("HDR 预览").performClick()
+            switchHdr(true)
             waitForHdr()
             waitForRecognition("识别中")
             waitForInference()
@@ -60,9 +66,9 @@ class HdrDetectionToggleInstrumentedTest {
             compose.onNodeWithText("校准").assertIsEnabled().performClick()
             compose.onNodeWithText("普通校准").performClick()
             compose.onNodeWithText("没有，开始校准").performClick()
-            compose.onNodeWithContentDescription("HDR 预览").assertIsOn().assertIsNotEnabled()
+            compose.onNodeWithContentDescription("HDR 状态").assert(hasText("已开启", substring = true))
             compose.onNodeWithText("关闭").performClick()
-            compose.onNodeWithContentDescription("HDR 预览").assertIsOn().assertIsEnabled()
+            compose.onNodeWithContentDescription("HDR 状态").assert(hasText("已开启", substring = true))
 
             compose.onNodeWithText("更多").performClick()
             compose.onNodeWithText("绿光识别").assertIsEnabled()
@@ -74,19 +80,20 @@ class HdrDetectionToggleInstrumentedTest {
             waitForRecognition("识别中")
             waitForInference()
 
-            compose.onNodeWithContentDescription("HDR 预览").performClick()
+            switchHdr(false)
             waitForRecognition("识别中")
-            compose.onNodeWithContentDescription("HDR 预览").assertIsOff()
+            waitForHdrOff()
             waitForInference()
 
             compose.onNodeWithText("识别中").performClick()
-            compose.onNodeWithContentDescription("HDR 预览").performClick()
+            switchHdr(true)
             waitForHdr()
             waitForRecognition("识别")
-            compose.onNodeWithContentDescription("HDR 预览").performClick()
+            switchHdr(false)
             waitForRecognition("识别")
-            compose.onNodeWithContentDescription("HDR 预览").assertIsOff()
+            waitForHdrOff()
         }
+        } finally { AutoHdrPreferences.saveEnabled(prefs, originalAuto) }
     }
 
     private fun waitForRecognition(text: String) {
@@ -98,9 +105,25 @@ class HdrDetectionToggleInstrumentedTest {
     private fun waitForHdr() {
         compose.waitUntil(30_000) {
             compose.onAllNodesWithText("HDR：HLG10 | YOLO：SDR YUV")
-                .fetchSemanticsNodes().isNotEmpty()
+                .fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithText("HDR：已开启（手动）").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithContentDescription("HDR 预览").assertIsOn()
+        compose.onNodeWithContentDescription("HDR 状态").assert(hasText("已开启", substring = true))
+    }
+
+    private fun switchHdr(enabled: Boolean) {
+        compose.onNodeWithText("自动 HDR").performClick()
+        compose.onNodeWithContentDescription("自动 HDR 开关").assertIsOff()
+        val manual = compose.onNodeWithContentDescription("HDR 预览").assertIsEnabled()
+        if (enabled) manual.assertIsOff() else manual.assertIsOn()
+        manual.performClick()
+        compose.onNodeWithContentDescription("关闭自动 HDR 面板").performClick()
+    }
+
+    private fun waitForHdrOff() {
+        compose.waitUntil(30_000) {
+            compose.onAllNodesWithText("HDR：已关闭（手动）").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     private fun waitForInference() {

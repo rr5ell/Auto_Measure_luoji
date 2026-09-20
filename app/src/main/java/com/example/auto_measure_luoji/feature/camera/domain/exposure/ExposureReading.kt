@@ -9,8 +9,10 @@ data class ExposureReading(
     val cameraId: String,
     val physical: Boolean,
 ) {
+    fun isFresh(nowNs: Long): Boolean = nowNs >= receivedAtNs && nowNs - receivedAtNs <= 2_000_000_000L
+
     fun panelText(nowNs: Long): String = "曝光时间：" + when {
-        nowNs < receivedAtNs || nowNs - receivedAtNs > 2_000_000_000L -> "等待新帧"
+        !isFresh(nowNs) -> "等待新帧"
         exposureTimeNs == null -> "未提供"
         exposureTimeNs <= 0L -> "读数异常"
         // Camera2 单位为 ns；1 ms = 1,000,000 ns，使用浮点除法保留亚毫秒曝光。

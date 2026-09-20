@@ -82,6 +82,9 @@ import com.example.auto_measure_luoji.feature.camera.domain.FrameTransformQueue
 import com.example.auto_measure_luoji.feature.camera.domain.previewfps.PreviewFrameRate
 import com.example.auto_measure_luoji.feature.camera.domain.PreviewMotionEstimator
 import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabilities
+import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPolicy
+import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
+import com.example.auto_measure_luoji.feature.camera.ui.autohdr.AutoHdrDialog
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -758,6 +761,15 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var hdrYoloAvailable by remember { mutableStateOf(false) }
     var hdrPreviewChecking by remember { mutableStateOf(false) }
     var hdrPreviewError by remember { mutableStateOf<String?>(null) }
+    var autoHdrEnabled by remember { mutableStateOf(AutoHdrPreferences.loadEnabled(cameraPrefs)) }
+    var autoHdrSettings by remember { mutableStateOf(AutoHdrPreferences.loadSettings(cameraPrefs)) }
+    val autoHdrPolicy = remember { AutoHdrPolicy() }
+    var autoHdrRevision by remember { mutableLongStateOf(0L) }
+    var showAutoHdrDialog by remember { mutableStateOf(false) }
+    var hdrTransitionPending by remember { mutableStateOf<Boolean?>(null) }
+    var autoHdrFault by remember { mutableStateOf<String?>(null) }
+    var hdrStatusText by remember { mutableStateOf("HDR：未就绪") }
+    var cameraScreenResumed by remember { mutableStateOf(false) }
     var hdrPreviousGlRender by remember { mutableStateOf(false) }
     var uiZoomOnlyEnabled by remember {
         mutableStateOf(cameraPrefs.getBoolean(KEY_UI_ZOOM_ONLY_ENABLED, false))
@@ -2480,8 +2492,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         resetGyroPreviewRenderTransformToBase()
     }
 
+    fun hdrSwitchBlocked(): Boolean = !cameraScreenResumed || isProcessing || showCalPanel || showDualCalPanel ||
+        isDualCalibMode || statMeasuring || isDeviceMeasuring || measureTrigger ||
+        laserCompareEnabled || showLaserComparePanel || gyroStabilizationCalibrationEnabled
+
+    fun stopAutoHdrAfterFailure(message: String) {
+        autoHdrEnabled = false
+        autoHdrRevision++
+        AutoHdrPreferences.saveEnabled(cameraPrefs, false)
+        autoHdrFault = message
+        hdrTransitionPending = null
+        Log.w("AutoHdr", "自动 HDR 已停止：$message")
+    }
+
     fun applyHdrPreviewMode(enabled: Boolean) {
         if (enabled == hdrPreviewEnabled) return
+        hdrTransitionPending = enabled
         if (enabled) hdrPreviousGlRender = gyroPreviewGlRenderEnabled
         cameraController.closeCamera()
         cameraController.setHdrPreviewEnabled(enabled)
@@ -2513,17 +2539,17 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         Log.i("CameraScreen", "hdr-preview: requested=$enabled gl=$gyroPreviewGlRenderEnabled detection=$detectionEnabled")
     }
 
-    fun toggleHdrPreview() {
-        if (hdrPreviewChecking) return
-        if (hdrPreviewEnabled) {
+    fun requestHdrPreview(enabled: Boolean, automatic: Boolean = false) {
+        if (hdrPreviewChecking || hdrTransitionPending != null || hdrSwitchBlocked()) return
+        if (automatic != autoHdrEnabled || enabled == hdrPreviewEnabled) return
+        if (!isCameraReady && (automatic || enabled)) return
+        autoHdrFault = null
+        if (!enabled) {
             applyHdrPreviewMode(false)
             return
         }
         val lens = selectedLens ?: return
-        if (!isCameraReady || showCalPanel || showDualCalPanel || isDualCalibMode) {
-            hdrPreviewError = "请在相机就绪且未校准时开启 HDR 预览"
-            return
-        }
+        val revision = autoHdrRevision
         val display = wrapperRef?.display
         hdrPreviewChecking = true
         statusText = "正在检测 HDR 预览能力"
@@ -2535,16 +2561,59 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         HlgPreviewGl.checkSupport(display).getOrThrow()
                     }
                 }
-                if (selectedLens != lens || !isCameraReady) return@launch
-                if (        showCalPanel || showDualCalPanel || isDualCalibMode) {
-                    hdrPreviewError = "当前流程已变化，请结束校准后重试 HDR"
-                    return@launch
-                }
+                if (selectedLens != lens || !isCameraReady || hdrSwitchBlocked() ||
+                    automatic != autoHdrEnabled || revision != autoHdrRevision) return@launch
+                if (automatic && autoHdrPolicy.decide(true, false, hdrPreviewEnabled,
+                        cameraController.latestExposureReading, autoHdrSettings,
+                        android.os.SystemClock.elapsedRealtimeNanos()) != true) return@launch
                 result.onSuccess { applyHdrPreviewMode(true) }
-                    .onFailure { hdrPreviewError = it.message ?: "当前设备不支持 HDR 预览" }
+                    .onFailure {
+                        val message = it.message ?: "当前设备不支持 HDR 预览"
+                        stopAutoHdrAfterFailure(message)
+                        hdrPreviewError = message
+                    }
             } finally {
                 hdrPreviewChecking = false
             }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val nowNs = android.os.SystemClock.elapsedRealtimeNanos()
+            val cooldown = autoHdrPolicy.remainingSeconds(nowNs)
+            val stateText = when {
+                hdrPreviewChecking -> "检测能力中"
+                hdrTransitionPending != null -> if (hdrTransitionPending == true) "开启中" else "关闭中"
+                !isCameraReady -> "未就绪"
+                hdrPreviewEnabled -> "已开启"
+                else -> "已关闭"
+            }
+            val automaticText = when {
+                !autoHdrEnabled -> "手动"
+                cooldown > 0 -> "自动，停判 ${cooldown}s"
+                hdrSwitchBlocked() -> "自动，流程中暂停"
+                cameraController.latestExposureReading?.let { it.isFresh(nowNs) && (it.exposureTimeNs ?: 0L) > 0L } != true -> "自动，等待有效曝光"
+                else -> "自动"
+            }
+            val nextStatus = "HDR：$stateText（$automaticText）" +
+                (autoHdrFault?.let { "\n自动 HDR 已停止：$it" } ?: "")
+            if (hdrStatusText != nextStatus) {
+                hdrStatusText = nextStatus
+                Log.i("AutoHdr", nextStatus)
+            }
+            autoHdrPolicy.decide(
+                enabled = autoHdrEnabled,
+                blocked = !isCameraReady || hdrPreviewChecking || hdrTransitionPending != null || hdrSwitchBlocked(),
+                hdrEnabled = hdrPreviewEnabled,
+                reading = cameraController.latestExposureReading,
+                settings = autoHdrSettings,
+                nowNs = nowNs,
+            )?.let { target ->
+                Log.i("AutoHdr", "曝光触发 HDR=${target} ${cameraController.latestExposureReading?.logText}")
+                requestHdrPreview(target, automatic = true)
+            }
+            delay(250)
         }
     }
 
@@ -3944,6 +4013,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         cameraController.onCameraOpened = {
             mainHandler.post {
                 isCameraReady = true
+                if (hdrTransitionPending == hdrPreviewEnabled) {
+                    autoHdrPolicy.transitionCompleted(android.os.SystemClock.elapsedRealtimeNanos(), autoHdrSettings)
+                    hdrTransitionPending = null
+                    Log.i("AutoHdr", "HDR 切换成功 enabled=$hdrPreviewEnabled，停判 ${autoHdrSettings.cooldownSeconds}s")
+                }
                 hdrYoloAvailable = hdrPreviewEnabled && cameraController.analysisImageReader != null
                 statusText = if (hdrPreviewEnabled) {
                     if (hdrYoloAvailable) "HDR：HLG10 | YOLO：SDR YUV"
@@ -3960,6 +4034,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         cameraController.onError = { msg ->
             mainHandler.post {
                 isCameraReady = false
+                stopAutoHdrAfterFailure(msg)
                 if (hdrPreviewEnabled) {
                     if (showCalPanel || showDualCalPanel || isDualCalibMode) {
                         cameraController.closeCamera()
@@ -4322,14 +4397,18 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         val monitor = AmbientLightMonitor(sensorManager) { ambientLightText = it.panelText }
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> monitor.start()
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_DESTROY -> monitor.stop()
+                Lifecycle.Event.ON_RESUME -> { cameraScreenResumed = true; monitor.start() }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_DESTROY -> { cameraScreenResumed = false; monitor.stop() }
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) monitor.start()
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            cameraScreenResumed = true
+            monitor.start()
+        }
         onDispose {
+            cameraScreenResumed = false
             lifecycleOwner.lifecycle.removeObserver(observer)
             monitor.stop()
         }
@@ -4867,6 +4946,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 onPreviewError = previewError@{ message ->
                                     if (glPreviewViewRef !== this) return@previewError
                                     if (hdrPreviewEnabled) {
+                                        stopAutoHdrAfterFailure(message)
                                         if (showCalPanel || showDualCalPanel || isDualCalibMode) {
                                             isCameraReady = false
                                             cameraController.closeCamera()
@@ -4875,7 +4955,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                             applyHdrPreviewMode(false)
                                             hdrPreviewError = "$message，已恢复 SDR 预览"
                                         }
-                                    } else statusText = message
+                                    } else {
+                                        stopAutoHdrAfterFailure(message)
+                                        isCameraReady = false
+                                        statusText = message
+                                    }
                                 }
                                 onCameraSurfaceTextureAvailable = surfaceReady@{ st ->
                                     if (glPreviewViewRef !== this) return@surfaceReady
@@ -5029,16 +5113,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 Spacer(modifier = Modifier.width(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("HDR", color = Color.White, fontSize = 12.sp)
-                    Switch(
-                        checked = hdrPreviewEnabled,
-                        enabled = !hdrPreviewChecking && !isProcessing && !showCalPanel &&
-                            !showDualCalPanel && !isDualCalibMode && (hdrPreviewEnabled || isCameraReady),
-                        onCheckedChange = { toggleHdrPreview() },
-                        modifier = Modifier.semantics { contentDescription = "HDR 预览" },
-                    )
-                }
+                TopActionButton(
+                    text = "自动 HDR",
+                    active = autoHdrEnabled || hdrPreviewEnabled,
+                    onClick = { showAutoHdrDialog = true },
+                )
                 TextButton(
                     onClick = { showShadingModeDialog = true },
                     enabled = isCameraReady && !showCalPanel && !showDualCalPanel && !isDualCalibMode,
@@ -5306,6 +5385,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     fpsText = previewFpsText,
                     ambientLightText = ambientLightText,
                     exposureTimeText = exposureTimeText,
+                    hdrStatusText = hdrStatusText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -6029,6 +6109,30 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 dismissButton = {
                     TextButton(onClick = { showYoloFilterDialog = false }) { Text("取消") }
                 },
+            )
+        }
+
+        if (showAutoHdrDialog) {
+            AutoHdrDialog(
+                settings = autoHdrSettings,
+                automatic = autoHdrEnabled,
+                hdrEnabled = hdrPreviewEnabled,
+                canChangeHdr = (isCameraReady || hdrPreviewEnabled) && !hdrSwitchBlocked() && !hdrPreviewChecking && hdrTransitionPending == null,
+                status = hdrStatusText,
+                onAutomaticChanged = { enabled ->
+                    autoHdrEnabled = enabled
+                    autoHdrRevision++
+                    autoHdrFault = null
+                    AutoHdrPreferences.saveEnabled(cameraPrefs, enabled)
+                },
+                onHdrChanged = { requestHdrPreview(it) },
+                onSave = { settings ->
+                    AutoHdrPreferences.saveSettings(cameraPrefs, settings)
+                    autoHdrSettings = settings
+                    autoHdrRevision++
+                    showAutoHdrDialog = false
+                },
+                onDismiss = { showAutoHdrDialog = false },
             )
         }
 
@@ -7090,6 +7194,7 @@ private fun StatusHud(
     fpsText: String,
     ambientLightText: String,
     exposureTimeText: String,
+    hdrStatusText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7130,6 +7235,13 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "曝光时间" },
+        )
+        Text(
+            text = hdrStatusText,
+            color = Color(0xFF80CBC4),
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "HDR 状态" },
         )
         lines.take(6).forEachIndexed { index, text ->
             Text(

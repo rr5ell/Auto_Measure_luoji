@@ -10,9 +10,11 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/exposure-time-display` |
+| 当前主要分支 | `feature/auto-hdr-exposure` |
 
 ## 可复用能力
+
+- [android-camera2-auto-hdr-exposure](entries/android-camera2-auto-hdr-exposure.md)：曝光阈值自动 HDR、双向停判、手动互斥、参数持久化与主面板状态。
 
 - [android-camera2-exposure-display](entries/android-camera2-exposure-display.md)：实际曝光快照、逻辑/物理来源、旧会话过滤和实时主面板显示。
 
@@ -62,4 +64,4 @@
 
 ## 最后更新
 
-2026-09-20，Codex Agent。保留 TYPE_LIGHT 环境照度，新增 Camera2 实际曝光时间只读显示；不修改 HDR、低光增强或系统 EIS。
+2026-09-20，Codex Agent。新增可配置的曝光阈值自动 HDR 与双向停判状态机；保留照度和曝光诊断，不启用系统 EIS。
