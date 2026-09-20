@@ -10,6 +10,10 @@ import android.opengl.GLUtils
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.PreviewCaptureShader
 import java.util.concurrent.atomic.AtomicLong
 import android.hardware.DataSpace
 import android.opengl.GLES11Ext
@@ -56,6 +60,37 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
     private val diagnosticRecordingRequested = AtomicBoolean(false)
     private var cameraSurfaceTexture: SurfaceTexture? = null
     private val detectionIds = AtomicLong()
+    private val captureBusy = AtomicBoolean(false)
+
+    /** 只读下一张完成渲染的画面，不含检测框；超时/取消不遗留 Bitmap 或占用图像流。 */
+    suspend fun capturePreviewBitmap(width: Int = 1080, height: Int = 1920,
+        minimumTimestampNs: Long = 0L): Bitmap {
+        require(width in 1..2160 && height in 1..3840)
+        check(captureBusy.compareAndSet(false, true)) { "预览采集正在进行" }
+        val result = CompletableDeferred<ByteBuffer>()
+        try {
+            queueEvent { previewRenderer.requestCapture(width, height, minimumTimestampNs, result) }
+            requestRender()
+            val bytes = withTimeout(1500L) { result.await() }
+            val pixels = withContext(Dispatchers.Default) {
+                IntArray(width * height).also { pixels ->
+                    // FBO 已包含本帧采样和显示矩阵，不再按传感器方向旋转。
+                    // GL 左下原点 -> Bitmap 左上原点：bitmap(x,y)=gl(x,H-1-y)。
+                    // 归一化与旧校准相同：xn=x/viewW*W，yn=y/viewH*H。
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val i = ((height - 1 - y) * width + x) * 4
+                        pixels[y * width + x] = Color.rgb(bytes.get(i).toInt() and 255,
+                            bytes.get(i + 1).toInt() and 255, bytes.get(i + 2).toInt() and 255)
+                    }
+                }
+            }
+            // Bitmap 在调用协程恢复后创建，避免取消发生在 withContext 返回时泄漏 Bitmap。
+            return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        } finally {
+            result.cancel()
+            captureBusy.set(false)
+        }
+    }
 
     fun setDetectionEnabled(enabled: Boolean) {
         queueEvent { previewRenderer.setDetectionEnabled(enabled) }
@@ -294,6 +329,43 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         private var labelTexture = 0
         private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 28f; color = Color.WHITE }
         private var labelBitmap: Bitmap? = null
+        private data class CaptureRequest(val width: Int, val height: Int,
+            val afterSequence: Long, val minimumTimestampNs: Long, val result: CompletableDeferred<ByteBuffer>)
+        private var pendingCapture: CaptureRequest? = null
+        private var captureProgram = 0
+
+        fun requestCapture(width: Int, height: Int, minimumTimestampNs: Long, result: CompletableDeferred<ByteBuffer>) {
+            if (!result.isActive) return
+            pendingCapture?.result?.completeExceptionally(IllegalStateException("预览采集被替换"))
+            pendingCapture = CaptureRequest(width, height, drawSequence, minimumTimestampNs, result)
+        }
+
+        private fun captureOutputIfRequested() {
+            val request = pendingCapture ?: return
+            if (!request.result.isActive) { pendingCapture = null; return }
+            if (!hasOutput || drawSequence <= request.afterSequence || renderedTimestampNs < request.minimumTimestampNs) return
+            pendingCapture = null
+            val target = RenderTarget(false)
+            try {
+                if (captureProgram == 0) captureProgram = createProgram(VERTEX_SHADER, PreviewCaptureShader.FRAGMENT)
+                target.ensure(request.width, request.height)
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, target.framebufferId)
+                GLES20.glViewport(0, 0, request.width, request.height)
+                drawTexture(outputTarget.textureId, false, identity, identity, overrideProgram = captureProgram)
+                val bytes = ByteBuffer.allocateDirect(request.width * request.height * 4)
+                GLES20.glReadPixels(0, 0, request.width, request.height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, bytes)
+                val error = GLES20.glGetError()
+                check(error == GLES20.GL_NO_ERROR) { "预览取帧失败：GL 0x${error.toString(16)}" }
+                request.result.complete(bytes)
+                Log.i(TAG, "preview-capture: hdr=$hdrEnabled timestamp=$renderedTimestampNs size=${request.width}x${request.height}")
+            } catch (error: Exception) {
+                request.result.completeExceptionally(error)
+            } finally {
+                target.release()
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+                GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+            }
+        }
 
         fun setDetectionEnabled(enabled: Boolean) {
             if (detectionEnabled == enabled) return
@@ -377,6 +449,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         }
 
         private fun createSurface() {
+            pendingCapture?.result?.completeExceptionally(IllegalStateException("预览表面已重建"))
+            pendingCapture = null
+            captureProgram = 0
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             program = if (hdrEnabled) createProgram(HlgPreviewGl.VERTEX_SHADER, HlgPreviewGl.FRAGMENT_SHADER)
                 else createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
@@ -572,6 +647,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 unmatchedDraws++
             }
 
+            captureOutputIfRequested()
             // 缺少同时间戳补偿时保留上一张已完成的 FBO，图像和矩阵一起保持。
             // 不能在 updateTexImage() 取到新图像后套用上一帧矩阵。
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -590,8 +666,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         }
 
         private fun drawTexture(textureId: Int, external: Boolean, textureMatrix: FloatArray, vertexMatrix: FloatArray,
-            sampleWidth: Int = 0, sampleHeight: Int = 0) {
-            val activeProgram = if (external) program else copyProgram
+            sampleWidth: Int = 0, sampleHeight: Int = 0, overrideProgram: Int = 0) {
+            val activeProgram = if (overrideProgram != 0) overrideProgram else if (external) program else copyProgram
             val target = if (external) GLES11Ext.GL_TEXTURE_EXTERNAL_OES else GLES20.GL_TEXTURE_2D
             val positionHandle = GLES20.glGetAttribLocation(activeProgram, "aPosition")
             val texCoordHandle = GLES20.glGetAttribLocation(activeProgram, "aTexCoord")
@@ -599,6 +675,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(target, textureId)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uTexture"), 0)
+            if (overrideProgram != 0) GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uHlg"), if (hdrEnabled) 1 else 0)
             if (external && hdrEnabled) {
                 GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uFullRange"), if (hdrFullRange) 1 else 0)
             }
@@ -776,6 +853,10 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         }
 
         fun releaseCameraTexture() {
+            pendingCapture?.result?.completeExceptionally(IllegalStateException("预览已关闭"))
+            pendingCapture = null
+            if (captureProgram != 0) GLES20.glDeleteProgram(captureProgram)
+            captureProgram = 0
             clearDetection()
             labelBitmap?.recycle()
             labelBitmap = null

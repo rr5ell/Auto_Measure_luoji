@@ -16,6 +16,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.feature.camera.data.LensScanner
+import com.example.auto_measure_luoji.feature.camera.data.LensCategory
 import com.example.auto_measure_luoji.feature.camera.domain.Camera2Controller
 import com.example.auto_measure_luoji.feature.camera.domain.RenderedPreviewFrame
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
@@ -24,6 +25,8 @@ import com.example.auto_measure_luoji.feature.camera.ui.FrameBoundPreviewTestAct
 import com.example.auto_measure_luoji.feature.camera.ui.GlStabilizedPreviewView
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetectionBox
 import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
+import com.example.auto_measure_luoji.feature.calibration.detector.LaserDetector
+import com.example.auto_measure_luoji.feature.calibration.util.ImageUtils
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -34,6 +37,64 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class HdrPreviewInstrumentedTest {
+    @Test fun physicalHdrCalibrationKeepsHlgAcrossLensSwitches() {
+        assumeTrue(Build.VERSION.SDK_INT >= 33)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val display = (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
+            .getDisplay(Display.DEFAULT_DISPLAY)
+        assumeTrue(HlgPreviewGl.checkSupport(display).isSuccess)
+        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+        val lenses = LensScanner(context).scan().filter {
+            it.physicalId != null && HdrPreviewCapabilities.checkCamera(context, it, strictPhysical = true).isSuccess
+        }.distinctBy { it.cameraId to it.physicalId }.sortedBy { it.eq35mm }
+        assumeTrue("设备未开放两颗支持 HLG10 的物理镜头", lenses.size >= 2)
+        val wide = lenses.firstOrNull { it.category == LensCategory.WIDE } ?: lenses.first()
+        val tele = lenses.last()
+        assumeTrue("缺少不同的广角和长焦镜头", wide != tele)
+        val textures = LinkedBlockingQueue<SurfaceTexture>()
+        val opened = LinkedBlockingQueue<Boolean>()
+        val errors = LinkedBlockingQueue<String>()
+        val controller = Camera2Controller(context)
+        controller.start()
+        controller.setHdrPreviewEnabled(true)
+        controller.onCameraOpened = { opened.offer(true) }
+        controller.onError = { errors.offer(it) }
+        val intent = Intent(context, FrameBoundPreviewTestActivity::class.java).putExtra("hdr_preview", true)
+        try {
+            ActivityScenario.launch<FrameBoundPreviewTestActivity>(intent).use { scenario ->
+                lateinit var preview: GlStabilizedPreviewView
+                scenario.onActivity {
+                    preview = it.preview
+                    preview.onPreviewError = { message -> errors.offer(message) }
+                    preview.onCameraSurfaceTextureAvailable = { texture -> textures.offer(texture) }
+                    preview.setFrameSynchronized(false)
+                }
+                val texture = textures.poll(10, TimeUnit.SECONDS) ?: error("HDR GL 表面未创建")
+                val surface = Surface(texture)
+                try {
+                    for (lens in listOf(wide, tele, wide)) {
+                        controller.closeCamera()
+                        controller.setZoomRatio(if (lens == wide) 5f else 1f)
+                        controller.setSurfaceTexture(texture)
+                        controller.openCamera(lens, surface, strictPhysical = true)
+                        assertNotNull("HDR 物理会话失败：$errors", opened.poll(15, TimeUnit.SECONDS))
+                        val deadline = SystemClock.elapsedRealtime() + 5000L
+                        while (controller.latestSensorTimestampNs == 0L && SystemClock.elapsedRealtime() < deadline) Thread.sleep(20)
+                        assertTrue("当前物理镜头未出帧", controller.latestSensorTimestampNs > 0L)
+                        // 校准锁定物理输出，不混入来自另一逻辑视角的 SDR 分析流。
+                        assertNull(controller.analysisImageReader)
+                        val bitmap = runBlocking { preview.capturePreviewBitmap(240, 426, controller.latestSensorTimestampNs) }
+                        bitmap.recycle()
+                        assertEquals(DataSpace.STANDARD_BT2020, DataSpace.getStandard(texture.dataSpace))
+                        assertEquals(DataSpace.TRANSFER_HLG, DataSpace.getTransfer(texture.dataSpace))
+                        assertTrue("HDR 校准发生错误：$errors", errors.isEmpty())
+                    }
+                } finally { controller.closeCamera(); surface.release() }
+            }
+        } finally { controller.closeCamera(); controller.stop() }
+    }
+
     @Test fun missingDisplayDoesNotEnableHdr() {
         assertTrue(HlgPreviewGl.checkSupport(null).isFailure)
     }
@@ -90,6 +151,20 @@ class HdrPreviewInstrumentedTest {
                     }
                     assertEquals(DataSpace.STANDARD_BT2020, DataSpace.getStandard(texture.dataSpace))
                     assertEquals(DataSpace.TRANSFER_HLG, DataSpace.getTransfer(texture.dataSpace))
+                    val calibrationBitmap = runBlocking { preview.capturePreviewBitmap() }
+                    try {
+                        assertEquals(1080, calibrationBitmap.width)
+                        assertEquals(1920, calibrationBitmap.height)
+                        val pixels = IntArray(1080 * 1920)
+                        calibrationBitmap.getPixels(pixels, 0, 1080, 0, 0, 1080, 1920)
+                        assertTrue("HDR 校准取帧为空", pixels.any { it and 0xFFFFFF != 0 })
+                        val result = LaserDetector.detectLaserCenterFromBytes(ImageUtils.bitmapToPngBytes(calibrationBitmap))
+                        result?.let {
+                            assertTrue(it.cx.isFinite() && it.cx in 0.0..1079.0)
+                            assertTrue(it.cy.isFinite() && it.cy in 0.0..1919.0)
+                        }
+                        assertEquals(DataSpace.TRANSFER_HLG, DataSpace.getTransfer(texture.dataSpace))
+                    } finally { calibrationBitmap.recycle() }
                     val analysisSupported = HdrPreviewCapabilities.checkYuvAnalysis(context, lens).isSuccess
                     if (analysisSupported) {
                         assertNotNull("HDR session did not create YUV input", controller.analysisImageReader)

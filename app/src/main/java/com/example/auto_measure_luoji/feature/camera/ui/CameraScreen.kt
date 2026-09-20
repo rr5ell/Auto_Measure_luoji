@@ -1799,6 +1799,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun saveGyroPreviewSettings() {
+        if ((showCalPanel || showDualCalPanel || isDualCalibMode || isProcessing) &&
+            gyroPreviewGlRenderEnabledInput != gyroPreviewGlRenderEnabled) {
+            gyroPreviewSettingsError = "请先结束校准，再切换预览渲染方式"
+            return
+        }
         if (hdrPreviewEnabled && !gyroPreviewGlRenderEnabledInput) {
             gyroPreviewSettingsError = "请先关闭预览 HDR，再关闭 GL 逐帧预览"
             return
@@ -2330,25 +2335,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             .putBoolean(KEY_GYRO_PREVIEW_INVERT_VERTICAL, config.invertVertical)
             .apply()
         gyroPreviewStabilizer.updateConfig(config)
-        if (gyroPreviewGlRenderEnabledInput) {
-            detectionEnabled = false
-            detectionBoxes = emptyList()
-            detectionPerfText = ""
-            showMeasurePrompt = false
-            measureTrigger = false
-            wasTargetInArea = false
-            statMeasuring = false
-            showCalPanel = false
-            showDualCalPanel = false
-            showCalibrationModeDialog = false
-            showCalChoiceDialog = false
-            showDualCalChoiceDialog = false
-            showDualCoordInputDialog = false
-            showCoordInputDialog = false
-            laserCompareEnabled = false
-            showLaserComparePanel = false
-            laserCompareText = "GL逐帧预览实验已开启，绿光识别已暂停"
-        }
+        // GL 已支持后台识别和校准取帧，保存参数不再关闭用户正在使用的功能。
         if (glRenderChanged) {
             cameraController.closeCamera()
             isCameraReady = false
@@ -2628,11 +2615,35 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     suspend fun captureLaserFrameForCalibration(): LaserFrameCapture {
+        check(isCameraReady) { "相机未就绪，请等待当前镜头预览恢复" }
+        if (gyroPreviewGlRenderEnabled) {
+            val view = glPreviewViewRef ?: error("GL 预览未就绪")
+            val lens = selectedLens
+            val hdr = hdrPreviewEnabled
+            val deadline = android.os.SystemClock.elapsedRealtime() + 1500L
+            while (cameraController.latestSensorTimestampNs <= 0L && isCameraReady &&
+                android.os.SystemClock.elapsedRealtime() < deadline) delay(20)
+            val minimumTimestamp = cameraController.latestSensorTimestampNs
+            check(isCameraReady && minimumTimestamp > 0L && view === glPreviewViewRef && lens == selectedLens) {
+                "当前镜头尚未出帧，请等待预览恢复后采集"
+            }
+            val bitmap = view.capturePreviewBitmap(ImageUtils.OUT_W, ImageUtils.OUT_H, minimumTimestamp)
+            try {
+                check(isCameraReady && view === glPreviewViewRef && lens == selectedLens && hdr == hdrPreviewEnabled) {
+                    "采集期间相机已切换，请重新采集"
+                }
+                val bytes = withContext(Dispatchers.Default) { ImageUtils.bitmapToPngBytes(bitmap) }
+                check(isCameraReady && view === glPreviewViewRef && lens == selectedLens && hdr == hdrPreviewEnabled) {
+                    "采集期间相机已切换，请重新采集"
+                }
+                return LaserFrameCapture(bitmap, bytes, if (hdr) "HDR HLG10 转 sRGB" else "GL 预览")
+            } catch (error: Exception) {
+                bitmap.recycle()
+                throw error
+            }
+        }
         return when (yoloFrameSource) {
             YoloFrameSource.PREVIEW_BITMAP -> {
-                if (gyroPreviewGlRenderEnabled) {
-                    throw IllegalStateException("GL逐帧预览实验不提供 TextureView 截图校准")
-                }
                 val tv = textureViewRef ?: throw IllegalStateException("预览未就绪")
                 if (!tv.isAvailable) throw IllegalStateException("预览未就绪")
                 var snapshot: Bitmap? = null
@@ -2704,13 +2715,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun toggleLaserComparePanel() {
-        if (gyroPreviewGlRenderEnabled) {
-            laserCompareEnabled = false
-            showLaserComparePanel = false
-            laserCompareText = "GL逐帧预览实验下不运行绿光识别"
-            statusText = "GL逐帧预览实验已开启：绿光识别不可用"
-            return
-        }
         val nextVisible = !showLaserComparePanel
         showLaserComparePanel = nextVisible
         if (nextVisible) {
@@ -2724,15 +2728,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     fun runLaserCompareRecognition() {
-        if (gyroPreviewGlRenderEnabled) {
-            laserCompareEnabled = false
-            laserCompareText = "GL逐帧预览实验下不运行绿光识别"
-            statusText = "GL逐帧预览实验已开启：绿光识别不可用"
-            return
-        }
         if (laserCompareEnabled) return
         val tv = textureViewRef
-        if (tv == null || !tv.isAvailable) {
+        if (!isCameraReady || (!gyroPreviewGlRenderEnabled && (tv == null || !tv.isAvailable))) {
             laserCompareText = "预览未就绪"
             statusText = "绿光识别：预览未就绪"
             return
@@ -2745,7 +2743,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             laserCompareText = "正在对比新旧绿光算法..."
             statusText = "绿光新旧算法对比中..."
             try {
-                snapshot = withContext(Dispatchers.Main) { tv.getBitmap() }
+                snapshot = if (gyroPreviewGlRenderEnabled) {
+                    glPreviewViewRef?.capturePreviewBitmap(ImageUtils.OUT_W, ImageUtils.OUT_H)
+                } else withContext(Dispatchers.Main) { tv?.getBitmap() }
                 val frame = snapshot
                 if (frame == null) {
                     laserCompareText = "截取预览失败"
@@ -3807,6 +3807,16 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     fun activateDualCalibration(tele: LensCandidate) {
         val wide = dualWideLens ?: return
+        if (hdrPreviewEnabled) {
+            val failure = listOf(wide, tele).firstNotNullOfOrNull {
+                HdrPreviewCapabilities.checkCamera(context, it, strictPhysical = true).exceptionOrNull()
+            }
+            if (failure != null) {
+                dualLastResultText = failure.message ?: "当前镜头不支持 HDR 双摄校准"
+                hdrPreviewError = dualLastResultText
+                return
+            }
+        }
         val selectedTelephotoMag = (tele.eq35mm / wide.eq35mm).roundToInt().coerceAtLeast(2)
         dualTeleLens = tele
         isDualCalibMode = true
@@ -3839,6 +3849,15 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         telePoint: LaserPoint,
     ) {
         val wide = dualWideLens ?: return
+        if (hdrPreviewEnabled) {
+            val failure = listOf(wide, tele).firstNotNullOfOrNull {
+                HdrPreviewCapabilities.checkCamera(context, it, strictPhysical = true).exceptionOrNull()
+            }
+            if (failure != null) {
+                dualCoordError = failure.message ?: "当前镜头不支持 HDR 双摄校准"
+                return
+            }
+        }
         val selectedTelephotoMag = (tele.eq35mm / wide.eq35mm).roundToInt().coerceAtLeast(2)
         dualTeleLens = tele
         isDualCalibMode = true
@@ -3928,8 +3947,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             mainHandler.post {
                 isCameraReady = false
                 if (hdrPreviewEnabled) {
-                    applyHdrPreviewMode(false)
-                    hdrPreviewError = "$msg，已恢复 SDR 预览"
+                    if (showCalPanel || showDualCalPanel || isDualCalibMode) {
+                        cameraController.closeCamera()
+                        hdrPreviewError = "$msg；HDR 校准已暂停，未切换 SDR，请退出校准后重试"
+                    } else {
+                        applyHdrPreviewMode(false)
+                        hdrPreviewError = "$msg，已恢复 SDR 预览"
+                    }
                 } else statusText = "错误: $msg"
             }
         }
@@ -4361,6 +4385,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             cameraZoomForMode(clampNormalZoom(currentEquivRatio, lens))
         }
         cameraController.setZoomRatio(initialZoom)
+        isCameraReady = false
         cameraController.closeCamera()
         cameraController.setHdrPreviewEnabled(hdrPreviewEnabled)
         cameraController.openCamera(
@@ -4812,8 +4837,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 onPreviewError = previewError@{ message ->
                                     if (glPreviewViewRef !== this) return@previewError
                                     if (hdrPreviewEnabled) {
-                                        applyHdrPreviewMode(false)
-                                        hdrPreviewError = "$message，已恢复 SDR 预览"
+                                        if (showCalPanel || showDualCalPanel || isDualCalibMode) {
+                                            isCameraReady = false
+                                            cameraController.closeCamera()
+                                            hdrPreviewError = "$message；HDR 校准已暂停，未切换 SDR，请退出校准后重试"
+                                        } else {
+                                            applyHdrPreviewMode(false)
+                                            hdrPreviewError = "$message，已恢复 SDR 预览"
+                                        }
                                     } else statusText = message
                                 }
                                 onCameraSurfaceTextureAvailable = surfaceReady@{ st ->
@@ -4940,7 +4971,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     TopActionButton(
                         text = if (isDualCalibMode) "双摄" else if (showCalPanel) "校准中" else "校准",
                         active = showCalPanel || showDualCalPanel || isDualCalibMode,
-                        enabled = !gyroPreviewGlRenderEnabled,
+                        enabled = isCameraReady || showCalPanel || showDualCalPanel || isDualCalibMode,
                         onClick = {
                             when {
                                 isDualCalibMode && dualCalManager.state == DualCalibrationManager.State.IDLE && dualTargetPrediction != null -> {
@@ -4961,7 +4992,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         TopActionButton(
                             text = if (laserCompareEnabled) "对比中" else "绿光对比",
                             active = showLaserComparePanel || laserCompareEnabled,
-                            enabled = !gyroPreviewGlRenderEnabled,
+                            enabled = isCameraReady,
                             accent = Color(0xFF00C853),
                             onClick = { toggleLaserComparePanel() },
                         )
@@ -4972,8 +5003,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     Text("HDR", color = Color.White, fontSize = 12.sp)
                     Switch(
                         checked = hdrPreviewEnabled,
-                        enabled = !hdrPreviewChecking && (hdrPreviewEnabled ||
-                            (isCameraReady && !showCalPanel && !showDualCalPanel && !isDualCalibMode)),
+                        enabled = !hdrPreviewChecking && !isProcessing && !showCalPanel &&
+                            !showDualCalPanel && !isDualCalibMode && (hdrPreviewEnabled || isCameraReady),
                         onCheckedChange = { toggleHdrPreview() },
                         modifier = Modifier.semantics { contentDescription = "HDR 预览" },
                     )
@@ -5165,7 +5196,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             ToolMenuItem(
                                 text = if (laserCompareEnabled) "绿光识别中" else "绿光识别",
                                 active = showLaserComparePanel || laserCompareEnabled,
-                                enabled = !gyroPreviewGlRenderEnabled,
+                                enabled = isCameraReady,
                                 accent = Color(0xFF00C853),
                                 onClick = {
                                     toolsMenuExpanded = false

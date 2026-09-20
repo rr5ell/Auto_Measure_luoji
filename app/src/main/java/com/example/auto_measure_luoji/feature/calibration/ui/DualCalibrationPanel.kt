@@ -116,7 +116,7 @@ fun DualCalibrationPanel(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            TextButton(onClick = onClose, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+            TextButton(onClick = onClose, enabled = !isProcessing, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                 Text("关闭", color = Color(0xFF9E9E9E), fontSize = 13.sp)
             }
         }

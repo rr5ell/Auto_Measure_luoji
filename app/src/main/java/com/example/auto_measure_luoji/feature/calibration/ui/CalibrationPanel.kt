@@ -140,6 +140,7 @@ fun CalibrationPanel(
             )
             TextButton(
                 onClick = onClose,
+                enabled = !isProcessing,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
             ) {
                 Text("关闭", color = TextSecondary, fontSize = 13.sp)

@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/preview-fps` |
+| 当前主要分支 | `feature/hdr-calibration` |
 
 ## 可复用能力
 
@@ -57,4 +57,4 @@
 
 ## 最后更新
 
-2026-09-18，Codex Agent。新增预览 FPS 计数与状态区显示，分别接入 TextureView 与 GL/HDR；不改变系统 EIS 或相机请求帧率。
+2026-09-20，Codex Agent。HDR 条目新增预览取帧、HLG 转 sRGB、普通及物理镜头校准约束；禁止校准时降级 SDR，不启用系统 EIS。

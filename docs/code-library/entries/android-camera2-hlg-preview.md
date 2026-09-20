@@ -11,7 +11,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\GlStabilizedPreviewView.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
 - 相关文档：E:\StudioProjects\Auto_Measure_luoji\docs\eis-hdr-lsc-sync.md
-- 最后更新：2026-09-16
+- 最后更新：2026-09-20
 - 作者：Codex Agent
 
 ## 适用场景
@@ -20,7 +20,7 @@
 ## 禁止场景
 - 禁止启用系统 EIS；仅允许 OIS 或算法层物理补偿。
 - 禁止普通预览绑定物理 Surface，禁止把 SDR 输入混入 HLG 表面。
-- HDR YOLO 只允许走已适配的 SDR YUV 双路输出；禁止直接处理 HLG 像素。GL 绿光、截图校准仍禁用。
+- HDR YOLO 只允许走已适配的 SDR YUV 双路输出；禁止直接处理 HLG 像素。校准与绿光使用独立预览取帧及 HLG 到 sRGB 转换，禁止直接将 HLG 编码标记成 sRGB。
 
 ## 核心参数
 | 参数名 | 类型 | 默认值 | 说明 | 边界条件 |
@@ -36,6 +36,8 @@
 - 切换保留 `detectionEnabled` 用户意图，由相机就绪状态与 HDR 分析流可用性暂停/恢复推理；只清除框、性能文本、有效期及测距触发。不能用关闭识别开关代替暂停推理。
 - YUV 的时间戳和尺寸在异步推理前快照；推理返回后不能再读取可能已被会话关闭释放的 Image 元数据。
 - 复用 `FrameTransformQueue` 精确匹配，不使用临近时间戳回退。
+- GL/HDR 校准复用 `GlStabilizedPreviewView.capturePreviewBitmap()`，颜色处理标准路径为 `E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\previewcapture\PreviewCaptureShader.kt`。只在采集时回读新帧，不含模型框，不读旁路 YUV；调用方负责回收 Bitmap。
+- 双摄调用 `checkCamera(context, lens, strictPhysical = true)` 检查实际物理镜头 HLG10 能力，保持物理 Surface 绑定与 HDR profile。校准失败不能自动降级 SDR；详见 `docs/hdr-calibration.md`。
 
 ## 注意事项
 - 源实现来自 Auto_measure `2e14622`；本项目针对父逻辑相机检查和建立 HDR 输出，不复制源项目的普通物理绑定。

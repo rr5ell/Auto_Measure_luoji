@@ -117,6 +117,8 @@ class Camera2Controller(private val context: Context) {
         private set
     var sensorOrientation: Int = 0
         private set
+    @Volatile var latestSensorTimestampNs: Long = 0L
+        private set
 
     var onCameraOpened: (() -> Unit)? = null
     var onCameraClosed: (() -> Unit)? = null
@@ -192,11 +194,7 @@ class Camera2Controller(private val context: Context) {
         strictPhysical: Boolean = false,
     ) {
         if (hdrPreviewRequested) {
-            if (strictPhysical) {
-                onError?.invoke("HDR 预览不支持校准采集")
-                return
-            }
-            val failure = HdrPreviewCapabilities.checkCamera(context, lens).exceptionOrNull()
+            val failure = HdrPreviewCapabilities.checkCamera(context, lens, strictPhysical).exceptionOrNull()
             if (failure != null) {
                 onError?.invoke(failure.message ?: "当前相机不支持 HDR 预览")
                 return
@@ -211,7 +209,8 @@ class Camera2Controller(private val context: Context) {
         hasPublishedActivePhysicalCameraId = false
 
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val chars = manager.getCameraCharacteristics(lens.cameraId)
+        val chars = manager.getCameraCharacteristics(
+            if (currentStrictPhysical) lens.physicalId!! else lens.cameraId)
         sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         updateExposureCompensationCharacteristics(chars)
         updateVideoStabilizationCharacteristics(chars)
@@ -219,7 +218,18 @@ class Camera2Controller(private val context: Context) {
 
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         if (map != null) {
-            val sizes = map.getOutputSizes(SurfaceTexture::class.java)
+            val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.let { physicalSizes ->
+                if (!currentStrictPhysical) physicalSizes else {
+                    val logicalSizes = manager.getCameraCharacteristics(lens.cameraId)
+                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                        ?.getOutputSizes(SurfaceTexture::class.java).orEmpty().toSet()
+                    physicalSizes.filter { it in logicalSizes }.toTypedArray()
+                }
+            }
+            if (currentStrictPhysical && sizes.isNullOrEmpty()) {
+                onError?.invoke("物理镜头与逻辑相机没有共同的预览尺寸")
+                return
+            }
             previewSize = choosePreviewSize(sizes, 9.0 / 16.0)
         }
 
@@ -356,6 +366,7 @@ class Camera2Controller(private val context: Context) {
         try {
             val output = OutputConfiguration(surface).apply {
                 setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
+                if (currentStrictPhysical) setPhysicalCameraId(lens.physicalId!!)
             }
             // HLG10 只用于预览。模型沿用同一逻辑相机会话的 8-bit SDR YUV，不读取 HLG 编码像素。
             val outputs = mutableListOf(output)
@@ -374,7 +385,7 @@ class Camera2Controller(private val context: Context) {
                             return
                         }
                         Log.i("Camera2Ctrl", "hdr-preview: configured HLG10 camera=${lens.cameraId} " +
-                            "output=logical size=$previewSize yuv=${analysisImageReader != null}")
+                            "output=${if (currentStrictPhysical) lens.physicalId else "logical"} size=$previewSize yuv=${analysisImageReader != null}")
                         captureSession = session
                         startPreview(session)
                     }
@@ -383,7 +394,7 @@ class Camera2Controller(private val context: Context) {
                         session.close()
                         if (cameraDevice === camera && hdrPreviewRequested) {
                             // 不在 HDR GL 表面上暗中重试 SDR，也不偷偷换成逻辑镜头。
-                            onError?.invoke("当前镜头或分辨率的 HLG10 会话被设备拒绝")
+                            onError?.invoke("当前镜头 ${lens.physicalId ?: lens.cameraId} 或分辨率的 HLG10 会话被设备拒绝，未降级为 SDR")
                         }
                     }
                 },
@@ -500,6 +511,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun publishFrameTiming(result: TotalCaptureResult) {
         val sensorTimestampNs = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+        latestSensorTimestampNs = sensorTimestampNs
         onFrameTimingChanged?.invoke(
             CameraFrameTiming(
                 frameNumber = result.frameNumber,
@@ -926,6 +938,7 @@ class Camera2Controller(private val context: Context) {
         val wasActive = cameraDevice != null
         try { captureSession?.close() } catch (_: Exception) {}
         captureSession = null
+        latestSensorTimestampNs = 0L
         try { cameraDevice?.close() } catch (_: Exception) {}
         cameraDevice = null
         currentStrictPhysical = false

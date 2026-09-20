@@ -57,7 +57,15 @@ class HdrDetectionToggleInstrumentedTest {
             waitForRecognition("识别中")
             waitForInference()
 
+            compose.onNodeWithText("校准").assertIsEnabled().performClick()
+            compose.onNodeWithText("普通校准").performClick()
+            compose.onNodeWithText("没有，开始校准").performClick()
+            compose.onNodeWithContentDescription("HDR 预览").assertIsOn().assertIsNotEnabled()
+            compose.onNodeWithText("关闭").performClick()
+            compose.onNodeWithContentDescription("HDR 预览").assertIsOn().assertIsEnabled()
+
             compose.onNodeWithText("更多").performClick()
+            compose.onNodeWithText("绿光识别").assertIsEnabled()
             compose.onNodeWithText("YOLO源 ", substring = true).assertIsNotEnabled()
             compose.onNode(hasText("YOLO单框", substring = true) or hasText("YOLO多框"))
                 .assertIsEnabled().performClick()
