@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.PreviewCaptureShader
+import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.PreviewContrast
 import java.util.concurrent.atomic.AtomicLong
 import android.hardware.DataSpace
 import android.opengl.GLES11Ext
@@ -90,6 +91,11 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             result.cancel()
             captureBusy.set(false)
         }
+    }
+
+    fun setPreviewContrast(value: Float) {
+        queueEvent { previewRenderer.previewContrast = PreviewContrast.normalize(value) }
+        requestRender()
     }
 
     fun setDetectionEnabled(enabled: Boolean) {
@@ -333,6 +339,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             val afterSequence: Long, val minimumTimestampNs: Long, val result: CompletableDeferred<ByteBuffer>)
         private var pendingCapture: CaptureRequest? = null
         private var captureProgram = 0
+        private var contrastProgram = 0
+        var previewContrast = 1f
 
         fun requestCapture(width: Int, height: Int, minimumTimestampNs: Long, result: CompletableDeferred<ByteBuffer>) {
             if (!result.isActive) return
@@ -453,6 +461,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             pendingCapture = null
             captureProgram = 0
             GLES20.glClearColor(0f, 0f, 0f, 1f)
+            contrastProgram = createProgram(VERTEX_SHADER, PreviewContrast.FRAGMENT)
             program = if (hdrEnabled) createProgram(HlgPreviewGl.VERTEX_SHADER, HlgPreviewGl.FRAGMENT_SHADER)
                 else createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
             copyProgram = createProgram(VERTEX_SHADER, COPY_FRAGMENT_SHADER)
@@ -654,7 +663,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             if (outputTarget.textureId != 0 && hasOutput) {
-                drawTexture(outputTarget.textureId, false, identity, identity)
+                // 仅最后一次上屏合成应用对比度，算法取帧、诊断及检测框保持原样。
+                drawTexture(outputTarget.textureId, false, identity, identity,
+                    overrideProgram = if (previewContrast == 1f) 0 else contrastProgram)
             }
             // 检测框独立画到屏幕，不烘焙到预览缓存，过期/关闭时一帧即可清除。
             if (hasOutput) drawDetectionBoxes(detectionPresentation()?.boxes.orEmpty())
@@ -675,6 +686,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(target, textureId)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uTexture"), 0)
+            if (activeProgram == contrastProgram) {
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(activeProgram, "uContrast"), previewContrast)
+            }
             if (overrideProgram != 0) GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uHlg"), if (hdrEnabled) 1 else 0)
             if (external && hdrEnabled) {
                 GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uFullRange"), if (hdrFullRange) 1 else 0)
@@ -856,6 +870,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             pendingCapture?.result?.completeExceptionally(IllegalStateException("预览已关闭"))
             pendingCapture = null
             if (captureProgram != 0) GLES20.glDeleteProgram(captureProgram)
+            if (contrastProgram != 0) GLES20.glDeleteProgram(contrastProgram)
+            contrastProgram = 0
             captureProgram = 0
             clearDetection()
             labelBitmap?.recycle()

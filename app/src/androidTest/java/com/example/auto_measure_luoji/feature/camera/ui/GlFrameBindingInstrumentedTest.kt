@@ -228,6 +228,34 @@ class GlFrameBindingInstrumentedTest {
                 assertEquals(4_050_000_000L, skippedPresentation.timestampNs)
                 assertEquals(4_066_666_666L, skippedPresentation.previewTimestampNs)
 
+                // 上屏对比度必须改变像素，但不能改变供算法读取的输出缓存。
+                preview.setDetectionEnabled(false)
+                for ((index, contrast) in listOf(1f, 0.5f, 2f, 1f).withIndex()) {
+                    preview.setPreviewContrast(contrast)
+                    val ts = 5_000_000_000L + index * 100_000_000L
+                    submit(ts)
+                    produce(ts, 0.2f)
+                    val unmodified = frames.poll(5, TimeUnit.SECONDS) ?: error("对比度测试未出帧")
+                    assertEquals(51f, unmodified.output.luma[20].toFloat(), 3f)
+                    val bitmap = android.graphics.Bitmap.createBitmap(240, 426, android.graphics.Bitmap.Config.ARGB_8888)
+                    try {
+                        val copied = LinkedBlockingQueue<Int>()
+                        val expected = (((0.2f - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f) * 255f)
+                        var matched = false
+                        for (attempt in 0..9) {
+                            android.view.PixelCopy.request(preview, bitmap, { copied.offer(it) },
+                                android.os.Handler(android.os.Looper.getMainLooper()))
+                            assertEquals(android.view.PixelCopy.SUCCESS, copied.poll(5, TimeUnit.SECONDS))
+                            if (abs(android.graphics.Color.red(bitmap.getPixel(10, 10)) - expected) < 4f) {
+                                matched = true
+                                break
+                            }
+                            Thread.sleep(50)
+                        }
+                        assertTrue("上屏对比度未生效：$contrast", matched)
+                    } finally { bitmap.recycle() }
+                }
+
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
             } finally {
                 EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)

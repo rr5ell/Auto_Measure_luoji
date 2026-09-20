@@ -11,7 +11,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\README.md
   - E:\StudioProjects\Auto_Measure_luoji\CHANGELOG.md
   - E:\StudioProjects\Auto_Measure_luoji\ERROR_REPORT.md
-- last_updated: 2026-07-31
+- last_updated: 2026-09-20
 - author: Codex Agent
 
 ## 适用场景
@@ -26,20 +26,20 @@
 | 参数名 | 类型 | 默认值 | 说明 | 边界条件 |
 |---|---|---|---|---|
 | `CALIBRATION_EXPOSURE_EV` | `Float` | `-2.0f` | 校准面板打开期间请求的目标 EV | 设备不支持完整范围时会被裁剪 |
-| `pendingExposureCompensationEv` | `Float` | `0f` | Camera2Controller 缓存的目标 EV，跨 session 保留 | 面板关闭后必须恢复为 `0f` |
+| `pendingExposureCompensationEv` | `Float` | `0f` | Camera2Controller 缓存的目标 EV，跨 session 保留 | 校准结束恢复手动 EV，默认 0 |
 | `CONTROL_AE_COMPENSATION_STEP` | `Rational` | 设备返回 | 单个补偿档位对应的 EV 值 | 非法或缺失时按 `1 EV` 兜底 |
 | `CONTROL_AE_COMPENSATION_RANGE` | `Range<Int>` | 设备返回 | 可写入的整数补偿档位范围 | 写入前必须裁剪 |
 | `CONTROL_AE_EXPOSURE_COMPENSATION` | `Int` | 计算得到 | Camera2 请求实际写入的补偿档位 | `actualEV = steps * stepEV` |
 
 ## 复用方式
 - `CameraScreen` 通过 `LaunchedEffect(isCameraReady, showCalPanel, showDualCalPanel)` 判断校准面板是否打开。
-- 面板打开时调用 `Camera2Controller.setExposureCompensationEv(-2.0f)`；面板关闭时调用 `setExposureCompensationEv(0f)`。
+- 校准期间调用 `Camera2Controller.setExposureCompensationEv(-2.0f)`；退出普通/双摄校准后恢复手动 EV。临时覆盖由 `ImageAdjustments.forCalibration` 统一处理，见 `android-camera-manual-image-adjustments`。
 - `Camera2Controller.startPreview()` 会重新应用 pending EV，保证普通/双镜头切换和 session 重建后不丢失校准曝光。
 
 ## 注意事项
-- 日志 `exposure: requestedEV=..., actualEV=..., steps=..., step=..., range=...` 是真机确认设备实际 EV 的主要依据。
+- 日志 `exposure: requestedEV=..., actualEV=..., steps=..., step=..., range=...` 中 actualEV 是量化后请求值，不是 CaptureResult 实测值；判断硬件是否生效须结合返回元数据和真实画面。
 - 如果 `actualEV` 不是 `-2.0`，说明设备步进或范围不支持完整目标值，需要按日志判断是否接受裁剪结果。
-- 本逻辑只控制 AE 曝光补偿；OIS/EIS 策略不变，EIS 默认 OFF，只有用户显式选择实验模式时才可开启。
+- 本逻辑只控制 AE 曝光补偿；禁止启用 EIS，仅允许 OIS 或算法层物理补偿。
 
 ## 测试与验证
 - 测试命令：`.\gradlew.bat :app:compileDebugKotlin`

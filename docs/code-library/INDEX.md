@@ -10,9 +10,11 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `fix/auto-hdr-visible-samples` |
+| 当前主要分支 | `feature/manual-image-adjustments` |
 
 ## 可复用能力
+
+- [android-camera-manual-image-adjustments](entries/android-camera-manual-image-adjustments.md)：手动 EV、硬件档位量化、显示端对比度、校准覆盖恢复与自动 HDR 互斥。
 
 - [android-camera2-auto-hdr-exposure](entries/android-camera2-auto-hdr-exposure.md)：曝光阈值自动 HDR、四条主面板同步采样确认、双向停判、故障暂停保留自动开关、手动互斥及参数持久化。
 
@@ -64,4 +66,4 @@
 
 ## 最后更新
 
-2026-09-20，Codex Agent。自动 HDR 与主面板共用 500 ms 采样，停判后重新累计四条；故障暂停不退出自动模式，提供显式恢复；不启用系统 EIS。
+2026-09-20，Codex Agent。新增手动 EV 与显示端对比度、校准覆盖恢复；自动 HDR 保持四条同步采样与故障暂停；不启用系统 EIS。

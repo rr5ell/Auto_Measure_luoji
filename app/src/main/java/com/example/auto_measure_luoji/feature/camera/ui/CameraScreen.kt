@@ -85,6 +85,9 @@ import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabi
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPolicy
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
 import com.example.auto_measure_luoji.feature.camera.ui.autohdr.AutoHdrDialog
+import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ImageAdjustments
+import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdjustmentDialog
+import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.PreviewContrast
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -114,7 +117,6 @@ import kotlin.math.sqrt
 private const val WIDE_CALIBRATION_ZOOM = 5f
 private const val NORMAL_PREVIEW_MAX_ZOOM = 24f
 private const val NORMAL_MIN_ZOOM_OFFSET = 0.1f
-private const val CALIBRATION_EXPOSURE_EV = -2.0f
 private const val KEY_GYRO_STABILIZATION_CALIBRATION_ENABLED = "gyro_stabilization_calibration_enabled"
 private const val KEY_GYRO_STABILIZATION_CALIBRATION_FINE_SAMPLE_ENABLED =
     "gyro_stabilization_calibration_fine_sample_enabled"
@@ -766,6 +768,18 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     val autoHdrPolicy = remember { AutoHdrPolicy() }
     var autoHdrRevision by remember { mutableLongStateOf(0L) }
     var showAutoHdrDialog by remember { mutableStateOf(false) }
+    var showImageAdjustmentDialog by remember { mutableStateOf(false) }
+    var imageAdjustments by remember {
+        mutableStateOf(ImageAdjustments(
+            runCatching { cameraPrefs.getFloat("manual_exposure_ev", 0f) }.getOrDefault(0f),
+            runCatching { cameraPrefs.getFloat("preview_contrast", 1f) }.getOrDefault(1f),
+        ).sanitized())
+    }
+    var imageAdjustmentError by remember { mutableStateOf<String?>(null) }
+    fun saveImageAdjustments() {
+        cameraPrefs.edit().putFloat("manual_exposure_ev", imageAdjustments.ev)
+            .putFloat("preview_contrast", imageAdjustments.contrast).apply()
+    }
     var hdrTransitionPending by remember { mutableStateOf<Boolean?>(null) }
     var autoHdrFault by remember { mutableStateOf<String?>(null) }
     var hdrStatusText by remember { mutableStateOf("HDR：未就绪") }
@@ -2482,7 +2496,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         resetGyroPreviewRenderTransformToBase()
     }
 
-    fun hdrSwitchBlocked(): Boolean = !cameraScreenResumed || isProcessing || showCalPanel || showDualCalPanel ||
+    fun hdrSwitchBlocked(): Boolean = !cameraScreenResumed || showImageAdjustmentDialog || isProcessing || showCalPanel || showDualCalPanel ||
         isDualCalibMode || statMeasuring || isDeviceMeasuring || measureTrigger ||
         laserCompareEnabled || showLaserComparePanel || gyroStabilizationCalibrationEnabled
 
@@ -4560,16 +4574,26 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    LaunchedEffect(isCameraReady, showCalPanel, showDualCalPanel) {
-        val calibrationActive = showCalPanel || showDualCalPanel
-        val targetEv = if (calibrationActive) CALIBRATION_EXPOSURE_EV else 0f
+    LaunchedEffect(isCameraReady, showCalPanel, showDualCalPanel, isDualCalibMode, imageAdjustments.ev) {
+        val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
+        val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
+        imageAdjustmentError = null
         cameraController.setExposureCompensationEv(targetEv)
             .onFailure { error ->
-                Log.w("CameraScreen", "校准 EV 设置失败", error)
+                imageAdjustmentError = "EV 设置失败：${error.message}"
+                Log.w("CameraScreen", "EV 设置失败", error)
                 if (calibrationActive) {
                     statusText = "校准 EV 设置失败: ${error.message}"
                 }
             }
+    }
+
+    LaunchedEffect(textureViewRef, glPreviewViewRef, imageAdjustments.contrast, showCalPanel, showDualCalPanel, isDualCalibMode) {
+        val contrast = imageAdjustments.forCalibration(showCalPanel || showDualCalPanel || isDualCalibMode).contrast
+        textureViewRef?.setLayerPaint(android.graphics.Paint().apply {
+            colorFilter = if (contrast == 1f) null else android.graphics.ColorMatrixColorFilter(PreviewContrast.colorMatrix(contrast))
+        })
+        glPreviewViewRef?.setPreviewContrast(contrast)
     }
 
     // 变换效果：默认倍率放大交给 Camera2；纯 UI 放大实验模式下由 TextureView Matrix 承担显示 zoom。
@@ -5111,6 +5135,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 !showCalPanel && !showDualCalPanel -> showCalibrationModeDialog = true
                             }
                         },
+                    )
+                    TopActionButton(
+                        text = "EV / 对比度",
+                        active = imageAdjustments != ImageAdjustments(),
+                        onClick = { showImageAdjustmentDialog = true },
                     )
                     if (isLaserCompareApp) {
                         TopActionButton(
@@ -6119,6 +6148,33 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 dismissButton = {
                     TextButton(onClick = { showYoloFilterDialog = false }) { Text("取消") }
                 },
+            )
+        }
+
+        if (showImageAdjustmentDialog) {
+            val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
+            val busy = isProcessing || statMeasuring || isDeviceMeasuring || measureTrigger ||
+                laserCompareEnabled || gyroStabilizationCalibrationEnabled
+            val canAdjust = isCameraReady && !calibrationActive && !busy && !hdrPreviewChecking && hdrTransitionPending == null
+            ImageAdjustmentDialog(
+                settings = imageAdjustments.forCalibration(calibrationActive),
+                exposureRange = cameraController.exposureCompensationRange(),
+                enabled = canAdjust,
+                status = when {
+                    calibrationActive -> "校准中：EV -2.00，对比度 1.00"
+                    !isCameraReady -> "相机未就绪"
+                    !canAdjust -> "当前流程中不可调节"
+                    imageAdjustmentError != null -> imageAdjustmentError
+                    else -> null
+                },
+                onChange = { settings ->
+                    if (canAdjust) {
+                        imageAdjustments = settings.sanitized()
+                        autoHdrPolicy.resetConfirmation()
+                    }
+                },
+                onChangeFinished = { saveImageAdjustments() },
+                onDismiss = { saveImageAdjustments(); showImageAdjustmentDialog = false },
             )
         }
 

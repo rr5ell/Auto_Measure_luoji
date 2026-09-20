@@ -22,6 +22,7 @@ import android.util.Size
 import android.view.Surface
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureReading
+import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
@@ -590,7 +591,12 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun exposureCompensationRange() = ExposureCompensationRange(
+        exposureCompensationRange.lower, exposureCompensationRange.upper, exposureCompensationStep.toFloat(),
+    )
+
     fun setExposureCompensationEv(ev: Float): Result<Int> {
+        if (!ev.isFinite()) return Result.failure(IllegalArgumentException("EV 必须为有限数值"))
         pendingExposureCompensationEv = ev
         val builder = previewRequestBuilder ?: return Result.success(0)
         val session = captureSession ?: return Result.success(0)
