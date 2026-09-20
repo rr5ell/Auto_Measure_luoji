@@ -1257,6 +1257,17 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var glPreviewViewRef by remember { mutableStateOf<GlStabilizedPreviewView?>(null) }
     var texturePreviewFrameRate by remember { mutableStateOf<PreviewFrameRate?>(null) }
     var previewFpsText by remember { mutableStateOf("预览 FPS：--") }
+    var exposureTimeText by remember { mutableStateOf("曝光时间：--") }
+    LaunchedEffect(isCameraReady, selectedLens, hdrPreviewEnabled, gyroPreviewGlRenderEnabled) {
+        exposureTimeText = "曝光时间：--"
+        if (!isCameraReady) return@LaunchedEffect
+        while (true) {
+            val reading = cameraController.latestExposureReading
+            exposureTimeText = reading?.panelText(android.os.SystemClock.elapsedRealtimeNanos()) ?: "曝光时间：--"
+            if (reading != null) Log.i("CameraExposure", "${reading.logText} $exposureTimeText")
+            delay(500)
+        }
+    }
     val activePreviewFrameRate = if (gyroPreviewGlRenderEnabled) glPreviewViewRef?.previewFrameRate else texturePreviewFrameRate
     LaunchedEffect(isCameraReady, selectedLens, hdrPreviewEnabled, gyroPreviewGlRenderEnabled, activePreviewFrameRate) {
         previewFpsText = "预览 FPS：--"
@@ -5294,6 +5305,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 StatusHud(
                     fpsText = previewFpsText,
                     ambientLightText = ambientLightText,
+                    exposureTimeText = exposureTimeText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -7077,6 +7089,7 @@ private fun ToolMenuItem(
 private fun StatusHud(
     fpsText: String,
     ambientLightText: String,
+    exposureTimeText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7110,6 +7123,13 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "环境照度" },
+        )
+        Text(
+            text = exposureTimeText,
+            color = Color(0xFF90CAF9),
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "曝光时间" },
         )
         lines.take(6).forEachIndexed { index, text ->
             Text(

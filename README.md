@@ -6,6 +6,8 @@ Android 自动测量工具应用。
 
 当前 Android 构建版本：`0.8.33 (833)`。
 
+环境照度下方显示“曝光时间：xx.xxx ms”，读取当前相机 `CaptureResult.SENSOR_EXPOSURE_TIME` 的实际返回值，每 500 ms 刷新并写入 `CameraExposure` 日志。该值不是设置值或帧间隔，不依赖 YOLO 或防抖；无返回、异常或超过 2 秒没有新帧会明确提示。普通、GL/HDR 预览共用采集回调，严格物理校准只读取对应物理结果，不冒用逻辑相机值。
+
 主面板在 FPS 下方显示“环境照度：xx.x lx”，来自 `Sensor.TYPE_LIGHT`，替代原来的静态低光增强范围。数值保留一位小数，变化时最多每秒更新两次，同时写入 `AmbientLight` 日志；无传感器、等待读数和监听失败分别显示。退到后台停止监听，回到前台重新等待新读数。该值是手机光线传感器测得的环境照度，不是后置相机目标亮度；不会自动切换 HDR 或修改相机请求。详见 [环境照度条目](docs/code-library/entries/android-sensor-ambient-light.md)。
 
 ## 本次更新（2026-09-15）

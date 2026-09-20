@@ -10,9 +10,11 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/ambient-light-display` |
+| 当前主要分支 | `feature/exposure-time-display` |
 
 ## 可复用能力
+
+- [android-camera2-exposure-display](entries/android-camera2-exposure-display.md)：实际曝光快照、逻辑/物理来源、旧会话过滤和实时主面板显示。
 
 - [android-sensor-ambient-light](entries/android-sensor-ambient-light.md)：TYPE_LIGHT 实时照度、前台监听、500 ms 合并事件和主面板显示。
 - [android-camera2-low-light-luminance](entries/android-camera2-low-light-luminance.md)：独立只读低光增强亮度范围诊断；不再接入主面板，不开启低光增强。
@@ -60,4 +62,4 @@
 
 ## 最后更新
 
-2026-09-20，Codex Agent。主面板改为 TYPE_LIGHT 实时环境照度，静态相机能力保留作独立诊断；不开启 HDR、低光增强或系统 EIS。
+2026-09-20，Codex Agent。保留 TYPE_LIGHT 环境照度，新增 Camera2 实际曝光时间只读显示；不修改 HDR、低光增强或系统 EIS。

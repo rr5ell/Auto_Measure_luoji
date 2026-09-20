@@ -14,12 +14,14 @@ import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.util.Log
 import android.util.Range
 import android.util.Rational
 import android.util.Size
 import android.view.Surface
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
+import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureReading
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
@@ -101,6 +103,9 @@ class Camera2Controller(private val context: Context) {
     private var sensorInfoLensShadingApplied: Boolean? = null
     private var lastShadingResult: Int? = null
     @Volatile private var cameraGeneration = 0L
+    @Volatile private var exposureSnapshot: Pair<Long, ExposureReading>? = null
+    val latestExposureReading: ExposureReading?
+        get() = exposureSnapshot?.takeIf { it.first == cameraGeneration }?.second
     private var pendingVideoStabilizationMode: Int = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
     private var availableVideoStabilizationModes: IntArray = intArrayOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
     private var lastActivePhysicalCameraId: String? = null
@@ -934,6 +939,7 @@ class Camera2Controller(private val context: Context) {
 
     fun closeCamera() {
         cameraGeneration++
+        exposureSnapshot = null
         shadingCharacteristicsKnown = false
         val wasActive = cameraDevice != null
         try { captureSession?.close() } catch (_: Exception) {}
@@ -955,7 +961,20 @@ class Camera2Controller(private val context: Context) {
             request: CaptureRequest,
             result: TotalCaptureResult,
         ) {
+            val generation = cameraGeneration
             if (session !== captureSession) return
+            val lens = currentLens
+            val physicalId = if (currentStrictPhysical) lens?.physicalId else null
+            // 严格物理输出只展示对应物理结果，缺失时不冒用逻辑相机曝光。
+            val exposureResult: CaptureResult? = if (physicalId != null && Build.VERSION.SDK_INT >= 28) {
+                result.physicalCameraResults[physicalId]
+            } else result
+            exposureSnapshot = generation to ExposureReading(
+                exposureTimeNs = exposureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                receivedAtNs = SystemClock.elapsedRealtimeNanos(),
+                cameraId = physicalId ?: lens?.cameraId ?: "unknown",
+                physical = physicalId != null,
+            )
             publishFrameTiming(result)
             publishActivePhysicalCameraId(result)
             publishStabilizationCaptureResult(request, result)
