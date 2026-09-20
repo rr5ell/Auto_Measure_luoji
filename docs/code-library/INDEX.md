@@ -10,11 +10,12 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/low-light-luminance` |
+| 当前主要分支 | `feature/ambient-light-display` |
 
 ## 可复用能力
 
-- [android-camera2-low-light-luminance](entries/android-camera2-low-light-luminance.md)：只读低光增强亮度范围、逻辑/物理来源和主面板诊断，不开启低光增强。
+- [android-sensor-ambient-light](entries/android-sensor-ambient-light.md)：TYPE_LIGHT 实时照度、前台监听、500 ms 合并事件和主面板显示。
+- [android-camera2-low-light-luminance](entries/android-camera2-low-light-luminance.md)：独立只读低光增强亮度范围诊断；不再接入主面板，不开启低光增强。
 
 | reuse_id | 能力 | 标签 | canonical code path | 状态 |
 |---|---|---|---|---|
@@ -59,4 +60,4 @@
 
 ## 最后更新
 
-2026-09-20，Codex Agent。新增低光增强静态亮度范围读取与主面板诊断条目；不开启低光增强或系统 EIS。
+2026-09-20，Codex Agent。主面板改为 TYPE_LIGHT 实时环境照度，静态相机能力保留作独立诊断；不开启 HDR、低光增强或系统 EIS。

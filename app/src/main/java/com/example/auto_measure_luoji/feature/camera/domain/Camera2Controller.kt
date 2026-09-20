@@ -20,8 +20,6 @@ import android.util.Rational
 import android.util.Size
 import android.view.Surface
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
-import com.example.auto_measure_luoji.feature.camera.domain.lowlight.LowLightBoostCharacteristics
-import com.example.auto_measure_luoji.feature.camera.domain.lowlight.LowLightBoostInfo
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
@@ -133,9 +131,6 @@ class Camera2Controller(private val context: Context) {
     var onVideoStabilizationStateChanged: ((Int, String) -> Unit)? = null
     var onFrameTimingChanged: ((CameraFrameTiming) -> Unit)? = null
     var onShadingModeStateChanged: ((Int, String) -> Unit)? = null
-    var onLowLightBoostInfoChanged: (() -> Unit)? = null
-    @Volatile var lowLightBoostInfo: LowLightBoostInfo? = null
-        private set
 
     /** 回调在分析线程运行，只借用图像；Image 的关闭仍由控制器负责。 */
     @Volatile var onAnalysisImageAvailable: ((Image, Int) -> Unit)? = null
@@ -216,9 +211,6 @@ class Camera2Controller(private val context: Context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val chars = manager.getCameraCharacteristics(
             if (currentStrictPhysical) lens.physicalId!! else lens.cameraId)
-        lowLightBoostInfo = LowLightBoostCharacteristics.read(chars,
-            if (currentStrictPhysical) lens.physicalId!! else lens.cameraId, currentStrictPhysical)
-        onLowLightBoostInfoChanged?.invoke()
         sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         updateExposureCompensationCharacteristics(chars)
         updateVideoStabilizationCharacteristics(chars)
@@ -942,8 +934,6 @@ class Camera2Controller(private val context: Context) {
 
     fun closeCamera() {
         cameraGeneration++
-        lowLightBoostInfo = null
-        onLowLightBoostInfoChanged?.invoke()
         shadingCharacteristicsKnown = false
         val wasActive = cameraDevice != null
         try { captureSession?.close() } catch (_: Exception) {}

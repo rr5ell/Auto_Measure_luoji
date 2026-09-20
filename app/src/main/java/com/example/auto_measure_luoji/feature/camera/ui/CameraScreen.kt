@@ -11,6 +11,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import com.example.auto_measure_luoji.feature.camera.domain.ambientlight.AmbientLightMonitor
+import com.example.auto_measure_luoji.feature.camera.domain.ambientlight.AmbientLightReading
 import android.util.Log
 import android.view.Surface
 import android.view.TextureView
@@ -751,7 +753,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
     var showShadingModeDialog by remember { mutableStateOf(false) }
     var cameraShadingText by remember { mutableStateOf("") }
-    var lowLightBoostText by remember { mutableStateOf("低光增强范围：未读取") }
+    var ambientLightText by remember { mutableStateOf(AmbientLightReading(AmbientLightReading.Status.WAITING).panelText) }
     var hdrPreviewEnabled by remember { mutableStateOf(false) }
     var hdrYoloAvailable by remember { mutableStateOf(false) }
     var hdrPreviewChecking by remember { mutableStateOf(false) }
@@ -3994,12 +3996,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 cameraShadingText = msg
             }
         }
-        cameraController.onLowLightBoostInfoChanged = {
-            mainHandler.post {
-                // 读取当前快照，避免旧回调在镜头切换/关闭后把上一会话的区间写回来。
-                lowLightBoostText = cameraController.lowLightBoostInfo?.panelText ?: "低光增强范围：未读取"
-            }
-        }
         cameraController.setShadingMode(cameraShadingMode)
         cameraController.onFrameTimingChanged = { timing ->
             mainHandler.post {
@@ -4311,6 +4307,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     // 生命周期监听
     val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, sensorManager) {
+        val monitor = AmbientLightMonitor(sensorManager) { ambientLightText = it.panelText }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> monitor.start()
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_DESTROY -> monitor.stop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) monitor.start()
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            monitor.stop()
+        }
+    }
     var hasPaused by remember { mutableStateOf(false) }
     DisposableEffect(lifecycleOwner, gyroPreviewGlRenderEnabled, hdrPreviewEnabled) {
         val observer = LifecycleEventObserver { _, event ->
@@ -5281,7 +5293,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     .joinToString("\n")
                 StatusHud(
                     fpsText = previewFpsText,
-                    lowLightBoostText = lowLightBoostText,
+                    ambientLightText = ambientLightText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -7064,7 +7076,7 @@ private fun ToolMenuItem(
 @Composable
 private fun StatusHud(
     fpsText: String,
-    lowLightBoostText: String,
+    ambientLightText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7093,11 +7105,11 @@ private fun StatusHud(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = lowLightBoostText,
+            text = ambientLightText,
             color = Color(0xFFFFD54F),
             fontSize = 10.sp,
             lineHeight = 13.sp,
-            modifier = Modifier.semantics { contentDescription = "低光增强亮度范围" },
+            modifier = Modifier.semantics { contentDescription = "环境照度" },
         )
         lines.take(6).forEachIndexed { index, text ->
             Text(

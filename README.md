@@ -6,7 +6,7 @@ Android 自动测量工具应用。
 
 当前 Android 构建版本：`0.8.33 (833)`。
 
-主面板在 FPS 下方显示“低光增强范围”，标明当前读取的是逻辑相机还是物理镜头及其 ID。Android 15+ 读取 `CONTROL_LOW_LIGHT_BOOST_INFO_LUMINANCE_RANGE`，单位 `lx`；缺失时显示“未提供”，旧系统显示“需 Android 15+”。这是静态能力区间，不是实时照度，也不代表低光增强已开启；仅记录日志，不修改相机请求。详见 [能力读取条目](docs/code-library/entries/android-camera2-low-light-luminance.md)。
+主面板在 FPS 下方显示“环境照度：xx.x lx”，来自 `Sensor.TYPE_LIGHT`，替代原来的静态低光增强范围。数值保留一位小数，变化时最多每秒更新两次，同时写入 `AmbientLight` 日志；无传感器、等待读数和监听失败分别显示。退到后台停止监听，回到前台重新等待新读数。该值是手机光线传感器测得的环境照度，不是后置相机目标亮度；不会自动切换 HDR 或修改相机请求。详见 [环境照度条目](docs/code-library/entries/android-sensor-ambient-light.md)。
 
 ## 本次更新（2026-09-15）
 

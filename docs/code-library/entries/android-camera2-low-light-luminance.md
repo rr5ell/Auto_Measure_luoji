@@ -2,18 +2,17 @@
 
 ## 元数据
 - 状态：active
-- 技术栈：Android、Kotlin、Camera2、Jetpack Compose
+- 技术栈：Android、Kotlin、Camera2
 - 标签：camera2, low-light, luminance, diagnostics, capabilities
 - 标准代码路径：
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\lowlight\LowLightBoostCharacteristics.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\lowlight\LowLightBoostInfo.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\Camera2Controller.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
 - 最后更新：2026-09-20
 - 作者：Codex Agent
 
 ## 适用场景
-- 查看当前相机会话的低光增强工作亮度范围，在日志中排查逻辑相机与物理镜头的能力差异。
+- 按需读取指定相机的低光增强工作亮度范围，在日志中排查逻辑相机与物理镜头的能力差异。
+- 原主面板用途已由 `android-sensor-ambient-light` 替代，本工具只保留独立元数据诊断用途。
 
 ## 禁止场景
 - 禁止将静态范围当成实时照度、HDR 支持或低光增强运行状态。
@@ -30,7 +29,7 @@
 
 ## 复用方式
 - `LowLightBoostCharacteristics.read(chars, cameraId, physical)` 只读并输出 Camera2Ctrl 日志。
-- `Camera2Controller` 只在打开会话时调用，关闭时清空；主面板通过现有回调模式显示最新快照，不逐帧查询。
+- 应用预览不再自动调用；按需使用 `LowLightBoostInstrumentedTest` 枚举真实相机元数据。
 - `LowLightBoostInfo.panelText` 保留原始 Float 精度、相机 ID 和单位，缺失/旧 API/读取失败单独显示。
 
 ## 注意事项
@@ -41,10 +40,10 @@
 ## 测试与验证
 - 构建：`gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --offline --no-daemon`。
 - `LowLightBoostInfoTest`：字段精度、逻辑/物理来源、null、旧 API、读取失败、NaN、无穷大、负值、倒置区间、零区间。
-- `LowLightBoostInstrumentedTest`：枚举真实逻辑/物理镜头并对照 API 原始返回；验证主面板与前后台恢复。
+- `LowLightBoostInstrumentedTest`：枚举真实逻辑/物理镜头并对照 API 原始返回；主面板测试迁移至 `AmbientLightInstrumentedTest`。
 - 未覆盖风险：各厂商声明的亮度区间是否对应实际画质效果；只读结果不构成低光增强效果验证。
 
-### 真机返回记录
+### 历史真机返回记录（替换主面板前）
 - 日期：2026-09-20；型号：SM-S9480；Android 16 / API 36。
 - 应用和设备测试包构建通过，26 项单元测试与设备元数据读取测试通过。
 - 测试包已安装，因手机锁屏，主面板显示及前后台恢复设备测试暂未执行；本轮未重跑全量 Lint。

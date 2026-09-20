@@ -6,27 +6,14 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.lifecycle.Lifecycle
-import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.example.auto_measure_luoji.MainActivity
-import com.example.auto_measure_luoji.feature.camera.data.LensScanner
-import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import org.junit.Assert.*
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LowLightBoostInstrumentedTest {
-    @get:Rule val compose = createEmptyComposeRule()
-
     @Test fun logActualLogicalAndPhysicalCameraRangesWithoutOpeningCamera() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -55,28 +42,4 @@ class LowLightBoostInstrumentedTest {
         } else assertFalse(info.apiAvailable)
     }
 
-    @Test fun panelShowsCurrentLogicalCameraRangeAfterResume() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val context = instrumentation.targetContext
-        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= 31) {
-            instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.BLUETOOTH_SCAN)
-            instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.BLUETOOTH_CONNECT)
-        }
-        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val lens = SelectLensUseCase()(LensScanner(context).scan()) ?: error("没有后置镜头")
-        val expected = LowLightBoostCharacteristics.read(manager.getCameraCharacteristics(lens.cameraId), lens.cameraId, false).panelText
-        fun verifyPanel() {
-            compose.waitUntil(30_000) {
-                compose.onAllNodesWithText(expected).fetchSemanticsNodes().isNotEmpty()
-            }
-            compose.onNodeWithContentDescription("低光增强亮度范围").assertTextEquals(expected).assertIsDisplayed()
-        }
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            verifyPanel()
-            scenario.moveToState(Lifecycle.State.CREATED)
-            scenario.moveToState(Lifecycle.State.RESUMED)
-            verifyPanel()
-        }
-    }
 }

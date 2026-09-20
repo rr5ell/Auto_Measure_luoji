@@ -5,6 +5,21 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [ambient-light-2026-09-20] - 2026-09-20
+
+作者：Codex Agent。
+
+### 变更
+- 主界面 FPS 下方将静态 `LUMINANCE_RANGE` 替换为 `Sensor.TYPE_LIGHT` 实时环境照度，显示一位小数与 `lx`，同步输出 `AmbientLight` 日志。
+- 独立前台传感器监听，500 ms 合并最新事件；退到后台或退出页面注销监听、清除待发布读数，恢复时不沿用旧值。
+- 无传感器、等待数据、监听失败和非法读数明确区分；真实零照度正常显示，不以零值代替缺失值。
+- 移除相机会话的静态范围回调，保留独立元数据诊断工具；不改变 HDR、YOLO、AE 或防抖配置，不启用 EIS。
+- 新增照度格式单元测试与设备监听、停止回调、主面板恢复测试。
+
+### 验证
+- Debug 应用与设备测试包构建通过，29 项单元测试全部通过，差异空白检查通过。
+- ADB 未检测到设备，未安装或执行新增真机测试，未获取本机实时 lux；本轮未重跑全量 Lint。
+
 ## [low-light-luminance-2026-09-20] - 2026-09-20
 
 作者：Codex Agent。
