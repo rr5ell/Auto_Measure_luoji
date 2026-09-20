@@ -2497,6 +2497,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         laserCompareEnabled || showLaserComparePanel || gyroStabilizationCalibrationEnabled
 
     fun stopAutoHdrAfterFailure(message: String) {
+        autoHdrPolicy.resetConfirmation()
         autoHdrEnabled = false
         autoHdrRevision++
         AutoHdrPreferences.saveEnabled(cameraPrefs, false)
@@ -2508,6 +2509,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     fun applyHdrPreviewMode(enabled: Boolean) {
         if (enabled == hdrPreviewEnabled) return
         hdrTransitionPending = enabled
+        autoHdrPolicy.resetConfirmation()
         if (enabled) hdrPreviousGlRender = gyroPreviewGlRenderEnabled
         cameraController.closeCamera()
         cameraController.setHdrPreviewEnabled(enabled)
@@ -2563,9 +2565,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
                 if (selectedLens != lens || !isCameraReady || hdrSwitchBlocked() ||
                     automatic != autoHdrEnabled || revision != autoHdrRevision) return@launch
-                if (automatic && autoHdrPolicy.decide(true, false, hdrPreviewEnabled,
+                if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(true, hdrPreviewEnabled,
                         cameraController.latestExposureReading, autoHdrSettings,
-                        android.os.SystemClock.elapsedRealtimeNanos()) != true) return@launch
+                        android.os.SystemClock.elapsedRealtimeNanos())) return@launch
                 result.onSuccess { applyHdrPreviewMode(true) }
                     .onFailure {
                         val message = it.message ?: "当前设备不支持 HDR 预览"
@@ -2574,6 +2576,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     }
             } finally {
                 hdrPreviewChecking = false
+                autoHdrPolicy.resetConfirmation()
             }
         }
     }
@@ -2602,9 +2605,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 hdrStatusText = nextStatus
                 Log.i("AutoHdr", nextStatus)
             }
-            autoHdrPolicy.decide(
+            val decisionBlocked = !isCameraReady || hdrTransitionPending != null || hdrSwitchBlocked()
+            // 能力检查期间保留已确认的四条数据，但业务暂停或自动关闭仍立即作废确认。
+            if (!hdrPreviewChecking || decisionBlocked || !autoHdrEnabled) autoHdrPolicy.decide(
                 enabled = autoHdrEnabled,
-                blocked = !isCameraReady || hdrPreviewChecking || hdrTransitionPending != null || hdrSwitchBlocked(),
+                blocked = decisionBlocked,
                 hdrEnabled = hdrPreviewEnabled,
                 reading = cameraController.latestExposureReading,
                 settings = autoHdrSettings,
@@ -4398,7 +4403,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> { cameraScreenResumed = true; monitor.start() }
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_DESTROY -> { cameraScreenResumed = false; monitor.stop() }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_DESTROY -> {
+                    cameraScreenResumed = false
+                    autoHdrPolicy.resetConfirmation()
+                    monitor.stop()
+                }
                 else -> Unit
             }
         }
@@ -4409,6 +4418,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
         onDispose {
             cameraScreenResumed = false
+            autoHdrPolicy.resetConfirmation()
             lifecycleOwner.lifecycle.removeObserver(observer)
             monitor.stop()
         }
@@ -6120,6 +6130,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 canChangeHdr = (isCameraReady || hdrPreviewEnabled) && !hdrSwitchBlocked() && !hdrPreviewChecking && hdrTransitionPending == null,
                 status = hdrStatusText,
                 onAutomaticChanged = { enabled ->
+                    autoHdrPolicy.resetConfirmation()
                     autoHdrEnabled = enabled
                     autoHdrRevision++
                     autoHdrFault = null
@@ -6127,6 +6138,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 },
                 onHdrChanged = { requestHdrPreview(it) },
                 onSave = { settings ->
+                    autoHdrPolicy.resetConfirmation()
                     AutoHdrPreferences.saveSettings(cameraPrefs, settings)
                     autoHdrSettings = settings
                     autoHdrRevision++

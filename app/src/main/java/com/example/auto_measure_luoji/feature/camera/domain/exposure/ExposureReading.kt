@@ -8,6 +8,7 @@ data class ExposureReading(
     val receivedAtNs: Long,
     val cameraId: String,
     val physical: Boolean,
+    val sessionGeneration: Long = 0L,
 ) {
     fun isFresh(nowNs: Long): Boolean = nowNs >= receivedAtNs && nowNs - receivedAtNs <= 2_000_000_000L
 
@@ -20,5 +21,5 @@ data class ExposureReading(
     }
 
     val logText: String
-        get() = "SENSOR_EXPOSURE_TIME=$exposureTimeNs ns camera=$cameraId output=${if (physical) "physical" else "logical"}"
+        get() = "SENSOR_EXPOSURE_TIME=$exposureTimeNs ns camera=$cameraId output=${if (physical) "physical" else "logical"} generation=$sessionGeneration"
 }

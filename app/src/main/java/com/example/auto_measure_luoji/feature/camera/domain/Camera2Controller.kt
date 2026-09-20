@@ -974,6 +974,7 @@ class Camera2Controller(private val context: Context) {
                 receivedAtNs = SystemClock.elapsedRealtimeNanos(),
                 cameraId = physicalId ?: lens?.cameraId ?: "unknown",
                 physical = physicalId != null,
+                sessionGeneration = generation,
             )
             publishFrameTiming(result)
             publishActivePhysicalCameraId(result)
