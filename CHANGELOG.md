@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.33] - 2026-09-20
+
+作者：Codex Agent。
+
+### 发布
+- 构建版本递增为 `0.8.33 (833)`，用于蒲公英测试分发。
+- 包含预览 FPS、GL/HDR 普通校准、物理双摄校准及绿光识别；校准期间保持 HDR，过滤旧镜头缓存。
+- 本次仅调整发布版本，不修改模型、阈值、相机参数或系统 EIS 配置。双摄物理校准阶段 YOLO 暂停，真实两距离标定精度仍需现场验证。
+- Debug APK 构建、版本核对与签名验证通过；单元测试任务复用 22 项通过结果，本轮未重跑真机或全量 Lint。
+- 蒲公英解析完成，确认版本 `Auto_Measure_luoji 0.8.33 (833)`；[下载页面](https://www.pgyer.com/automeasureluoji)。
+- APK SHA-256：`B80282C239AB69E225E9FFCAE8B457E7DE6E6D2B1629D6C0130D539A4F444630`。
+
 ## [hdr-calibration-2026-09-20] - 2026-09-20
 
 作者：Codex Agent。
