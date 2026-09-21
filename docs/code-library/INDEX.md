@@ -10,10 +10,10 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/backlight-balance` |
+| 当前主要分支 | `fix/backlight-subject-protection` |
 
 ## 可复用能力
-- [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：稀疏高亮统计、受限负 EV 闭环、自动 HDR 隔离及保边双向预览映射。
+- [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：稀疏高亮/中心暗部统计、受限负 EV 闭环、暗部保护、自动 HDR 隔离及保边双向预览映射。
 - [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。
 - [android-preview-glare-suppression](entries/android-preview-glare-suppression.md)：显示端受限白雾扣除、平坦区与高光保护、普通/GL 共享 Shader 和互斥设置。
 - [android-preview-local-tone-retinex](entries/android-preview-local-tone-retinex.md)：保边局部色调映射、单尺度 Retinex、普通/GL 显示端共用邻域滤波及互斥开关。
@@ -71,4 +71,4 @@
 
 ## 最后更新
 
-2026-09-21，Codex Agent。新增逆光平衡，90 项单元测试及三项设备专项回归通过；采集负补偿与双向局部显示映射分离，P99 余量避免相邻阈值振荡。中心测光保留；无真机 HDR/逆光效果结论，不启用系统 EIS。
+2026-09-21，Codex Agent。逆光平衡增加中心暗部 P20 保护、最多约 -2/3 EV 与深暗增益调整；93 项单元测试和三项模拟器专项回归通过。P99 防振荡及中心测光保留；无真机 HDR/逆光效果结论，不启用系统 EIS。

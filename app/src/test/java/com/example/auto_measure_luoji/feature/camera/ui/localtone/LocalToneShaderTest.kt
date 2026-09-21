@@ -56,6 +56,7 @@ class LocalToneShaderTest {
         fun gain(y: Float, peak: Float = y, neighbors: FloatArray = FloatArray(25) { y }) =
             LocalToneShader.gain(PreviewToneMode.BACKLIGHT_BALANCE, y, neighbors, peak)
         assertEquals(1f, gain(0.005f), 0.0001f)
+        assertTrue("深暗部不能被原噪声门槛完全压住", gain(0.02f) > 2f)
         assertTrue(gain(0.2f) > 1.4f)
         assertTrue(gain(0.8f) < 1f)
         assertEquals(0.85f, gain(1f), 0.0001f)

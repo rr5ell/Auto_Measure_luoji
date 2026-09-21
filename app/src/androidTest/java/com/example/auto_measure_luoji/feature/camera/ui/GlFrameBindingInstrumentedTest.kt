@@ -269,14 +269,17 @@ class GlFrameBindingInstrumentedTest {
                 }
 
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
-                for ((index, tone) in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX,
-                    PreviewToneMode.GLARE_SUPPRESSION, PreviewToneMode.BACKLIGHT_BALANCE, PreviewToneMode.OFF).withIndex()) {
+                val toneCases = listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX,
+                    PreviewToneMode.GLARE_SUPPRESSION, PreviewToneMode.BACKLIGHT_BALANCE, PreviewToneMode.OFF).map { it to 0.2f } +
+                    listOf(PreviewToneMode.BACKLIGHT_BALANCE to (5f / 255f), PreviewToneMode.OFF to (5f / 255f))
+                for ((index, toneCase) in toneCases.withIndex()) {
+                    val (tone, level) = toneCase
                     preview.setPreviewToneMode(tone)
                     val ts = 7_000_000_000L + index * 100_000_000L
                     submit(ts)
-                    produce(ts, 0.2f)
+                    produce(ts, level)
                     val original = frames.poll(5, TimeUnit.SECONDS) ?: error("局部调色未出帧")
-                    assertEquals(51f, original.output.luma[20].toFloat(), 3f)
+                    assertEquals(level * 255f, original.output.luma[20].toFloat(), 3f)
                     val bitmap = android.graphics.Bitmap.createBitmap(240, 426, android.graphics.Bitmap.Config.ARGB_8888)
                     try {
                         var matched = false
@@ -286,11 +289,11 @@ class GlFrameBindingInstrumentedTest {
                             assertEquals(android.view.PixelCopy.SUCCESS, copied.poll(5, TimeUnit.SECONDS))
                             matched = listOf(10 to 10, 58 to 275).all { (x, y) ->
                                 val neighbors = FloatArray(25) {
-                                    if (y == 275 && x + (it % 5 - 2) * 3 >= 60) 1f else 0.2f
+                                    if (y == 275 && x + (it % 5 - 2) * 3 >= 60) 1f else level
                                 }
                                 val expected = if (tone == PreviewToneMode.GLARE_SUPPRESSION)
-                                    255f * GlareSuppressionShader.channel(0.2f, GlareSuppressionShader.veil(0.2f, 0.2f, neighbors))
-                                    else 51f * LocalToneShader.gain(tone, 0.2f, neighbors)
+                                    255f * GlareSuppressionShader.channel(level, GlareSuppressionShader.veil(level, level, neighbors))
+                                    else level * 255f * LocalToneShader.gain(tone, level, neighbors)
                                 abs(android.graphics.Color.red(bitmap.getPixel(x, y)) - expected) < 5f
                             }
                             if (matched) break

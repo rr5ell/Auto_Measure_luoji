@@ -52,7 +52,8 @@ object LocalToneShader {
     /**
      * 与既有保边模式复用对数基底 B，细节 D=ln(Y)-B 不变。
      * 暗基底增益 exp(0.45*max(ln(0.55)-B,0))，最多 3 倍；
-     * Y<0.015 不增益，0.015..0.06 平滑过渡，避免把近黑噪声抬白。
+     * Y<=0.005 不增益，0.005..0.03 平滑过渡；比旧的 0.015..0.06 更早提亮深暗部。
+     * 保持零输入为零且最多 3 倍，不加白色偏置；深暗噪声仍可能随信号一起放大。
      * 高光端以 peak=最大 RGB 通道，从 0.65..1 平滑压到最多 0.85 倍。
      * 最终 RGB 同乘增益并限制色域，不加白色偏置、不改变几何或恢复丢失细节。
      */
@@ -62,7 +63,7 @@ object LocalToneShader {
             return t * t * (3f - 2f * t)
         }
         val lift = min(exp(0.45f * max(ln(0.55f) - base, 0f)), 3f)
-        val gain = (1f + (lift - 1f) * smooth(0.015f, 0.06f, center) *
+        val gain = (1f + (lift - 1f) * smooth(0.005f, 0.03f, center) *
             (1f - smooth(0.45f, 0.85f, peak))) * (1f - 0.15f * smooth(0.65f, 1f, peak))
         return min(gain, 1f / max(peak, 0.0001f))
     }
@@ -97,7 +98,7 @@ object LocalToneShader {
                 float base = sum / max(weightSum, 0.0001);
                 if (mode == 4) {
                     float lift = min(exp(0.45 * max(log(0.55) - base, 0.0)), 3.0);
-                    float gain = (1.0 + (lift - 1.0) * smoothstep(0.015, 0.06, center) *
+                    float gain = (1.0 + (lift - 1.0) * smoothstep(0.005, 0.03, center) *
                         (1.0 - smoothstep(0.45, 0.85, peak))) * (1.0 - 0.15 * smoothstep(0.65, 1.0, peak));
                     return min(gain, 1.0 / max(peak, 0.0001));
                 }

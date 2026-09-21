@@ -4674,10 +4674,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 } else {
                     policy.update(sample, now)?.let { ev ->
                         cameraController.setExposureCompensationEv(ev).getOrThrow()
-                        Log.i("BacklightBalance", "bright=${sample.brightFraction} p99=${sample.percentile99} requestedEV=$ev")
+                        Log.i("BacklightBalance", "bright=${sample.brightFraction} p99=${sample.percentile99} centerP20=${sample.centerDarkLuma} requestedEV=$ev")
                     }
                     backlightBalanceText = String.format(java.util.Locale.US,
-                        "逆光平衡：高亮 %.1f%%，补偿 %+.2f EV", sample.brightFraction * 100f, policy.correctionEv)
+                        "逆光平衡：高亮 %.1f%%，中心暗部 %d，补偿 %+.2f EV%s",
+                        sample.brightFraction * 100f, sample.centerDarkLuma, policy.correctionEv,
+                        if (policy.subjectProtected) "（暗部保护）" else "")
                 }
                 delay(500)
             }

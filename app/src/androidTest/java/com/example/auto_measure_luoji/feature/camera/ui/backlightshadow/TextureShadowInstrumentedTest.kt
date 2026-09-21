@@ -26,7 +26,7 @@ import kotlin.math.abs
 @RunWith(AndroidJUnit4::class)
 class TextureShadowInstrumentedTest {
     private data class DisplayCase(val shadows: Boolean = false, val contrast: Float = 1f,
-        val legacy: Boolean = false, val tone: PreviewToneMode = PreviewToneMode.OFF)
+        val legacy: Boolean = false, val tone: PreviewToneMode = PreviewToneMode.OFF, val dark: Float = 0.2f)
     @Test fun shaderLiftsOnlyDisplayAndRestoresContrastWithoutTouchingSource() {
         assumeTrue(TexturePreviewAdjustments.supported)
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -54,9 +54,15 @@ class TextureShadowInstrumentedTest {
                 DisplayCase(tone = PreviewToneMode.GLARE_SUPPRESSION),
                 DisplayCase(contrast = 0.8f, tone = PreviewToneMode.GLARE_SUPPRESSION), DisplayCase(),
                 DisplayCase(tone = PreviewToneMode.BACKLIGHT_BALANCE), DisplayCase(),
+                DisplayCase(tone = PreviewToneMode.BACKLIGHT_BALANCE, dark = 5f / 255f), DisplayCase(dark = 5f / 255f),
                 DisplayCase(contrast = 0.8f, legacy = true), DisplayCase(legacy = true))
-            for ((shadows, contrast, legacy, tone) in cases) {
+            for ((shadows, contrast, legacy, tone, dark) in cases) {
                 scenario.onActivity {
+                    val canvas = it.texturePreview.lockCanvas() ?: error("无法取得合成图画布")
+                    val level = (dark * 255f).toInt()
+                    canvas.drawColor(Color.rgb(level, level, level))
+                    canvas.drawRect(120f, 0f, 240f, 426f, Paint().apply { color = Color.rgb(204, 204, 204) })
+                    it.texturePreview.unlockCanvasAndPost(canvas)
                     adjustments.apply(it.texturePreview, if (legacy) 1f else contrast, shadows, tone).getOrThrow()
                     if (legacy) adjustments.applyLegacyContrast(it.texturePreview, contrast)
                 }
@@ -72,8 +78,8 @@ class TextureShadowInstrumentedTest {
                                 bitmap, { result -> copied.offer(result) }, Handler(Looper.getMainLooper()))
                         }
                         assertEquals(PixelCopy.SUCCESS, copied.poll(5, TimeUnit.SECONDS))
-                        matched = listOf(30 to 0.2f, 118 to 0.2f, 180 to 0.8f).all { (x, value) ->
-                            val neighbors = FloatArray(25) { if (x + (it % 5 - 2) * 3 >= 120) 0.8f else 0.2f }
+                        matched = listOf(30 to dark, 118 to dark, 180 to 0.8f).all { (x, value) ->
+                            val neighbors = FloatArray(25) { if (x + (it % 5 - 2) * 3 >= 120) 0.8f else dark }
                             val gain = if (tone != PreviewToneMode.OFF) LocalToneShader.gain(tone, value, neighbors)
                                 else if (shadows) ShadowEnhancement.gain(value, value, value) else 1f
                             val adjusted = if (tone == PreviewToneMode.GLARE_SUPPRESSION)
@@ -88,7 +94,7 @@ class TextureShadowInstrumentedTest {
                     assertTrue("普通预览效果不符：模式=$tone 暗部=$shadows 对比度=$contrast，像素=${Color.red(bitmap.getPixel(30, 100))},${Color.red(bitmap.getPixel(118, 100))}", matched)
                     scenario.onActivity {
                         val source = it.texturePreview.bitmap ?: error("算法取帧失败")
-                        try { assertEquals("原图被修改：暗部=$shadows 对比度=$contrast 旧系统路径=$legacy", 51, Color.red(source.getPixel(30, 100))) }
+                        try { assertEquals("原图被修改：暗部=$shadows 对比度=$contrast 旧系统路径=$legacy", (dark * 255f).toInt(), Color.red(source.getPixel(30, 100))) }
                         finally { source.recycle() }
                     }
                 } finally { bitmap.recycle() }
