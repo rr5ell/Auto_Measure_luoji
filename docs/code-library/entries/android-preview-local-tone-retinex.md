@@ -23,7 +23,7 @@
 ## 核心参数
 | 参数名 | 类型 | 默认值 | 说明 | 边界条件 |
 |---|---|---|---|---|
-| preview_local_tone_mode | String | OFF | OFF/LOCAL_TONE/RETINEX/GLARE_SUPPRESSION | 无效值回退 OFF；单值持久化保证互斥 |
+| preview_local_tone_mode | String | OFF | OFF/LOCAL_TONE/RETINEX/GLARE_SUPPRESSION/BACKLIGHT_BALANCE | 无效值回退 OFF；单值持久化保证互斥 |
 | 邻域 | 采样网格 | 5x5 | [1,4,6,4,1] 外积空间权重 | 固定 25 次邻域采样，不是稠密大核 |
 | 半径 | 像素 | 短边*0.025 | 间距为半径/2 | 限制 4~32；GL/AGSL 坐标单位不同 |
 | 双边范围标准差 | Float | 0.35 | 对数亮度差 | 边缘两侧不会无条件混合 |
@@ -34,7 +34,8 @@
 ## 复用方式
 - GPU 使用 LocalToneShader.functions，宿主提供 toneLuma(position) 并钳位采样坐标；CPU gain 仅用于参考测试。
 - TexturePreviewAdjustments.apply 接收模式；GL 调用 setPreviewToneMode，在最终上屏合成应用。
-- CameraScreen 的四个增强互斥（含独立眩光抑制模块）；校准通过 forCalibration(true) 临时覆盖，不写回偏好。
+- CameraScreen 的五个增强互斥（含眩光抑制和逆光平衡）；校准通过 forCalibration(true) 临时覆盖，不写回偏好。
+- BACKLIGHT_BALANCE 复用双边基底，允许高光增益低于 1、近黑限制增益；此模式还包含受限负 EV 采集控制，不能沿用其他模式“仅影响显示”的整体描述，详见 android-camera-backlight-balance。
 - 效果顺序：局部增强或旧暗部曲线，然后对比度。关闭模式应立刻恢复原有显示处理。
 
 ## 注意事项

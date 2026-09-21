@@ -90,6 +90,7 @@ import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdj
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightExposurePolicy
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
@@ -784,6 +785,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         ).sanitized())
     }
     var imageAdjustmentError by remember { mutableStateOf<String?>(null) }
+    var backlightBalanceText by remember { mutableStateOf("") }
     var previewToneMode by remember {
         mutableStateOf(PreviewToneMode.fromPreference(
             runCatching { cameraPrefs.getString(PreviewToneMode.PREFERENCE_KEY, null) }.getOrNull()))
@@ -2564,7 +2566,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     fun requestHdrPreview(enabled: Boolean, automatic: Boolean = false) {
         if (hdrPreviewChecking || hdrTransitionPending != null || hdrSwitchBlocked()) return
         if (automatic != autoHdrEnabled || enabled == hdrPreviewEnabled) return
-        if (automatic && autoHdrFault != null) return
+        if (automatic && (autoHdrFault != null || previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE)) return
         if (!isCameraReady && (automatic || enabled)) return
         // 自动开启和关闭共用入口校验，手动操作不走四条确认。
         if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(enabled, hdrPreviewEnabled,
@@ -2590,6 +2592,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
                 if (selectedLens != lens || !isCameraReady || hdrSwitchBlocked() ||
                     automatic != autoHdrEnabled || revision != autoHdrRevision) return@launch
+                if (automatic && previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE) return@launch
                 if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(true, hdrPreviewEnabled,
                         cameraController.latestExposureReading, autoHdrSettings,
                         android.os.SystemClock.elapsedRealtimeNanos())) return@launch
@@ -2613,7 +2616,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             val reading = if (isCameraReady) cameraController.latestExposureReading else null
             exposureTimeText = reading?.panelText(nowNs) ?: "曝光时间：--"
             if (reading != null) Log.i("CameraExposure", "${reading.logText} $exposureTimeText")
-            val decisionBlocked = !isCameraReady || hdrTransitionPending != null || hdrSwitchBlocked() || autoHdrFault != null
+            val decisionBlocked = !isCameraReady || hdrTransitionPending != null || hdrSwitchBlocked() || autoHdrFault != null ||
+                previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
             // 能力检查保留已确认批次；业务暂停或自动关闭仍会作废批次。
             if (!hdrPreviewChecking || decisionBlocked || !autoHdrEnabled) autoHdrPolicy.decide(
                 enabled = autoHdrEnabled,
@@ -2637,6 +2641,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             val automaticText = when {
                 !autoHdrEnabled -> "手动"
                 autoHdrFault != null -> "自动，故障暂停"
+                previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE -> "自动，逆光平衡暂停判断"
                 cooldown > 0 -> "自动，停判 ${cooldown}s"
                 hdrSwitchBlocked() -> "自动，流程中暂停"
                 reading?.let { it.isFresh(nowNs) && (it.exposureTimeNs ?: 0L) > 0L } != true -> "自动，等待有效曝光"
@@ -4607,11 +4612,19 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             .onFailure { statusText = "中心测光设置失败：${it.message}" }
     }
 
-    LaunchedEffect(isCameraReady, showCalPanel, showDualCalPanel, isDualCalibMode, imageAdjustments.ev) {
+    DisposableEffect(cameraController) {
+        onDispose { cameraController.highlightAnalysisEnabled = false }
+    }
+
+    LaunchedEffect(isCameraReady, selectedLens, showCalPanel, showDualCalPanel, isDualCalibMode,
+        imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
+        val balance = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
+        cameraController.highlightAnalysisEnabled = false
+        backlightBalanceText = if (balance) "逆光平衡：等待相机" else ""
         imageAdjustmentError = null
-        cameraController.setExposureCompensationEv(targetEv)
+        val initial = cameraController.setExposureCompensationEv(targetEv)
             .onFailure { error ->
                 imageAdjustmentError = "EV 设置失败：${error.message}"
                 Log.w("CameraScreen", "EV 设置失败", error)
@@ -4619,6 +4632,65 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     statusText = "校准 EV 设置失败: ${error.message}"
                 }
             }
+        if (!balance) return@LaunchedEffect
+        if (initial.isFailure) { backlightBalanceText = "逆光平衡：EV 设置失败"; return@LaunchedEffect }
+        if (calibrationActive || showImageAdjustmentDialog || !cameraScreenResumed) {
+            backlightBalanceText = "逆光平衡：曝光调节暂停"
+            return@LaunchedEffect
+        }
+        if (!isCameraReady) return@LaunchedEffect
+        if (!TexturePreviewAdjustments.supported && !gyroPreviewGlRenderEnabled) {
+            backlightBalanceText = "逆光平衡：未生效（需要 GL）"
+            return@LaunchedEffect
+        }
+        val range = cameraController.exposureCompensationRange()
+        if (!range.supported || cameraController.analysisImageReader == null) {
+            backlightBalanceText = "逆光平衡：仅局部映射（无" + (if (!range.supported) "曝光补偿）" else "分析流）")
+            return@LaunchedEffect
+        }
+        var policy = HighlightExposurePolicy(range, targetEv)
+        policy.pause(android.os.SystemClock.elapsedRealtimeNanos())
+        cameraController.highlightAnalysisEnabled = true
+        try {
+            while (true) {
+                val now = android.os.SystemClock.elapsedRealtimeNanos()
+                if (hdrSwitchBlocked() || hdrPreviewChecking || hdrTransitionPending != null) {
+                    policy.pause(now)
+                    backlightBalanceText = "逆光平衡：曝光调节暂停"
+                    delay(500)
+                    continue
+                }
+                val sample = cameraController.latestHighlightStatistics?.takeIf {
+                    now >= it.sampledAtNs && now - it.sampledAtNs <= 1_500_000_000L
+                }
+                if (sample == null) {
+                    // 数据丢失时撤销自动负补偿，不能把画面永久留在较暗的曝光。
+                    if (policy.correctionEv != 0f) {
+                        cameraController.setExposureCompensationEv(targetEv).getOrThrow()
+                        policy = HighlightExposurePolicy(range, targetEv)
+                    }
+                    policy.pause(now)
+                    backlightBalanceText = "逆光平衡：等待亮度数据"
+                } else {
+                    policy.update(sample, now)?.let { ev ->
+                        cameraController.setExposureCompensationEv(ev).getOrThrow()
+                        Log.i("BacklightBalance", "bright=${sample.brightFraction} p99=${sample.percentile99} requestedEV=$ev")
+                    }
+                    backlightBalanceText = String.format(java.util.Locale.US,
+                        "逆光平衡：高亮 %.1f%%，补偿 %+.2f EV", sample.brightFraction * 100f, policy.correctionEv)
+                }
+                delay(500)
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val restored = cameraController.setExposureCompensationEv(targetEv)
+            backlightBalanceText = if (restored.isSuccess) "逆光平衡：自动曝光调节失败，已恢复手动 EV"
+                else "逆光平衡：曝光恢复失败"
+            Log.w("BacklightBalance", backlightBalanceText, error)
+        } finally {
+            cameraController.highlightAnalysisEnabled = false
+        }
     }
 
     LaunchedEffect(textureViewRef, texturePreviewSize, glPreviewViewRef, imageAdjustments.contrast, shadowEnhancementEnabled, previewToneMode,
@@ -5531,6 +5603,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     exposureTimeText = exposureTimeText,
                     hdrStatusText = hdrStatusText,
                     centerMeteringText = centerMeteringText,
+                    backlightBalanceText = backlightBalanceText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -7379,6 +7452,7 @@ private fun StatusHud(
     exposureTimeText: String,
     hdrStatusText: String,
     centerMeteringText: String,
+    backlightBalanceText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7433,6 +7507,11 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "测光状态" },
+        )
+        if (backlightBalanceText.isNotEmpty()) Text(
+            text = backlightBalanceText,
+            color = Color(0xFFFFCC80), fontSize = 10.sp, lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "逆光平衡状态" },
         )
         lines.take(6).forEachIndexed { index, text ->
             Text(

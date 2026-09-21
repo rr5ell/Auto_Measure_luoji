@@ -270,7 +270,7 @@ class GlFrameBindingInstrumentedTest {
 
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
                 for ((index, tone) in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX,
-                    PreviewToneMode.GLARE_SUPPRESSION, PreviewToneMode.OFF).withIndex()) {
+                    PreviewToneMode.GLARE_SUPPRESSION, PreviewToneMode.BACKLIGHT_BALANCE, PreviewToneMode.OFF).withIndex()) {
                     preview.setPreviewToneMode(tone)
                     val ts = 7_000_000_000L + index * 100_000_000L
                     submit(ts)

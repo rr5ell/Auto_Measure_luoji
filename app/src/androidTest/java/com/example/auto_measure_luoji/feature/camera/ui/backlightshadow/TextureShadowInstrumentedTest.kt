@@ -53,6 +53,7 @@ class TextureShadowInstrumentedTest {
                 DisplayCase(contrast = 0.8f, tone = PreviewToneMode.RETINEX), DisplayCase(),
                 DisplayCase(tone = PreviewToneMode.GLARE_SUPPRESSION),
                 DisplayCase(contrast = 0.8f, tone = PreviewToneMode.GLARE_SUPPRESSION), DisplayCase(),
+                DisplayCase(tone = PreviewToneMode.BACKLIGHT_BALANCE), DisplayCase(),
                 DisplayCase(contrast = 0.8f, legacy = true), DisplayCase(legacy = true))
             for ((shadows, contrast, legacy, tone) in cases) {
                 scenario.onActivity {

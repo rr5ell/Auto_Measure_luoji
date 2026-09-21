@@ -27,22 +27,44 @@ object LocalToneShader {
     /** CPU 参考仅用于数学与像素回归，不用于逐帧图像处理。 */
     fun gain(mode: PreviewToneMode, center: Float, neighborhood: FloatArray, peak: Float = center): Float {
         require(neighborhood.size == 25)
-        if (mode !in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX) ||
+        if (mode !in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX, PreviewToneMode.BACKLIGHT_BALANCE) ||
             !center.isFinite() || !peak.isFinite() || neighborhood.any { !it.isFinite() }) return 1f
         val weights = floatArrayOf(1f, 4f, 6f, 4f, 1f)
         val logCenter = ln(max(center.coerceIn(0f, 1f), 1f / 255f))
         var sum = 0f
         var weightSum = 0f
+        val bilateral = mode != PreviewToneMode.RETINEX
         for (y in 0..4) for (x in 0..4) {
             val sample = max(neighborhood[y * 5 + x].coerceIn(0f, 1f), 1f / 255f)
             val d = ln(sample) - logCenter
-            val weight = weights[x] * weights[y] * if (mode == PreviewToneMode.LOCAL_TONE) exp(-d * d / 0.245f) else 1f
-            sum += weight * if (mode == PreviewToneMode.LOCAL_TONE) ln(sample) else sample
+            val weight = weights[x] * weights[y] * if (bilateral) exp(-d * d / 0.245f) else 1f
+            sum += weight * if (bilateral) ln(sample) else sample
             weightSum += weight
         }
         val base = sum / weightSum
+        if (mode == PreviewToneMode.BACKLIGHT_BALANCE) {
+            return balanceGain(center, peak, base)
+        }
         val delta = if (mode == PreviewToneMode.LOCAL_TONE) 0.4f * max(ln(0.7f) - base, 0f) else -0.45f * ln(base)
         return min(exp(delta).coerceIn(1f, 4f), 1f / max(peak.coerceIn(0f, 1f), 0.0001f))
+    }
+
+    /**
+     * 与既有保边模式复用对数基底 B，细节 D=ln(Y)-B 不变。
+     * 暗基底增益 exp(0.45*max(ln(0.55)-B,0))，最多 3 倍；
+     * Y<0.015 不增益，0.015..0.06 平滑过渡，避免把近黑噪声抬白。
+     * 高光端以 peak=最大 RGB 通道，从 0.65..1 平滑压到最多 0.85 倍。
+     * 最终 RGB 同乘增益并限制色域，不加白色偏置、不改变几何或恢复丢失细节。
+     */
+    private fun balanceGain(center: Float, peak: Float, base: Float): Float {
+        fun smooth(a: Float, b: Float, x: Float): Float {
+            val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
+            return t * t * (3f - 2f * t)
+        }
+        val lift = min(exp(0.45f * max(ln(0.55f) - base, 0f)), 3f)
+        val gain = (1f + (lift - 1f) * smooth(0.015f, 0.06f, center) *
+            (1f - smooth(0.45f, 0.85f, peak))) * (1f - 0.15f * smooth(0.65f, 1f, peak))
+        return min(gain, 1f / max(peak, 0.0001f))
     }
 
     // 宿主提供 toneLuma(position)，两种着色语言共用完整的滤波/增益逻辑。
@@ -63,7 +85,7 @@ object LocalToneShader {
                         float sampleY = max(toneLuma(position + $vec2(float(x), float(y)) * stepSize), 1.0 / 255.0);
                         float weight = spatialWeight(x) * spatialWeight(y);
                         float value = sampleY;
-                        if (mode == 1) {
+                        if (mode == 1 || mode == 4) {
                             value = log(sampleY);
                             float d = value - logCenter;
                             weight *= exp(-d * d / 0.245);
@@ -73,6 +95,12 @@ object LocalToneShader {
                     }
                 }
                 float base = sum / max(weightSum, 0.0001);
+                if (mode == 4) {
+                    float lift = min(exp(0.45 * max(log(0.55) - base, 0.0)), 3.0);
+                    float gain = (1.0 + (lift - 1.0) * smoothstep(0.015, 0.06, center) *
+                        (1.0 - smoothstep(0.45, 0.85, peak))) * (1.0 - 0.15 * smoothstep(0.65, 1.0, peak));
+                    return min(gain, 1.0 / max(peak, 0.0001));
+                }
                 float delta = mode == 1 ? 0.4 * max(log(0.7) - base, 0.0) : -0.45 * log(max(base, 1.0 / 255.0));
                 return min(clamp(exp(delta), 1.0, 4.0), 1.0 / max(peak, 0.0001));
             }

@@ -79,6 +79,17 @@ class CameraToolbarInstrumentedTest {
                 compose.onNodeWithText("更多").performClick()
                 compose.onNodeWithText("轻量眩光抑制").performScrollTo().assertIsOff().performClick()
                 compose.onNodeWithText("更多").performClick()
+                compose.onNodeWithText("逆光平衡").performScrollTo().assertIsOff().performClick()
+                AutoHdrPreferences.saveEnabled(prefs, true)
+                scenario.recreate()
+                waitForCamera()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodes(hasText("逆光平衡暂停判断", substring = true)).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithContentDescription("逆光平衡状态").assertExists()
+                compose.onNodeWithText("更多").performClick()
+                compose.onNodeWithText("逆光平衡").performScrollTo().assertIsOn()
+                compose.onNodeWithText("轻量眩光抑制").performScrollTo().assertIsOff()
                 compose.onNodeWithText("逆光暗部增强").performScrollTo()
                 compose.onNodeWithText("逆光暗部增强").performClick()
                 compose.onNodeWithText("更多").performClick()

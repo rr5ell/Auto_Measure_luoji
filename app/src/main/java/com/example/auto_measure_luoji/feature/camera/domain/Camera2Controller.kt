@@ -23,6 +23,7 @@ import android.view.Surface
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureReading
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRequest
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightStatistics
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
 import java.util.Locale
 import kotlin.math.abs
@@ -105,6 +106,10 @@ class Camera2Controller(private val context: Context) {
     private var centerMeteringSuspended = false
     private var centerMeteringDisplayScale = 1f
     private var lastMeteringResult: String? = null
+    @Volatile var highlightAnalysisEnabled = false
+    @Volatile private var highlightSnapshot: Pair<Long, HighlightStatistics>? = null
+    val latestHighlightStatistics: HighlightStatistics?
+        get() = highlightSnapshot?.takeIf { it.first == cameraGeneration }?.second
     val centerMeteringSupported: Boolean? get() = centerMetering.supported
     @Volatile var centerMeteringStatus = "测光：等待相机"
         private set
@@ -354,6 +359,16 @@ class Camera2Controller(private val context: Context) {
                         return@setOnImageAvailableListener
                     }
                     try {
+                        val generation = cameraGeneration
+                        val now = android.os.SystemClock.elapsedRealtimeNanos()
+                        if (highlightAnalysisEnabled && (latestHighlightStatistics?.let {
+                                now - it.sampledAtNs >= HighlightStatistics.INTERVAL_NS
+                            } != false)) {
+                            val plane = image.planes[0]
+                            HighlightStatistics.sample(
+                                plane.buffer, image.width, image.height, plane.rowStride, plane.pixelStride, now
+                            )?.let { if (reader === analysisImageReader && generation == cameraGeneration) highlightSnapshot = generation to it }
+                        }
                         onAnalysisImageAvailable?.invoke(image, sensorOrientation)
                     } catch (error: Exception) {
                         Log.w("Camera2Ctrl", "visual motion analysis failed", error)
