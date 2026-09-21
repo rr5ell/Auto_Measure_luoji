@@ -2,6 +2,8 @@ package com.example.auto_measure_luoji.feature.camera.ui.imageadjustment
 
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
+import com.example.auto_measure_luoji.feature.camera.ui.glaresuppression.GlareSuppressionShader
 
 /**
  * 显示端艺术对比度：C' = clamp((C - 0.5) * k + 0.5, 0, 1)。
@@ -34,9 +36,12 @@ object PreviewContrast {
             return dot(texture2D(uTexture, clamp(position, uToneTexel * 0.5, vec2(1.0) - uToneTexel * 0.5)).rgb, uLumaWeights);
         }
         ${LocalToneShader.functions(false)}
+        ${GlareSuppressionShader.functions(false)}
         void main() {
             vec4 c = texture2D(uTexture, vTexCoord);
-            if (uToneMode != 0) {
+            if (uToneMode == ${PreviewToneMode.GLARE_SUPPRESSION.shaderValue}) {
+                c.rgb = suppressGlare(vTexCoord, uToneStep, c.rgb, dot(c.rgb, uLumaWeights));
+            } else if (uToneMode != 0) {
                 c.rgb *= localToneGain(vTexCoord, uToneStep, dot(c.rgb, uLumaWeights), max(c.r, max(c.g, c.b)), uToneMode);
             } else if (uShadows > 0.5) {
                 c.rgb *= shadowGain(dot(c.rgb, uLumaWeights), max(c.r, max(c.g, c.b)));

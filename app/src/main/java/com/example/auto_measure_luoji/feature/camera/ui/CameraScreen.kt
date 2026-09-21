@@ -5220,7 +5220,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 statusText = if (shadowEnhancementEnabled) "逆光暗部增强已开启" else "逆光暗部增强已关闭"
                             },
                         )
-                        for (mode in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX)) {
+                        for (mode in PreviewToneMode.entries.filter { it != PreviewToneMode.OFF }) {
                             val selected = previewToneMode == mode
                             val enabled = (shadowSupported || selected) && isCameraReady &&
                                 !showCalPanel && !showDualCalPanel && !isDualCalibMode

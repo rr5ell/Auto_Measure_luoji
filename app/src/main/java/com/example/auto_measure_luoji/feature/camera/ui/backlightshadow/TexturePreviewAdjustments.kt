@@ -12,6 +12,7 @@ import androidx.annotation.RequiresApi
 import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.PreviewContrast
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
+import com.example.auto_measure_luoji.feature.camera.ui.glaresuppression.GlareSuppressionShader
 
 /** 仅处理 TextureView 的显示节点；TextureView.bitmap 和相机 YUV 保持原样。 */
 class TexturePreviewAdjustments {
@@ -69,11 +70,14 @@ class TexturePreviewAdjustments {
                 return dot(rgb, float3(0.2126, 0.7152, 0.0722));
             }
             ${LocalToneShader.functions(true)}
+            ${GlareSuppressionShader.functions(true)}
             half4 main(float2 position) {
                 half4 c = preview.eval(position);
                 float3 rgb = clamp(float3(c.rgb) / max(float(c.a), 0.0001), 0.0, 1.0);
                 float y = dot(rgb, float3(0.2126, 0.7152, 0.0722));
-                if (toneMode != 0) {
+                if (toneMode == ${PreviewToneMode.GLARE_SUPPRESSION.shaderValue}) {
+                    rgb = suppressGlare(position, toneStep, rgb, y);
+                } else if (toneMode != 0) {
                     rgb *= localToneGain(position, toneStep, y, max(rgb.r, max(rgb.g, rgb.b)), toneMode);
                 } else if (shadows > 0.5) {
                     rgb *= shadowGain(y, max(rgb.r, max(rgb.g, rgb.b)));

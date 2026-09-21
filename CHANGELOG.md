@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [preview-glare-suppression-2026-09-21] - 2026-09-21
+
+作者：Codex Agent。
+
+### 新增
+- “更多”新增“轻量眩光抑制”开关，默认关闭并保存选择，与现有三种预览增强互斥，关闭立即恢复；校准临时停用后恢复选择。
+- 共享 AGSL/GL 的 5x5 稀疏邻域白雾扣除试验：局部灰底估计、平坦区/高光保护、最大扣除量 0.12 和最低通道保护，不引入模型或 CPU 全帧处理。
+- 只影响普通/GL/HDR 最终显示，不修改原始缓存、YOLO、绿光、校准、坐标映射、相机曝光或自动 HDR，不启用 EIS。
+
+### 验证
+- 75 项单元测试通过；Debug 应用/测试包构建与 laserCompare Kotlin 编译通过。普通预览像素、GL 像素、菜单互斥/重建恢复三项重点回归分别通过，默认及 320dp/1.3 倍字体菜单截图无新增重叠。
+- 全量设备回归因模拟器 system_server 的 EGL_BAD_CONFIG 中断；串行 TextureView -> GL 回归另遇初始化超时/ANR，根因未确认，主机 GPU 下单独运行 GL 与菜单通过，不能宣称全量设备测试通过。
+- 尚未验证真实阳光眩光抑制效果、HLG 实机画质、持续帧率；不宣称恢复过曝细节或彻底消除光斑。
+
 ## [preview-local-tone-retinex-2026-09-21] - 2026-09-21
 
 作者：Codex Agent。

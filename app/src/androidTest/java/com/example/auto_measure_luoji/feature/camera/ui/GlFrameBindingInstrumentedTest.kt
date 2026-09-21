@@ -12,6 +12,7 @@ import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetect
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
+import com.example.auto_measure_luoji.feature.camera.ui.glaresuppression.GlareSuppressionShader
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -268,7 +269,8 @@ class GlFrameBindingInstrumentedTest {
                 }
 
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
-                for ((index, tone) in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX, PreviewToneMode.OFF).withIndex()) {
+                for ((index, tone) in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX,
+                    PreviewToneMode.GLARE_SUPPRESSION, PreviewToneMode.OFF).withIndex()) {
                     preview.setPreviewToneMode(tone)
                     val ts = 7_000_000_000L + index * 100_000_000L
                     submit(ts)
@@ -286,7 +288,9 @@ class GlFrameBindingInstrumentedTest {
                                 val neighbors = FloatArray(25) {
                                     if (y == 275 && x + (it % 5 - 2) * 3 >= 60) 1f else 0.2f
                                 }
-                                val expected = 51f * LocalToneShader.gain(tone, 0.2f, neighbors)
+                                val expected = if (tone == PreviewToneMode.GLARE_SUPPRESSION)
+                                    255f * GlareSuppressionShader.channel(0.2f, GlareSuppressionShader.veil(0.2f, 0.2f, neighbors))
+                                    else 51f * LocalToneShader.gain(tone, 0.2f, neighbors)
                                 abs(android.graphics.Color.red(bitmap.getPixel(x, y)) - expected) < 5f
                             }
                             if (matched) break

@@ -14,6 +14,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.feature.camera.ui.FrameBoundPreviewTestActivity
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
+import com.example.auto_measure_luoji.feature.camera.ui.glaresuppression.GlareSuppressionShader
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -50,6 +51,8 @@ class TextureShadowInstrumentedTest {
                 DisplayCase(contrast = 0.8f), DisplayCase(),
                 DisplayCase(tone = PreviewToneMode.LOCAL_TONE), DisplayCase(tone = PreviewToneMode.RETINEX),
                 DisplayCase(contrast = 0.8f, tone = PreviewToneMode.RETINEX), DisplayCase(),
+                DisplayCase(tone = PreviewToneMode.GLARE_SUPPRESSION),
+                DisplayCase(contrast = 0.8f, tone = PreviewToneMode.GLARE_SUPPRESSION), DisplayCase(),
                 DisplayCase(contrast = 0.8f, legacy = true), DisplayCase(legacy = true))
             for ((shadows, contrast, legacy, tone) in cases) {
                 scenario.onActivity {
@@ -72,7 +75,10 @@ class TextureShadowInstrumentedTest {
                             val neighbors = FloatArray(25) { if (x + (it % 5 - 2) * 3 >= 120) 0.8f else 0.2f }
                             val gain = if (tone != PreviewToneMode.OFF) LocalToneShader.gain(tone, value, neighbors)
                                 else if (shadows) ShadowEnhancement.gain(value, value, value) else 1f
-                            val expected = (((value * gain - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f) * 255f)
+                            val adjusted = if (tone == PreviewToneMode.GLARE_SUPPRESSION)
+                                GlareSuppressionShader.channel(value, GlareSuppressionShader.veil(value, value, neighbors))
+                                else value * gain
+                            val expected = (((adjusted - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f) * 255f)
                             abs(Color.red(bitmap.getPixel(x, 100)) - expected) < 4f
                         }
                         if (matched) break

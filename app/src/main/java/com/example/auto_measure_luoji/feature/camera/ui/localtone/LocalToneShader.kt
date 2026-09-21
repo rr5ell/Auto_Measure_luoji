@@ -27,7 +27,8 @@ object LocalToneShader {
     /** CPU 参考仅用于数学与像素回归，不用于逐帧图像处理。 */
     fun gain(mode: PreviewToneMode, center: Float, neighborhood: FloatArray, peak: Float = center): Float {
         require(neighborhood.size == 25)
-        if (mode == PreviewToneMode.OFF || !center.isFinite() || !peak.isFinite() || neighborhood.any { !it.isFinite() }) return 1f
+        if (mode !in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX) ||
+            !center.isFinite() || !peak.isFinite() || neighborhood.any { !it.isFinite() }) return 1f
         val weights = floatArrayOf(1f, 4f, 6f, 4f, 1f)
         val logCenter = ln(max(center.coerceIn(0f, 1f), 1f / 255f))
         var sum = 0f
