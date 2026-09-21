@@ -98,6 +98,11 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         requestRender()
     }
 
+    fun setShadowEnhancement(enabled: Boolean) {
+        queueEvent { previewRenderer.shadowEnhancement = enabled }
+        requestRender()
+    }
+
     fun setDetectionEnabled(enabled: Boolean) {
         queueEvent { previewRenderer.setDetectionEnabled(enabled) }
         requestRender()
@@ -341,6 +346,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         private var captureProgram = 0
         private var contrastProgram = 0
         var previewContrast = 1f
+        var shadowEnhancement = false
 
         fun requestCapture(width: Int, height: Int, minimumTimestampNs: Long, result: CompletableDeferred<ByteBuffer>) {
             if (!result.isActive) return
@@ -663,9 +669,9 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             if (outputTarget.textureId != 0 && hasOutput) {
-                // 仅最后一次上屏合成应用对比度，算法取帧、诊断及检测框保持原样。
+                // 仅最后一次上屏合成应用暗部增强和对比度，算法取帧、诊断及检测框保持原样。
                 drawTexture(outputTarget.textureId, false, identity, identity,
-                    overrideProgram = if (previewContrast == 1f) 0 else contrastProgram)
+                    overrideProgram = if (previewContrast == 1f && !shadowEnhancement) 0 else contrastProgram)
             }
             // 检测框独立画到屏幕，不烘焙到预览缓存，过期/关闭时一帧即可清除。
             if (hasOutput) drawDetectionBoxes(detectionPresentation()?.boxes.orEmpty())
@@ -688,6 +694,10 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uTexture"), 0)
             if (activeProgram == contrastProgram) {
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(activeProgram, "uContrast"), previewContrast)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(activeProgram, "uShadows"), if (shadowEnhancement) 1f else 0f)
+                val luma = GLES20.glGetUniformLocation(activeProgram, "uLumaWeights")
+                if (hdrEnabled) GLES20.glUniform3f(luma, 0.2627f, 0.6780f, 0.0593f)
+                else GLES20.glUniform3f(luma, 0.2126f, 0.7152f, 0.0722f)
             }
             if (overrideProgram != 0) GLES20.glUniform1i(GLES20.glGetUniformLocation(activeProgram, "uHlg"), if (hdrEnabled) 1 else 0)
             if (external && hdrEnabled) {

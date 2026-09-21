@@ -1,5 +1,7 @@
 package com.example.auto_measure_luoji.feature.camera.ui.imageadjustment
 
+import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
+
 /**
  * 显示端艺术对比度：C' = clamp((C - 0.5) * k + 0.5, 0, 1)。
  * k=1 原样输出；SDR 和 HLG 均在各自编码信号域处理，不将 HLG 当作 sRGB 解码。
@@ -20,9 +22,15 @@ object PreviewContrast {
         precision highp float;
         uniform sampler2D uTexture;
         uniform float uContrast;
+        uniform float uShadows;
+        uniform vec3 uLumaWeights;
         varying vec2 vTexCoord;
+        ${ShadowEnhancement.GAIN_FUNCTION}
         void main() {
             vec4 c = texture2D(uTexture, vTexCoord);
+            if (uShadows > 0.5) {
+                c.rgb *= shadowGain(dot(c.rgb, uLumaWeights), max(c.r, max(c.g, c.b)));
+            }
             gl_FragColor = vec4(clamp((c.rgb - 0.5) * uContrast + 0.5, 0.0, 1.0), c.a);
         }
     """

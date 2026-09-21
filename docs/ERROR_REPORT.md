@@ -1,5 +1,31 @@
 # 错误报告
 
+## [2026-09-21] 暗部增强与顶部菜单收纳
+
+作者：Codex Agent。
+
+### 发现的问题
+- 严重程度：中。ColorMatrix 只能线性变换颜色，不能独立提升暗部且保留高光；将效果烘焙入预览缓存则会改变模型及校准输入。
+- 本轮像素测试实测发现：此前 TextureView.setLayerPaint 对比度 0.8 会将 getBitmap 的灰阶值从 51 改为 66，证明原有对比度会污染算法取帧。根因为 getBitmap 复制硬件纹理层时包含该层 paint。
+- 顶部 HDR、LSC 和 EV 等按钮挤占主操作区域；测试包还额外固定绿光对比入口。
+
+### 解决方案
+- 复用现有最终上屏合成，加入共享的非线性暗部增益函数；TextureView 使用 Android 13+ RenderEffect/RuntimeShader，GL 使用最终屏幕 Shader。
+- 修正普通预览原有对比度隔离：API 31+ 统一使用 RenderEffect，API 24~30 仅在专属 FrameLayout 硬件层应用颜色矩阵，TextureView 的 layer paint 始终中性。
+- 所有颜色处理仅针对画面显示节点，不影响叠加框、坐标及算法取帧；校准临时关闭效果，不改写用户偏好。旧系统普通预览禁用开启并提示需 GL。
+- 顶部仅保留四个主入口，其余工具统一进入可滚动“更多”，保留原来的业务回调与锁定条件。
+
+### 预防措施
+- 验证灰阶单调、端点、增益/色域界限及 SDR/HLG 权重；像素回归同时检查显示改变与原图不变，菜单测试检查开关保存和重建恢复。
+- 禁止启用 EIS；不为显示增强重建相机会话。本次不修复已知 HDR 切换竞争；厂商 HLG 色彩、连续帧率及真实逆光画质需真机确认。
+
+### 验证结果
+- 65 项单元测试、Debug 应用与设备测试包构建、laserCompare Kotlin 编译通过；模拟器 10 项设备回归通过。
+- 初次 TextureView 像素测试发现对比度污染原图，修正后复测通过；API 31+ RenderEffect 路径和旧系统父容器滤镜路径均在当前模拟器验证，未在 API 24~30 实机执行。
+- 默认屏幕与 320dp/1.3 倍字体截图确认新增按钮/菜单无重叠；普通校准中开关禁用，偏好保持开启。
+- 改变模拟器密度/字体引起 Activity 重建时复现已知 CameraDevice was already closed，堆栈位于 Camera2Controller.startPreview:547 / createLogicalSession.onConfigured:462；恢复后仍有预览但保留错误提示。本轮未修改此竞争逻辑。
+- 真机 HLG 画质和持续帧率未验证，未重跑全量 Lint；不将模拟器软件 GPU 帧率视为手机性能结论。
+
 ## [2026-09-20] 手动 EV 与预览对比度的集成防护
 
 作者：Codex Agent。

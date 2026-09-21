@@ -34,6 +34,8 @@
 
 ## 注意事项
 
+- 预览暗部增强：Android 13+ RuntimeShader/AGSL（无新增依赖），GL/HLG10 使用现有 OpenGL ES Shader；标准实现位于 feature/camera/ui/backlightshadow，SDK 来源 app/build.gradle.kts。
+
 - 当前项目随包携带 Sherpa-ONNX native 推理库，但不把 SenseVoice / Silero VAD 模型权重打进 APK；模型仍由 `ThirdPartyVoiceModelDownloader` 下载到应用私有目录。
 - YOLO 可在 `TextureView.getBitmap()` 预览截图源与 Camera2 `ImageReader` 的 `YUV_420_888` 数据源之间切换；YUV 实时识别复用 native `yuv_preprocess` 预处理链路。
 - YOLO 后处理通过 `YoloPostprocessOptions` 统一传入置信度阈值和单框/多框策略，PreviewBitmap 与 YUV 数据源不得各自维护重复阈值常量。

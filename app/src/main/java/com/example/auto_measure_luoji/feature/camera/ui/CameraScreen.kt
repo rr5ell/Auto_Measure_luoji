@@ -87,10 +87,13 @@ import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPrefe
 import com.example.auto_measure_luoji.feature.camera.ui.autohdr.AutoHdrDialog
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ImageAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdjustmentDialog
-import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.PreviewContrast
+import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
+import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.toggleableState
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
 import com.example.auto_measure_luoji.feature.detection.domain.YoloPostprocessOptions
@@ -776,6 +779,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         ).sanitized())
     }
     var imageAdjustmentError by remember { mutableStateOf<String?>(null) }
+    var shadowEnhancementEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(ShadowEnhancement.PREFERENCE_KEY, false))
+    }
+    val texturePreviewAdjustments = remember { TexturePreviewAdjustments() }
     fun saveImageAdjustments() {
         cameraPrefs.edit().putFloat("manual_exposure_ev", imageAdjustments.ev)
             .putFloat("preview_contrast", imageAdjustments.contrast).apply()
@@ -4588,12 +4595,19 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
     }
 
-    LaunchedEffect(textureViewRef, glPreviewViewRef, imageAdjustments.contrast, showCalPanel, showDualCalPanel, isDualCalibMode) {
-        val contrast = imageAdjustments.forCalibration(showCalPanel || showDualCalPanel || isDualCalibMode).contrast
-        textureViewRef?.setLayerPaint(android.graphics.Paint().apply {
-            colorFilter = if (contrast == 1f) null else android.graphics.ColorMatrixColorFilter(PreviewContrast.colorMatrix(contrast))
-        })
+    LaunchedEffect(textureViewRef, glPreviewViewRef, imageAdjustments.contrast, shadowEnhancementEnabled,
+        showCalPanel, showDualCalPanel, isDualCalibMode) {
+        val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
+        val contrast = imageAdjustments.forCalibration(calibrationActive).contrast
+        val shadows = shadowEnhancementEnabled && !calibrationActive
+        textureViewRef?.let { view ->
+            texturePreviewAdjustments.apply(view, contrast, shadows).onFailure {
+                statusText = "暗部增强未生效：${it.message}"
+                Log.w("CameraScreen", "Texture preview adjustment failed", it)
+            }
+        }
         glPreviewViewRef?.setPreviewContrast(contrast)
+        glPreviewViewRef?.setShadowEnhancement(shadows)
     }
 
     // 变换效果：默认倍率放大交给 Camera2；纯 UI 放大实验模式下由 TextureView Matrix 承担显示 zoom。
@@ -5093,7 +5107,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.65f)),
+                modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.65f))
+                    .semantics { contentDescription = "相机顶部操作栏" },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val wideLens = findWideLens(lensCandidates)
@@ -5137,38 +5152,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         },
                     )
                     TopActionButton(
-                        text = "EV / 对比度",
-                        active = imageAdjustments != ImageAdjustments(),
-                        onClick = { showImageAdjustmentDialog = true },
+                        text = if (isVoiceListening) "唤醒中" else "唤醒",
+                        active = isVoiceListening,
+                        accent = Color(0xFF9C27B0),
+                        onClick = { toggleVoiceRecognition() },
                     )
-                    if (isLaserCompareApp) {
-                        TopActionButton(
-                            text = if (laserCompareEnabled) "对比中" else "绿光对比",
-                            active = showLaserComparePanel || laserCompareEnabled,
-                            enabled = isCameraReady,
-                            accent = Color(0xFF00C853),
-                            onClick = { toggleLaserComparePanel() },
-                        )
-                    }
                 }
                 Spacer(modifier = Modifier.width(4.dp))
-                TopActionButton(
-                    text = "自动 HDR",
-                    active = autoHdrEnabled || hdrPreviewEnabled,
-                    onClick = { showAutoHdrDialog = true },
-                )
-                TextButton(
-                    onClick = { showShadingModeDialog = true },
-                    enabled = isCameraReady && !showCalPanel && !showDualCalPanel && !isDualCalibMode,
-                    modifier = Modifier.width(64.dp).height(48.dp),
-                    contentPadding = PaddingValues(2.dp),
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("LSC", color = Color.White, fontSize = 12.sp)
-                        Text(Camera2Controller.shadingModeName(cameraShadingMode),
-                            color = Color(0xFF80CBC4), fontSize = 10.sp, maxLines = 1)
-                    }
-                }
                 Box {
                     TopActionButton(
                         text = "更多",
@@ -5181,7 +5171,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroStabilizationCalibrationEnabled ||
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
-                            isVoiceListening ||
+                            shadowEnhancementEnabled ||
+                            imageAdjustments != ImageAdjustments() ||
+                            autoHdrEnabled || hdrPreviewEnabled ||
                             yoloCaptureMode == YoloCaptureMode.UHD4K ||
                             yoloFrameSource == YoloFrameSource.IMAGE_READER_YUV ||
                             showLaserComparePanel ||
@@ -5194,6 +5186,50 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         onDismissRequest = { toolsMenuExpanded = false },
                         modifier = Modifier.background(Color(0xF0222222)),
                     ) {
+                        val shadowSupported = TexturePreviewAdjustments.supported || gyroPreviewGlRenderEnabled
+                        val shadowControlEnabled = (shadowSupported || shadowEnhancementEnabled) && isCameraReady &&
+                            !showCalPanel && !showDualCalPanel && !isDualCalibMode
+                        DropdownMenuItem(
+                            text = { Text(if (shadowSupported) "逆光暗部增强" else "逆光暗部增强（需 GL）") },
+                            trailingIcon = { Switch(checked = shadowEnhancementEnabled, onCheckedChange = null, enabled = shadowControlEnabled) },
+                            colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
+                            modifier = Modifier.semantics {
+                                toggleableState = androidx.compose.ui.state.ToggleableState(shadowEnhancementEnabled)
+                                role = androidx.compose.ui.semantics.Role.Switch
+                            },
+                            enabled = shadowControlEnabled,
+                            onClick = {
+                                shadowEnhancementEnabled = !shadowEnhancementEnabled
+                                cameraPrefs.edit().putBoolean(ShadowEnhancement.PREFERENCE_KEY, shadowEnhancementEnabled).apply()
+                                toolsMenuExpanded = false
+                                statusText = if (shadowEnhancementEnabled) "逆光暗部增强已开启" else "逆光暗部增强已关闭"
+                            },
+                        )
+                        ToolMenuItem(
+                            text = "EV / 对比度",
+                            active = imageAdjustments != ImageAdjustments(),
+                            onClick = { toolsMenuExpanded = false; showImageAdjustmentDialog = true },
+                        )
+                        ToolMenuItem(
+                            text = "自动 HDR",
+                            active = autoHdrEnabled || hdrPreviewEnabled,
+                            onClick = { toolsMenuExpanded = false; showAutoHdrDialog = true },
+                        )
+                        ToolMenuItem(
+                            text = "LSC ${Camera2Controller.shadingModeName(cameraShadingMode)}",
+                            enabled = isCameraReady && !showCalPanel && !showDualCalPanel && !isDualCalibMode,
+                            onClick = { toolsMenuExpanded = false; showShadingModeDialog = true },
+                        )
+                        if (isLaserCompareApp) {
+                            ToolMenuItem(
+                                text = if (laserCompareEnabled) "对比中" else "绿光对比",
+                                active = showLaserComparePanel || laserCompareEnabled,
+                                enabled = isCameraReady,
+                                accent = Color(0xFF00C853),
+                                onClick = { toolsMenuExpanded = false; toggleLaserComparePanel() },
+                            )
+                        }
                         ToolMenuItem(
                             text = if (wideLensActive) "广角中" else "广角",
                             active = wideLensActive,
@@ -5252,15 +5288,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 } else {
                                     "纯UI放大已关闭：恢复 Camera2 数码放大"
                                 }
-                            },
-                        )
-                        ToolMenuItem(
-                            text = if (isVoiceListening) "语音中" else "语音",
-                            active = isVoiceListening,
-                            accent = Color(0xFF9C27B0),
-                            onClick = {
-                                toolsMenuExpanded = false
-                                toggleVoiceRecognition()
                             },
                         )
                         ToolMenuItem(

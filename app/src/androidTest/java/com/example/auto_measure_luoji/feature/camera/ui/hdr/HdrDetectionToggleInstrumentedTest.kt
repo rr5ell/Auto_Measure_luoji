@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -71,10 +72,10 @@ class HdrDetectionToggleInstrumentedTest {
             compose.onNodeWithContentDescription("HDR 状态").assert(hasText("已开启", substring = true))
 
             compose.onNodeWithText("更多").performClick()
-            compose.onNodeWithText("绿光识别").assertIsEnabled()
-            compose.onNodeWithText("YOLO源 ", substring = true).assertIsNotEnabled()
+            compose.onNodeWithText("绿光识别").performScrollTo().assertIsEnabled()
+            compose.onNodeWithText("YOLO源 ", substring = true).performScrollTo().assertIsNotEnabled()
             compose.onNode(hasText("YOLO单框", substring = true) or hasText("YOLO多框"))
-                .assertIsEnabled().performClick()
+                .performScrollTo().assertIsEnabled().performClick()
             compose.onNodeWithText("YOLO识别阈值").assertIsDisplayed()
             compose.onNodeWithText("保存").assertIsEnabled().performClick()
             waitForRecognition("识别中")
@@ -112,6 +113,7 @@ class HdrDetectionToggleInstrumentedTest {
     }
 
     private fun switchHdr(enabled: Boolean) {
+        compose.onNodeWithText("更多").performClick()
         compose.onNodeWithText("自动 HDR").performClick()
         compose.onNodeWithContentDescription("自动 HDR 开关").assertIsOff()
         val manual = compose.onNodeWithContentDescription("HDR 预览").assertIsEnabled()

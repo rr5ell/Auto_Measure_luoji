@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [backlight-preview-toolbar-2026-09-21] - 2026-09-21
+
+作者：Codex Agent。
+
+### 新增
+- “更多”新增“逆光暗部增强”开关，默认关闭并保存设置；GPU 亮度曲线提高暗部增益、保护高光及通道比例，黑白端点保持不变。
+- Android 13+ 普通 TextureView 使用 AGSL，GL/HLG10 在最终上屏合成处理；先提亮后对比度，不改变识别/绿光/校准取帧或坐标，校准时暂时停用。
+
+### 变更
+- 顶部仅保留“识别、校准、唤醒、更多”；EV / 对比度、自动 HDR、LSC 和测试包绿光对比入口移入“更多”，原语音开关移到顶部并标为“唤醒”。
+- 旧 Android 普通预览明确提示“需 GL”，不自动切换相机会话；Shader 失败保留对比度并显示错误。不启用 EIS、不修改已有 HDR 会话竞争逻辑。
+- 像素测试发现原 TextureView 对比度会进入 getBitmap；改为 RenderEffect / 旧系统专属父容器滤镜，隔离显示与算法图像。
+
+### 验证
+- 65 项单元测试通过；Debug 应用及设备测试包构建、laserCompare Kotlin 编译通过。
+- 模拟器 10 项回归通过：普通预览/旧系统对比度显示路径像素与原图隔离、GL 帧映射和调色、四按钮菜单/持久化、手动调节及自动 HDR 面板。
+- 实际界面检查覆盖默认密度、320dp 窄屏/1.3 倍字体以及校准中锁定；字体配置重建期间复现已有 CameraDevice 关闭竞争，未宣称修复。未执行真机 HLG 画质、旧 Android 系统实机或全量 Lint 回归。
+
 ## [manual-image-adjustments-2026-09-20] - 2026-09-20
 
 作者：Codex Agent。

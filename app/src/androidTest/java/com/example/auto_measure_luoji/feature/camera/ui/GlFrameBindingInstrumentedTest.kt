@@ -9,6 +9,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.auto_measure_luoji.feature.camera.domain.RenderedPreviewFrame
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetectionBox
+import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -230,17 +231,25 @@ class GlFrameBindingInstrumentedTest {
 
                 // 上屏对比度必须改变像素，但不能改变供算法读取的输出缓存。
                 preview.setDetectionEnabled(false)
-                for ((index, contrast) in listOf(1f, 0.5f, 2f, 1f).withIndex()) {
+                val displayCases = listOf(
+                    Triple(1f, false, 0.2f), Triple(0.5f, false, 0.2f), Triple(2f, false, 0.2f),
+                    Triple(1f, false, 0.2f), Triple(1f, true, 0.2f), Triple(0.8f, true, 0.2f),
+                    Triple(1f, true, 0.8f), Triple(1f, false, 0.2f),
+                )
+                for ((index, displayCase) in displayCases.withIndex()) {
+                    val (contrast, shadows, gray) = displayCase
                     preview.setPreviewContrast(contrast)
+                    preview.setShadowEnhancement(shadows)
                     val ts = 5_000_000_000L + index * 100_000_000L
                     submit(ts)
-                    produce(ts, 0.2f)
+                    produce(ts, gray)
                     val unmodified = frames.poll(5, TimeUnit.SECONDS) ?: error("对比度测试未出帧")
-                    assertEquals(51f, unmodified.output.luma[20].toFloat(), 3f)
+                    assertEquals(gray * 255f, unmodified.output.luma[20].toFloat(), 3f)
                     val bitmap = android.graphics.Bitmap.createBitmap(240, 426, android.graphics.Bitmap.Config.ARGB_8888)
                     try {
                         val copied = LinkedBlockingQueue<Int>()
-                        val expected = (((0.2f - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f) * 255f)
+                        val gain = if (shadows) ShadowEnhancement.gain(gray, gray, gray) else 1f
+                        val expected = (((gray * gain - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f) * 255f)
                         var matched = false
                         for (attempt in 0..9) {
                             android.view.PixelCopy.request(preview, bitmap, { copied.offer(it) },
@@ -252,7 +261,7 @@ class GlFrameBindingInstrumentedTest {
                             }
                             Thread.sleep(50)
                         }
-                        assertTrue("上屏对比度未生效：$contrast", matched)
+                        assertTrue("上屏调节未生效：对比度=$contrast 暗部=$shadows", matched)
                     } finally { bitmap.recycle() }
                 }
 

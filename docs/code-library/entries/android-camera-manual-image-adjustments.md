@@ -9,7 +9,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\imageadjustment\ImageAdjustmentDialog.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\imageadjustment\PreviewContrast.kt
 - 接入路径：Camera2Controller.kt、CameraScreen.kt、GlStabilizedPreviewView.kt（以上 feature/camera 对应目录）。
-- 最后更新：2026-09-20
+- 最后更新：2026-09-21
 - 作者：Codex Agent
 
 ## 适用场景
@@ -29,7 +29,8 @@
 
 ## 复用方式
 - 复用 ExposureCompensationRange 进行界面档位量化，复用 Camera2Controller.setExposureCompensationEv 提交请求。
-- TextureView 使用 PreviewContrast.colorMatrix 的显示层滤镜；GL 使用 FRAGMENT 在最终上屏绘制应用，不修改 outputTarget。
+- TextureView 复用 PreviewContrast.colorMatrix，通过 TexturePreviewAdjustments 在 API 31+ 的 RenderEffect 或旧系统专属父容器应用。不能设置 TextureView.setLayerPaint 的滤镜，否则 getBitmap 也会改变；GL 使用 FRAGMENT 在最终上屏绘制应用，不修改 outputTarget。
+- 入口已移至“更多 -> EV / 对比度”。开启逆光暗部增强时，TextureView 改用 TexturePreviewAdjustments 的 AGSL 效果，先暗部增强后对比度，不能重复叠加 ColorMatrix；详见 android-preview-shadow-enhancement。
 - 对比度在当前 SDR/HLG 编码域按中点 0.5 调整，k=1 原样；无额外全帧 CPU 处理或几何变换。
 - 面板期间暂停自动 HDR 判断；参数改变清空四条确认，不重置停判截止时间。
 

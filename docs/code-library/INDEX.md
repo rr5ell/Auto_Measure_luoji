@@ -10,9 +10,10 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/manual-image-adjustments` |
+| 当前主要分支 | `feature/backlight-preview-toolbar` |
 
 ## 可复用能力
+- [android-preview-shadow-enhancement](entries/android-preview-shadow-enhancement.md)：预览端非线性暗部增益、AGSL/GL 共用曲线、校准暂停与原始取帧隔离。
 
 - [android-camera-manual-image-adjustments](entries/android-camera-manual-image-adjustments.md)：手动 EV、硬件档位量化、显示端对比度、校准覆盖恢复与自动 HDR 互斥。
 
@@ -66,4 +67,4 @@
 
 ## 最后更新
 
-2026-09-20，Codex Agent。新增手动 EV 与显示端对比度、校准覆盖恢复；自动 HDR 保持四条同步采样与故障暂停；不启用系统 EIS。
+2026-09-21，Codex Agent。新增显示端逆光暗部增强，顶部收拢四个入口；修正 TextureView 对比度污染原始取帧；65 项单元测试及 10 项模拟器回归通过，不启用系统 EIS。
