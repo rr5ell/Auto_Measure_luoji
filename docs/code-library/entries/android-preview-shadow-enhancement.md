@@ -29,6 +29,7 @@
 | HLG 权重 | RGB | 0.2627,0.6780,0.0593 | BT.2020 | 不作 sRGB 解码 |
 
 ## 复用方式
+- 已增加局部色调映射/Retinex，三个增强互斥，模式非 OFF 时优先局部算法。共享邻域实现见 android-preview-local-tone-retinex，不复制一套独立 shader。
 - TextureView 调用 TexturePreviewAdjustments.apply；Android 13+ 以 AGSL 同时完成增强与对比度。关闭增强时，API 31+ 使用 ColorMatrix RenderEffect，API 24~30 使用专属父容器硬件层滤镜。禁止对 TextureView.setLayerPaint 设置颜色滤镜，该滤镜也会影响 getBitmap 原图。旧系统普通预览不支持开启增强，仍支持对比度。
 - GL 调用 setShadowEnhancement，在最终上屏处理；outputTarget、诊断缓存和检测框均不处理。
 - Shader 共用 GAIN_FUNCTION；调色顺序固定为暗部增强、对比度。无额外 CPU 全帧处理，不改变坐标、时间戳或帧配对。

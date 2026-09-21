@@ -1,6 +1,7 @@
 package com.example.auto_measure_luoji.feature.camera.ui.imageadjustment
 
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
 
 /**
  * 显示端艺术对比度：C' = clamp((C - 0.5) * k + 0.5, 0, 1)。
@@ -18,17 +19,26 @@ object PreviewContrast {
             0f, 0f, k, 0f, offset, 0f, 0f, 0f, 1f, 0f)
     }
 
-    const val FRAGMENT = """
+    val FRAGMENT = """
         precision highp float;
         uniform sampler2D uTexture;
         uniform float uContrast;
         uniform float uShadows;
         uniform vec3 uLumaWeights;
+        uniform int uToneMode;
+        uniform vec2 uToneStep;
+        uniform vec2 uToneTexel;
         varying vec2 vTexCoord;
         ${ShadowEnhancement.GAIN_FUNCTION}
+        float toneLuma(vec2 position) {
+            return dot(texture2D(uTexture, clamp(position, uToneTexel * 0.5, vec2(1.0) - uToneTexel * 0.5)).rgb, uLumaWeights);
+        }
+        ${LocalToneShader.functions(false)}
         void main() {
             vec4 c = texture2D(uTexture, vTexCoord);
-            if (uShadows > 0.5) {
+            if (uToneMode != 0) {
+                c.rgb *= localToneGain(vTexCoord, uToneStep, dot(c.rgb, uLumaWeights), max(c.r, max(c.g, c.b)), uToneMode);
+            } else if (uShadows > 0.5) {
                 c.rgb *= shadowGain(dot(c.rgb, uLumaWeights), max(c.r, max(c.g, c.b)));
             }
             gl_FragColor = vec4(clamp((c.rgb - 0.5) * uContrast + 0.5, 0.0, 1.0), c.a);

@@ -30,7 +30,7 @@
 ## 复用方式
 - 复用 ExposureCompensationRange 进行界面档位量化，复用 Camera2Controller.setExposureCompensationEv 提交请求。
 - TextureView 复用 PreviewContrast.colorMatrix，通过 TexturePreviewAdjustments 在 API 31+ 的 RenderEffect 或旧系统专属父容器应用。不能设置 TextureView.setLayerPaint 的滤镜，否则 getBitmap 也会改变；GL 使用 FRAGMENT 在最终上屏绘制应用，不修改 outputTarget。
-- 入口已移至“更多 -> EV / 对比度”。开启逆光暗部增强时，TextureView 改用 TexturePreviewAdjustments 的 AGSL 效果，先暗部增强后对比度，不能重复叠加 ColorMatrix；详见 android-preview-shadow-enhancement。
+- 入口已移至“更多 -> EV / 对比度”。开启逆光暗部增强或局部色调映射/Retinex 时，TextureView 改用 TexturePreviewAdjustments 的 AGSL 效果，先增强后对比度，不能重复叠加 ColorMatrix；详见 android-preview-shadow-enhancement 和 android-preview-local-tone-retinex。
 - 对比度在当前 SDR/HLG 编码域按中点 0.5 调整，k=1 原样；无额外全帧 CPU 处理或几何变换。
 - 面板期间暂停自动 HDR 判断；参数改变清空四条确认，不重置停判截止时间。
 

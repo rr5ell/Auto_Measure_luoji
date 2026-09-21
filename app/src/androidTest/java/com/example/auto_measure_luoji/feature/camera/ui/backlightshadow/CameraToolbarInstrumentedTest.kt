@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -30,10 +31,12 @@ class CameraToolbarInstrumentedTest {
         }
         val prefs = context.getSharedPreferences("camera_screen_settings", Context.MODE_PRIVATE)
         val originalAuto = AutoHdrPreferences.loadEnabled(prefs)
+        val originalTone = prefs.getString(PreviewToneMode.PREFERENCE_KEY, null)
         val keys = listOf(ShadowEnhancement.PREFERENCE_KEY, "gyro_preview_gl_render_enabled", "gyro_preview_stabilization_enabled")
         val original = keys.associateWith { if (prefs.contains(it)) prefs.getBoolean(it, false) else null }
         AutoHdrPreferences.saveEnabled(prefs, false)
-        prefs.edit().apply { keys.forEach { putBoolean(it, false) } }.commit()
+        prefs.edit().putString(PreviewToneMode.PREFERENCE_KEY, PreviewToneMode.OFF.name)
+            .apply { keys.forEach { putBoolean(it, false) } }.commit()
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 waitForCamera()
@@ -56,11 +59,27 @@ class CameraToolbarInstrumentedTest {
                 compose.onNodeWithText("逆光暗部增强").performClick()
                 compose.runOnIdle { assertFalse(prefs.getBoolean(ShadowEnhancement.PREFERENCE_KEY, true)) }
                 compose.onNodeWithText("更多").performClick()
+                compose.onNodeWithText("保边局部色调映射").assertIsOff().performClick()
+                compose.onNodeWithText("更多").performClick()
+                compose.onNodeWithText("保边局部色调映射").assertIsOn()
+                compose.onNodeWithText("逆光暗部增强").assertIsOff()
+                compose.onNodeWithText("Retinex").assertIsOff().performClick()
+                scenario.recreate()
+                waitForCamera()
+                compose.onNodeWithText("更多").performClick()
+                compose.onNodeWithText("Retinex").assertIsOn()
+                compose.onNodeWithText("保边局部色调映射").assertIsOff()
+                compose.onNodeWithText("逆光暗部增强").performClick()
+                compose.onNodeWithText("更多").performClick()
+                compose.onNodeWithText("Retinex").assertIsOff()
+                compose.onNodeWithText("逆光暗部增强").assertIsOn().performClick()
+                compose.onNodeWithText("更多").performClick()
                 compose.onNodeWithText("EV / 对比度").performClick()
                 compose.onNodeWithContentDescription("手动 EV").assertIsDisplayed()
             }
         } finally {
             AutoHdrPreferences.saveEnabled(prefs, originalAuto)
+            prefs.edit().putString(PreviewToneMode.PREFERENCE_KEY, originalTone).commit()
             prefs.edit().apply { original.forEach { (key, value) ->
                 if (value == null) remove(key) else putBoolean(key, value)
             } }.commit()

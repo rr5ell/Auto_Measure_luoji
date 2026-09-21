@@ -12,6 +12,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.feature.camera.ui.FrameBoundPreviewTestActivity
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -22,6 +24,8 @@ import kotlin.math.abs
 
 @RunWith(AndroidJUnit4::class)
 class TextureShadowInstrumentedTest {
+    private data class DisplayCase(val shadows: Boolean = false, val contrast: Float = 1f,
+        val legacy: Boolean = false, val tone: PreviewToneMode = PreviewToneMode.OFF)
     @Test fun shaderLiftsOnlyDisplayAndRestoresContrastWithoutTouchingSource() {
         assumeTrue(TexturePreviewAdjustments.supported)
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -42,11 +46,14 @@ class TextureShadowInstrumentedTest {
                 view.unlockCanvasAndPost(canvas)
             }
             val adjustments = TexturePreviewAdjustments()
-            val cases = listOf(Triple(false, 1f, false), Triple(true, 1f, false), Triple(true, 0.8f, false),
-                Triple(false, 0.8f, false), Triple(false, 1f, false), Triple(false, 0.8f, true), Triple(false, 1f, true))
-            for ((shadows, contrast, legacy) in cases) {
+            val cases = listOf(DisplayCase(), DisplayCase(shadows = true), DisplayCase(true, 0.8f),
+                DisplayCase(contrast = 0.8f), DisplayCase(),
+                DisplayCase(tone = PreviewToneMode.LOCAL_TONE), DisplayCase(tone = PreviewToneMode.RETINEX),
+                DisplayCase(contrast = 0.8f, tone = PreviewToneMode.RETINEX), DisplayCase(),
+                DisplayCase(contrast = 0.8f, legacy = true), DisplayCase(legacy = true))
+            for ((shadows, contrast, legacy, tone) in cases) {
                 scenario.onActivity {
-                    adjustments.apply(it.texturePreview, if (legacy) 1f else contrast, shadows).getOrThrow()
+                    adjustments.apply(it.texturePreview, if (legacy) 1f else contrast, shadows, tone).getOrThrow()
                     if (legacy) adjustments.applyLegacyContrast(it.texturePreview, contrast)
                 }
                 val bitmap = Bitmap.createBitmap(240, 426, Bitmap.Config.ARGB_8888)
@@ -61,15 +68,17 @@ class TextureShadowInstrumentedTest {
                                 bitmap, { result -> copied.offer(result) }, Handler(Looper.getMainLooper()))
                         }
                         assertEquals(PixelCopy.SUCCESS, copied.poll(5, TimeUnit.SECONDS))
-                        matched = listOf(30 to 0.2f, 180 to 0.8f).all { (x, value) ->
-                            val gain = if (shadows) ShadowEnhancement.gain(value, value, value) else 1f
+                        matched = listOf(30 to 0.2f, 118 to 0.2f, 180 to 0.8f).all { (x, value) ->
+                            val neighbors = FloatArray(25) { if (x + (it % 5 - 2) * 3 >= 120) 0.8f else 0.2f }
+                            val gain = if (tone != PreviewToneMode.OFF) LocalToneShader.gain(tone, value, neighbors)
+                                else if (shadows) ShadowEnhancement.gain(value, value, value) else 1f
                             val expected = (((value * gain - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f) * 255f)
                             abs(Color.red(bitmap.getPixel(x, 100)) - expected) < 4f
                         }
                         if (matched) break
                         Thread.sleep(50)
                     }
-                    assertTrue("普通预览效果不符：暗部=$shadows 对比度=$contrast，像素=${Color.red(bitmap.getPixel(30, 100))}", matched)
+                    assertTrue("普通预览效果不符：模式=$tone 暗部=$shadows 对比度=$contrast，像素=${Color.red(bitmap.getPixel(30, 100))},${Color.red(bitmap.getPixel(118, 100))}", matched)
                     scenario.onActivity {
                         val source = it.texturePreview.bitmap ?: error("算法取帧失败")
                         try { assertEquals("原图被修改：暗部=$shadows 对比度=$contrast 旧系统路径=$legacy", 51, Color.red(source.getPixel(30, 100))) }

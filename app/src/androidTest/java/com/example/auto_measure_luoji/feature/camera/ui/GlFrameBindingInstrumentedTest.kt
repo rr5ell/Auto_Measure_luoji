@@ -10,6 +10,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.auto_measure_luoji.feature.camera.domain.RenderedPreviewFrame
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetectionBox
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -266,6 +268,33 @@ class GlFrameBindingInstrumentedTest {
                 }
 
                 assertEquals(GLES20.GL_NO_ERROR, GLES20.glGetError())
+                for ((index, tone) in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX, PreviewToneMode.OFF).withIndex()) {
+                    preview.setPreviewToneMode(tone)
+                    val ts = 7_000_000_000L + index * 100_000_000L
+                    submit(ts)
+                    produce(ts, 0.2f)
+                    val original = frames.poll(5, TimeUnit.SECONDS) ?: error("局部调色未出帧")
+                    assertEquals(51f, original.output.luma[20].toFloat(), 3f)
+                    val bitmap = android.graphics.Bitmap.createBitmap(240, 426, android.graphics.Bitmap.Config.ARGB_8888)
+                    try {
+                        var matched = false
+                        val copied = LinkedBlockingQueue<Int>()
+                        for (attempt in 0..19) {
+                            android.view.PixelCopy.request(preview, bitmap, { copied.offer(it) }, android.os.Handler(android.os.Looper.getMainLooper()))
+                            assertEquals(android.view.PixelCopy.SUCCESS, copied.poll(5, TimeUnit.SECONDS))
+                            matched = listOf(10 to 10, 58 to 275).all { (x, y) ->
+                                val neighbors = FloatArray(25) {
+                                    if (y == 275 && x + (it % 5 - 2) * 3 >= 60) 1f else 0.2f
+                                }
+                                val expected = 51f * LocalToneShader.gain(tone, 0.2f, neighbors)
+                                abs(android.graphics.Color.red(bitmap.getPixel(x, y)) - expected) < 5f
+                            }
+                            if (matched) break
+                            Thread.sleep(50)
+                        }
+                        assertTrue("GL 局部调色/恢复不符：$tone，像素=${android.graphics.Color.red(bitmap.getPixel(10, 10))},${android.graphics.Color.red(bitmap.getPixel(58, 275))}", matched)
+                    } finally { bitmap.recycle() }
+                }
             } finally {
                 EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
                 EGL14.eglDestroySurface(display, window)

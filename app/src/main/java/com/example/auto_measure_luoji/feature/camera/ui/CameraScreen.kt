@@ -89,6 +89,7 @@ import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.Imag
 import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdjustmentDialog
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
+import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -779,8 +780,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         ).sanitized())
     }
     var imageAdjustmentError by remember { mutableStateOf<String?>(null) }
+    var previewToneMode by remember {
+        mutableStateOf(PreviewToneMode.fromPreference(
+            runCatching { cameraPrefs.getString(PreviewToneMode.PREFERENCE_KEY, null) }.getOrNull()))
+    }
     var shadowEnhancementEnabled by remember {
-        mutableStateOf(cameraPrefs.getBoolean(ShadowEnhancement.PREFERENCE_KEY, false))
+        mutableStateOf(cameraPrefs.getBoolean(ShadowEnhancement.PREFERENCE_KEY, false) && previewToneMode == PreviewToneMode.OFF)
     }
     val texturePreviewAdjustments = remember { TexturePreviewAdjustments() }
     fun saveImageAdjustments() {
@@ -1287,6 +1292,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var laserCompareEnabled by remember { mutableStateOf(false) }
     var laserCompareText by remember { mutableStateOf("") }
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
+    var texturePreviewSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     var glPreviewViewRef by remember { mutableStateOf<GlStabilizedPreviewView?>(null) }
     var texturePreviewFrameRate by remember { mutableStateOf<PreviewFrameRate?>(null) }
     var previewFpsText by remember { mutableStateOf("预览 FPS：--") }
@@ -4595,19 +4601,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
     }
 
-    LaunchedEffect(textureViewRef, glPreviewViewRef, imageAdjustments.contrast, shadowEnhancementEnabled,
+    LaunchedEffect(textureViewRef, texturePreviewSize, glPreviewViewRef, imageAdjustments.contrast, shadowEnhancementEnabled, previewToneMode,
         showCalPanel, showDualCalPanel, isDualCalibMode) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val contrast = imageAdjustments.forCalibration(calibrationActive).contrast
         val shadows = shadowEnhancementEnabled && !calibrationActive
         textureViewRef?.let { view ->
-            texturePreviewAdjustments.apply(view, contrast, shadows).onFailure {
-                statusText = "暗部增强未生效：${it.message}"
+            texturePreviewAdjustments.apply(view, contrast, shadows, previewToneMode.forCalibration(calibrationActive)).onFailure {
+                statusText = "预览增强未生效：${it.message}"
                 Log.w("CameraScreen", "Texture preview adjustment failed", it)
             }
         }
         glPreviewViewRef?.setPreviewContrast(contrast)
         glPreviewViewRef?.setShadowEnhancement(shadows)
+        glPreviewViewRef?.setPreviewToneMode(previewToneMode.forCalibration(calibrationActive))
     }
 
     // 变换效果：默认倍率放大交给 Camera2；纯 UI 放大实验模式下由 TextureView Matrix 承担显示 zoom。
@@ -5034,9 +5041,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             glPreviewViewRef = glView
                             textureViewRef = null
                         } else {
+                            texturePreviewSize = androidx.compose.ui.unit.IntSize.Zero
                             val frameRate = PreviewFrameRate()
                             texturePreviewFrameRate = frameRate
                             val tv = TextureView(ctx).apply {
+                                addOnLayoutChangeListener { view, left, top, right, bottom, _, _, _, _ ->
+                                    if (textureViewRef === view) texturePreviewSize = androidx.compose.ui.unit.IntSize(right - left, bottom - top)
+                                }
                                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
                                         previewSurfaceTextureRef = st
@@ -5172,6 +5183,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             shadowEnhancementEnabled ||
+                            previewToneMode != PreviewToneMode.OFF ||
                             imageAdjustments != ImageAdjustments() ||
                             autoHdrEnabled || hdrPreviewEnabled ||
                             yoloCaptureMode == YoloCaptureMode.UHD4K ||
@@ -5201,11 +5213,37 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             enabled = shadowControlEnabled,
                             onClick = {
                                 shadowEnhancementEnabled = !shadowEnhancementEnabled
-                                cameraPrefs.edit().putBoolean(ShadowEnhancement.PREFERENCE_KEY, shadowEnhancementEnabled).apply()
+                                if (shadowEnhancementEnabled) previewToneMode = PreviewToneMode.OFF
+                                cameraPrefs.edit().putBoolean(ShadowEnhancement.PREFERENCE_KEY, shadowEnhancementEnabled)
+                                    .putString(PreviewToneMode.PREFERENCE_KEY, previewToneMode.name).apply()
                                 toolsMenuExpanded = false
                                 statusText = if (shadowEnhancementEnabled) "逆光暗部增强已开启" else "逆光暗部增强已关闭"
                             },
                         )
+                        for (mode in listOf(PreviewToneMode.LOCAL_TONE, PreviewToneMode.RETINEX)) {
+                            val selected = previewToneMode == mode
+                            val enabled = (shadowSupported || selected) && isCameraReady &&
+                                !showCalPanel && !showDualCalPanel && !isDualCalibMode
+                            DropdownMenuItem(
+                                text = { Text(mode.label + if (shadowSupported) "" else "（需 GL）") },
+                                trailingIcon = { Switch(checked = selected, onCheckedChange = null, enabled = enabled) },
+                                colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                    textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
+                                modifier = Modifier.semantics {
+                                    toggleableState = androidx.compose.ui.state.ToggleableState(selected)
+                                    role = androidx.compose.ui.semantics.Role.Switch
+                                },
+                                enabled = enabled,
+                                onClick = {
+                                    previewToneMode = previewToneMode.toggled(mode)
+                                    shadowEnhancementEnabled = false
+                                    cameraPrefs.edit().putString(PreviewToneMode.PREFERENCE_KEY, previewToneMode.name)
+                                        .putBoolean(ShadowEnhancement.PREFERENCE_KEY, false).apply()
+                                    toolsMenuExpanded = false
+                                    statusText = if (previewToneMode == PreviewToneMode.OFF) "${mode.label}已关闭" else "${mode.label}已开启"
+                                },
+                            )
+                        }
                         ToolMenuItem(
                             text = "EV / 对比度",
                             active = imageAdjustments != ImageAdjustments(),
