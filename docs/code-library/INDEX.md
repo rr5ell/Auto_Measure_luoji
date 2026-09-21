@@ -10,9 +10,10 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/preview-glare-suppression` |
+| 当前主要分支 | `feature/center-exposure-metering` |
 
 ## 可复用能力
+- [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。
 - [android-preview-glare-suppression](entries/android-preview-glare-suppression.md)：显示端受限白雾扣除、平坦区与高光保护、普通/GL 共享 Shader 和互斥设置。
 - [android-preview-local-tone-retinex](entries/android-preview-local-tone-retinex.md)：保边局部色调映射、单尺度 Retinex、普通/GL 显示端共用邻域滤波及互斥开关。
 - [android-preview-shadow-enhancement](entries/android-preview-shadow-enhancement.md)：预览端非线性暗部增益、AGSL/GL 共用曲线、校准暂停与原始取帧隔离。
@@ -69,4 +70,4 @@
 
 ## 最后更新
 
-2026-09-21，Codex Agent。新增轻量眩光抑制互斥开关，75 项单元测试通过；普通/GL 像素和菜单重点回归分别通过，全量模拟器回归因图形系统异常未完成。GPU 上屏与原始取帧保持隔离，不启用系统 EIS。
+2026-09-21，Codex Agent。新增中心区域测光，81 项单元测试及三项设备专项回归通过；CaptureResult 确认区域开启/恢复。测光改变采集曝光，不是显示滤镜；无真机 HDR/逆光效果结论，不启用系统 EIS。

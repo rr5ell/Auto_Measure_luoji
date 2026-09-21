@@ -22,6 +22,7 @@ import android.util.Size
 import android.view.Surface
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureReading
+import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRequest
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
 import java.util.Locale
 import kotlin.math.abs
@@ -99,6 +100,15 @@ class Camera2Controller(private val context: Context) {
     private var oisRequested: Boolean = false
     private var hdrPreviewRequested = false
     private var pendingShadingMode = SHADING_MODE_AUTO
+    private var centerMetering = CenterMeteringRequest()
+    private var centerMeteringRequested = false
+    private var centerMeteringSuspended = false
+    private var centerMeteringDisplayScale = 1f
+    private var lastMeteringResult: String? = null
+    val centerMeteringSupported: Boolean? get() = centerMetering.supported
+    @Volatile var centerMeteringStatus = "测光：等待相机"
+        private set
+    var onCenterMeteringStateChanged: ((String) -> Unit)? = null
     private var availableShadingModes = intArrayOf()
     private var shadingCharacteristicsKnown = false
     private var sensorInfoLensShadingApplied: Boolean? = null
@@ -221,6 +231,9 @@ class Camera2Controller(private val context: Context) {
         updateExposureCompensationCharacteristics(chars)
         updateVideoStabilizationCharacteristics(chars)
         updateShadingCharacteristics(chars)
+        // AE 请求发给父逻辑设备；双摄物理校准会暂停中心测光，不能拿物理阵列冒充逻辑坐标。
+        centerMetering.configure(manager.getCameraCharacteristics(lens.cameraId))
+        lastMeteringResult = null
 
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         if (map != null) {
@@ -360,6 +373,7 @@ class Camera2Controller(private val context: Context) {
         previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
             addTarget(surface)
             analysisImageReader?.surface?.let { addTarget(it) }
+            centerMetering.rememberTemplate(this)
         }
 
         if (hdrPreviewRequested && Build.VERSION.SDK_INT >= 33) createHdrSession(camera, lens, surface)
@@ -544,15 +558,13 @@ class Camera2Controller(private val context: Context) {
         val usedControlZoom = applyPreferredZoom(builder, lens, pendingZoomRatio)
 
         try {
-            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
-            onCameraOpened?.invoke()
+            if (submitMeteredPreview(session, builder)) onCameraOpened?.invoke()
         } catch (e: Exception) {
             if (usedControlZoom) {
                 Log.w("Camera2Ctrl", "CONTROL_ZOOM_RATIO failed on startPreview, fallback to SCALER_CROP_REGION", e)
                 applyCropZoom(builder, lens, pendingZoomRatio)
                 try {
-                    session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
-                    onCameraOpened?.invoke()
+                    if (submitMeteredPreview(session, builder)) onCameraOpened?.invoke()
                 } catch (fallback: Exception) {
                     onError?.invoke(fallback.message ?: "Preview request failed")
                 }
@@ -570,7 +582,7 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
         builder.set(CaptureRequest.SCALER_CROP_REGION, crop)
-        try { session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler) } catch (_: Exception) {}
+        try { submitMeteredPreview(session, builder) } catch (_: Exception) {}
     }
 
     fun setZoomRatio(zoomRatio: Float) {
@@ -581,14 +593,68 @@ class Camera2Controller(private val context: Context) {
         val session = captureSession ?: return
         val usedControlZoom = applyPreferredZoom(builder, lens, pendingZoomRatio)
         try {
-            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+            submitMeteredPreview(session, builder)
         } catch (e: Exception) {
             if (usedControlZoom) {
                 Log.w("Camera2Ctrl", "CONTROL_ZOOM_RATIO failed, fallback to SCALER_CROP_REGION", e)
                 applyCropZoom(builder, lens, pendingZoomRatio)
-                try { session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler) } catch (_: Exception) {}
+                try { submitMeteredPreview(session, builder) } catch (_: Exception) {}
             }
         }
+    }
+
+    fun setCenterMeteringEnabled(enabled: Boolean, suspended: Boolean = false, displayScale: Float = 1f): Result<Unit> {
+        centerMeteringRequested = enabled
+        centerMeteringSuspended = suspended
+        centerMeteringDisplayScale = displayScale
+        val builder = previewRequestBuilder
+        val session = captureSession
+        if (builder == null || session == null) {
+            publishCenterMeteringState("测光：等待相机")
+            return Result.success(Unit)
+        }
+        return runCatching {
+            submitMeteredPreview(session, builder)
+            Unit
+        }.onFailure {
+            publishCenterMeteringState("测光：设置失败")
+            Log.w("Camera2Ctrl", "center-metering: request failed", it)
+        }
+    }
+
+    private fun publishCenterMeteringState(message: String) {
+        centerMeteringStatus = message
+        onCenterMeteringStateChanged?.invoke(message)
+    }
+
+    /** 新区域被厂商拒绝时只撤销区域并重试一次，不重建相机、不触发 HDR 切换。 */
+    private fun submitMeteredPreview(session: CameraCaptureSession, builder: CaptureRequest.Builder): Boolean {
+        // 关闭/重建时旧回调可能晚到；丢弃旧提交，不把它误报成新会话的 HDR 故障。
+        if (session !== captureSession || builder !== previewRequestBuilder) return false
+        val enabled = centerMeteringRequested && !centerMeteringSuspended && !currentStrictPhysical
+        var region: android.graphics.Rect? = null
+        try {
+            region = centerMetering.apply(builder, previewSize, enabled, centerMeteringDisplayScale)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+        } catch (error: Exception) {
+            if (session !== captureSession || builder !== previewRequestBuilder) return false
+            if (!enabled || centerMetering.supported != true) throw error
+            centerMetering.reject(builder)
+            Log.w("Camera2Ctrl", "center-metering: rejected, restoring template regions", error)
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+            region = null
+        }
+        val state = when {
+            !centerMeteringRequested -> "测光：默认"
+            centerMeteringSuspended || currentStrictPhysical -> "测光：默认（校准暂停中心测光）"
+            centerMetering.rejected -> "测光：默认（中心区域被设备拒绝）"
+            centerMetering.supported != true -> "测光：默认（镜头不支持中心区域）"
+            region != null -> "测光：中心 30%（已请求）"
+            else -> "测光：默认"
+        }
+        Log.i("Camera2Ctrl", "center-metering: requested=$centerMeteringRequested region=$region status=$state")
+        publishCenterMeteringState(state)
+        return true
     }
 
     fun exposureCompensationRange() = ExposureCompensationRange(
@@ -946,6 +1012,9 @@ class Camera2Controller(private val context: Context) {
     fun closeCamera() {
         cameraGeneration++
         exposureSnapshot = null
+        centerMetering = CenterMeteringRequest()
+        lastMeteringResult = null
+        publishCenterMeteringState("测光：等待相机")
         shadingCharacteristicsKnown = false
         val wasActive = cameraDevice != null
         try { captureSession?.close() } catch (_: Exception) {}
@@ -969,6 +1038,12 @@ class Camera2Controller(private val context: Context) {
         ) {
             val generation = cameraGeneration
             if (session !== captureSession) return
+            val requestedRegions = request.get(CaptureRequest.CONTROL_AE_REGIONS)
+            val meteringResult = "request=${requestedRegions?.contentToString()} result=${result.get(CaptureResult.CONTROL_AE_REGIONS)?.contentToString()}"
+            if (meteringResult != lastMeteringResult) {
+                lastMeteringResult = meteringResult
+                Log.i("Camera2Ctrl", "center-metering-result: $meteringResult")
+            }
             val lens = currentLens
             val physicalId = if (currentStrictPhysical) lens?.physicalId else null
             // 严格物理输出只展示对应物理结果，缺失时不冒用逻辑相机曝光。

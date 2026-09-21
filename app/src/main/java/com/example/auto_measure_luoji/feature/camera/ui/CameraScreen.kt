@@ -90,6 +90,7 @@ import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdj
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
+import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -762,6 +763,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
     var showShadingModeDialog by remember { mutableStateOf(false) }
     var cameraShadingText by remember { mutableStateOf("") }
+    var centerMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(CenterMeteringRegion.PREFERENCE_KEY, false)) }
+    var centerMeteringSupported by remember { mutableStateOf<Boolean?>(null) }
+    var centerMeteringText by remember { mutableStateOf("测光：等待相机") }
     var ambientLightText by remember { mutableStateOf(AmbientLightReading(AmbientLightReading.Status.WAITING).panelText) }
     var hdrPreviewEnabled by remember { mutableStateOf(false) }
     var hdrYoloAvailable by remember { mutableStateOf(false) }
@@ -4115,6 +4119,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
         }
         cameraController.setShadingMode(cameraShadingMode)
+        cameraController.onCenterMeteringStateChanged = { message ->
+            mainHandler.post {
+                if (cameraController.centerMeteringStatus == message) {
+                    centerMeteringText = message
+                    centerMeteringSupported = cameraController.centerMeteringSupported
+                }
+            }
+        }
         cameraController.onFrameTimingChanged = { timing ->
             mainHandler.post {
                 if (!canApplyGyroPreviewStabilization() || !gyroPreviewFrameSyncEnabled) return@post
@@ -4585,6 +4597,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             Log.i("CameraScreen", message)
             zoomBackendText = message
         }
+    }
+
+    LaunchedEffect(isCameraReady, centerMeteringEnabled, showCalPanel, showDualCalPanel, isDualCalibMode,
+        uiZoomOnlyEnabled, currentEquivRatio, selectedLens) {
+        cameraController.setCenterMeteringEnabled(centerMeteringEnabled,
+            suspended = showCalPanel || showDualCalPanel || isDualCalibMode,
+            displayScale = uiZoomDisplayScale())
+            .onFailure { statusText = "中心测光设置失败：${it.message}" }
     }
 
     LaunchedEffect(isCameraReady, showCalPanel, showDualCalPanel, isDualCalibMode, imageAdjustments.ev) {
@@ -5183,6 +5203,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             shadowEnhancementEnabled ||
+                            centerMeteringEnabled ||
                             previewToneMode != PreviewToneMode.OFF ||
                             imageAdjustments != ImageAdjustments() ||
                             autoHdrEnabled || hdrPreviewEnabled ||
@@ -5244,6 +5265,25 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 },
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("中心区域测光" + if (centerMeteringSupported == false) "（不可用）" else "") },
+                            trailingIcon = { Switch(checked = centerMeteringEnabled, onCheckedChange = null,
+                                enabled = isCameraReady && (centerMeteringSupported == true || centerMeteringEnabled) &&
+                                    !showCalPanel && !showDualCalPanel && !isDualCalibMode) },
+                            colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
+                            modifier = Modifier.semantics {
+                                toggleableState = androidx.compose.ui.state.ToggleableState(centerMeteringEnabled)
+                                role = androidx.compose.ui.semantics.Role.Switch
+                            },
+                            enabled = isCameraReady && (centerMeteringSupported == true || centerMeteringEnabled) &&
+                                !showCalPanel && !showDualCalPanel && !isDualCalibMode,
+                            onClick = {
+                                centerMeteringEnabled = !centerMeteringEnabled
+                                cameraPrefs.edit().putBoolean(CenterMeteringRegion.PREFERENCE_KEY, centerMeteringEnabled).apply()
+                                toolsMenuExpanded = false
+                            },
+                        )
                         ToolMenuItem(
                             text = "EV / 对比度",
                             active = imageAdjustments != ImageAdjustments(),
@@ -5490,6 +5530,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     ambientLightText = ambientLightText,
                     exposureTimeText = exposureTimeText,
                     hdrStatusText = hdrStatusText,
+                    centerMeteringText = centerMeteringText,
                     statusText = statusText,
                     gyroText = gyroHudText,
                     modelText = when {
@@ -7337,6 +7378,7 @@ private fun StatusHud(
     ambientLightText: String,
     exposureTimeText: String,
     hdrStatusText: String,
+    centerMeteringText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7384,6 +7426,13 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "HDR 状态" },
+        )
+        Text(
+            text = centerMeteringText,
+            color = Color(0xFFB0BEC5),
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "测光状态" },
         )
         lines.take(6).forEachIndexed { index, text ->
             Text(
