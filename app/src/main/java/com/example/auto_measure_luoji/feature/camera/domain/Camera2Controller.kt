@@ -105,7 +105,7 @@ class Camera2Controller(private val context: Context) {
     private var pendingShadingMode = SHADING_MODE_AUTO
     private var centerMetering = CenterMeteringRequest()
     private var samsungMetering = SamsungMeteringRequest()
-    private var samsungMeteringRequested = false
+    private var samsungMeteringRequested: Int? = null
     private var samsungMeteringSuspended = false
     val samsungMeteringAvailable: Boolean get() = samsungMetering.available
     @Volatile var samsungMeteringStatus = "三星测光：等待相机"
@@ -659,8 +659,11 @@ class Camera2Controller(private val context: Context) {
         onCenterMeteringStateChanged?.invoke(message)
     }
 
-    fun setSamsungMeteringEnabled(enabled: Boolean, suspended: Boolean = false): Result<Unit> {
-        samsungMeteringRequested = enabled
+    fun setSamsungMeteringMode(mode: Int?, suspended: Boolean = false): Result<Unit> {
+        if (mode != null && mode != 3 && mode != 4) {
+            return Result.failure(IllegalArgumentException("仅允许原值、模式3或模式4"))
+        }
+        samsungMeteringRequested = mode
         samsungMeteringSuspended = suspended
         val builder = previewRequestBuilder ?: return Result.success(Unit)
         val session = captureSession ?: return Result.success(Unit)

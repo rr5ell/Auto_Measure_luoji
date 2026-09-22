@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** 显式启用的硬件探针，不持久化参数，不进入正式应用；4 的私有枚举含义尚未确认。 */
 @RunWith(AndroidJUnit4::class)
 class SamsungMeteringProbeTest {
-    @Test fun requestFourReadBackAndRestore() {
+    @Test fun requestThreeAndFourReadBackAndRestore() {
         assumeTrue("需显式传入 samsungMeteringProbe=true", InstrumentationRegistry.getArguments()
             .getString("samsungMeteringProbe") == "true")
         assumeTrue("仅在三星设备运行", Build.MANUFACTURER.equals("samsung", ignoreCase = true))
@@ -121,7 +121,7 @@ class SamsungMeteringProbeTest {
                     frames.clear()
                     builder.setTag(label)
                     lateinit var request: CaptureRequest
-                    modeRequest.submit(builder, enabled = label == "模式4", suspended = false) {
+                    modeRequest.submit(builder, mode = mode.takeIf { label == "模式3" || label == "模式4" }, suspended = false) {
                         request = it
                         captureSession.setRepeatingRequest(it, callback, handler)
                     }
@@ -154,9 +154,10 @@ class SamsungMeteringProbeTest {
                 }
                 try {
                     sample("基线", original)
+                    sample("模式3", 3)
                     sample("模式4", 4)
                 } finally {
-                    // 即便设置 4 或断言失败，也尝试提交并验证原值；最外层始终释放硬件。
+                    // 即便设置 3/4 或断言失败，也尝试提交并验证原值；最外层始终释放硬件。
                     sample("恢复", original)
                 }
             } finally {
@@ -177,25 +178,37 @@ class SamsungMeteringProbeTest {
         val control = SamsungMeteringRequest()
         control.rememberTemplate(builder, "other")
         assertFalse(control.available)
-        control.submit(builder, true, false) { assertEquals(original, it.get(key)) }
+        control.submit(builder, 3, false) { assertEquals(original, it.get(key)) }
         control.rememberTemplate(builder, "samsung")
         assertTrue(control.available)
-        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
-        control.submit(builder, true, false) { assertEquals(4, it.get(key)) }
-        control.submit(builder, true, true) { assertEquals(original, it.get(key)) }
-        control.submit(builder, true, false) { assertEquals(4, it.get(key)) }
-        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
-        var attempts = 0
-        control.submit(builder, true, false) {
-            if (++attempts == 1) throw IllegalArgumentException("模拟厂商拒绝")
-            assertEquals(original, it.get(key))
+        control.submit(builder, null, false) { assertEquals(original, it.get(key)) }
+        for (mode in listOf(3, 4)) {
+            control.submit(builder, mode, false) { assertEquals(mode, it.get(key)) }
+            control.submit(builder, mode, true) { assertEquals(original, it.get(key)) }
+            control.submit(builder, mode, false) { assertEquals(mode, it.get(key)) }
+            control.submit(builder, null, false) { assertEquals(original, it.get(key)) }
+            var attempts = 0
+            control.submit(builder, mode, false) {
+                if (++attempts == 1) throw IllegalArgumentException("模拟厂商拒绝")
+                assertEquals(original, it.get(key))
+            }
+            assertEquals(2, attempts)
+            assertTrue(control.status.contains("请求失败"))
+            control.submit(builder, mode, false) { assertEquals(original, it.get(key)) }
+            val other = if (mode == 3) 4 else 3
+            control.submit(builder, other, false) { assertEquals(other, it.get(key)) }
+            control.submit(builder, null, false) { assertEquals(original, it.get(key)) }
+            control.submit(builder, mode, false) { assertEquals(mode, it.get(key)) }
+            control.submit(builder, null, false) { assertEquals(original, it.get(key)) }
         }
-        assertEquals(2, attempts)
-        assertTrue(control.status.contains("请求失败"))
-        control.submit(builder, true, false) { assertEquals(original, it.get(key)) }
-        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
-        control.submit(builder, true, false) { assertEquals(4, it.get(key)) }
-        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
+        for (invalid in listOf(-1, 0, 2, 5)) {
+            try {
+                control.submit(builder, invalid, false) { fail("无效模式不能提交") }
+                fail("无效模式未被拒绝")
+            } catch (_: IllegalArgumentException) {
+                assertEquals(original, builder.get(key))
+            }
+        }
     }
 
     companion object {

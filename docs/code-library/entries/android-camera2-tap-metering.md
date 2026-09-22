@@ -77,9 +77,11 @@
 
 ## 三星私有测光实验开关
 - 2026-09-22，Codex Agent。新增标准路径：`E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\samsungmetering\SamsungMeteringRequest.kt`，由 Camera2Controller 所有重复请求入口共用。
-- “更多 -> 三星测光模式4（实验）”默认关闭，仅页面内 remember、不写偏好；重新创建页面或重启关闭。开关独立于点击 AE 区域，不自动调整 EV、ISO、快门、AF、测光窗口或防抖。
-- 仅三星且能读取当前模板 Int 原值时可用，不依赖 availableCaptureRequestKeys 枚举；失败不开启，不猜测原值。开启写 4，关闭/校准/严格物理输出/后台暂停恢复当前模板原值，新会话重新读取。
-- 同步提交异常恢复并重试原值一次，后续保持回退直到用户关闭再开启；最终恢复失败向上报告。真实结果仅接收当前会话当前请求，主面板显示请求/回传或未提供，不用请求值冒充实际值。
-- 禁止启用 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。私有值 4 的意义及画质收益未确认，不能移植为跨厂商通用 API。
+- “更多 -> 三星测光（实验）”提供关闭、模式3、模式4单选，默认关闭，仅页面内 remember、不写偏好；重新创建页面或重启关闭。选择独立于点击 AE 区域，不自动调整 EV、ISO、快门、AF、测光窗口或防抖。
+- 仅三星且能读取当前模板 Int 原值时可用，不依赖 availableCaptureRequestKeys 枚举；失败不开启，不猜测原值。接口只允许 null（恢复原值）、3、4，非法值在写入前拒绝；关闭/校准/严格物理输出/后台暂停恢复当前模板原值，新会话重新读取。
+- 同步提交异常恢复并重试原值一次，后续保持回退直到用户关闭或改选其他模式；最终恢复失败向上报告。真实结果仅接收当前会话当前请求，主面板显示请求/回传或未提供，不用请求值冒充实际值。
+- 单选 UI 标准路径：`E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\samsungmetering\SamsungMeteringDialog.kt`，复用项目 Material3 单选组和 48 dp 最小触控高度。
+- 禁止启用 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。本机私有值 3/4 的意义及画质收益未确认，不能移植为跨厂商通用 API。
 - 验证：107 项 JVM 单测、Debug APK/测试 APK 和 laserCompare 编译通过；SamsungMeteringProbeTest 新增生产封装暂停/恢复/模拟拒绝断言及实际回传，SamsungMeteringUiTest 覆盖普通/GL 开关和页面重建默认关闭，三星 2 项测试通过。手动 HDR 下回传 4、预览及状态截图通过。
 - 未覆盖：不同厂商/更多镜头组合、真实 HAL 异步故障、长期运行及曝光画质改善。仪器测试通过 `samsungMeteringProbe=true` 显式启用，UI 回归仅用于模板原值 0 的已验证三星。
+- 模式3扩展验证（2026-09-22，Codex Agent）：107 项单测及构建通过，探针通过原值 -> 3 -> 4 -> 原值，并覆盖两模式暂停/拒绝回退与非法值不提交；模式3的 12 帧为回传3、9.991324 ms、ISO 25、f/1.4。UI 初次因锁屏失败，解锁后普通/GL 模式选择与重建复位测试通过；手动 HDR 回传3通过，面板截图检查无重叠。不据此推断模式3的实际画质效果。

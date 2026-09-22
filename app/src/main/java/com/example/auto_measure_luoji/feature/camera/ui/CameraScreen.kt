@@ -94,6 +94,7 @@ import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.Hig
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.TapMeteringOverlay
+import com.example.auto_measure_luoji.feature.camera.ui.samsungmetering.SamsungMeteringDialog
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.meteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
@@ -770,7 +771,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var centerMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(CenterMeteringRegion.PREFERENCE_KEY, false)) }
     var centerMeteringSupported by remember { mutableStateOf<Boolean?>(null) }
     var centerMeteringText by remember { mutableStateOf("测光：等待相机") }
-    var samsungMeteringEnabled by remember { mutableStateOf(false) }
+    var samsungMeteringMode by remember { mutableStateOf<Int?>(null) }
+    var showSamsungMeteringDialog by remember { mutableStateOf(false) }
     var samsungMeteringAvailable by remember { mutableStateOf(false) }
     var samsungMeteringText by remember { mutableStateOf("三星测光：等待相机") }
     var tapMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(TapMeteringPoint.PREFERENCE_KEY, false)) }
@@ -4640,9 +4642,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             .onFailure { statusText = "测光设置失败：${it.message}" }
     }
 
-    LaunchedEffect(isCameraReady, samsungMeteringEnabled, showCalPanel, showDualCalPanel,
+    LaunchedEffect(isCameraReady, samsungMeteringMode, showCalPanel, showDualCalPanel,
         isDualCalibMode, cameraScreenResumed, selectedLens) {
-        cameraController.setSamsungMeteringEnabled(samsungMeteringEnabled,
+        cameraController.setSamsungMeteringMode(samsungMeteringMode,
             suspended = showCalPanel || showDualCalPanel || isDualCalibMode || !cameraScreenResumed)
             .onFailure { statusText = "三星测光设置失败：${it.message}" }
     }
@@ -5343,7 +5345,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             shadowEnhancementEnabled ||
-                            centerMeteringEnabled || tapMeteringEnabled || samsungMeteringEnabled ||
+                            centerMeteringEnabled || tapMeteringEnabled || samsungMeteringMode != null ||
                             previewToneMode != PreviewToneMode.OFF ||
                             imageAdjustments != ImageAdjustments() ||
                             autoHdrEnabled || hdrPreviewEnabled ||
@@ -5381,19 +5383,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("三星测光模式4（实验）") },
-                            trailingIcon = { Switch(checked = samsungMeteringEnabled, onCheckedChange = null) },
+                            text = { Text("三星测光（实验）") },
+                            trailingIcon = { Text(samsungMeteringMode?.toString() ?: "关", color = Color.White) },
                             colors = androidx.compose.material3.MenuDefaults.itemColors(
                                 textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
-                            modifier = Modifier.semantics {
-                                toggleableState = androidx.compose.ui.state.ToggleableState(samsungMeteringEnabled)
-                                role = androidx.compose.ui.semantics.Role.Switch
-                            },
-                            enabled = samsungMeteringEnabled || (isCameraReady && samsungMeteringAvailable &&
-                                !hdrSwitchBlocked() && !showCalPanel && !showDualCalPanel && !isDualCalibMode),
                             onClick = {
-                                samsungMeteringEnabled = !samsungMeteringEnabled
                                 toolsMenuExpanded = false
+                                showSamsungMeteringDialog = true
                             },
                         )
                         DropdownMenuItem(
@@ -6431,6 +6427,16 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 dismissButton = {
                     TextButton(onClick = { showYoloFilterDialog = false }) { Text("取消") }
                 },
+            )
+        }
+
+        if (showSamsungMeteringDialog) {
+            SamsungMeteringDialog(
+                mode = samsungMeteringMode,
+                canEnable = isCameraReady && samsungMeteringAvailable && !hdrSwitchBlocked() &&
+                    !showCalPanel && !showDualCalPanel && !isDualCalibMode,
+                onModeChanged = { samsungMeteringMode = it; showSamsungMeteringDialog = false },
+                onDismiss = { showSamsungMeteringDialog = false },
             )
         }
 

@@ -3,13 +3,13 @@ package com.example.auto_measure_luoji.feature.camera.domain.samsungmetering
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 
-/** 仅试验私有字段的可写性；回传 4 不代表启用了原相机的完整测光算法。 */
+/** 仅试验私有字段的可写性；回传 3/4 不代表启用了原相机的完整测光算法。 */
 class SamsungMeteringRequest {
     private var requestKey: CaptureRequest.Key<Int>? = null
     private var resultKey: CaptureResult.Key<Int>? = null
     private var original: Int? = null
     private var lastRequest: CaptureRequest? = null
-    private var rejected = false
+    private var rejectedMode: Int? = null
     private var prefix = ""
     @Volatile var available = false
         private set
@@ -22,7 +22,7 @@ class SamsungMeteringRequest {
         resultKey = null
         original = null
         lastRequest = null
-        rejected = false
+        rejectedMode = null
         available = false
         status = "三星测光：不可用"
         if (!manufacturer.equals("samsung", ignoreCase = true)) return
@@ -40,20 +40,22 @@ class SamsungMeteringRequest {
     }
 
     @Synchronized
-    fun submit(builder: CaptureRequest.Builder, enabled: Boolean, suspended: Boolean,
+    fun submit(builder: CaptureRequest.Builder, mode: Int?, suspended: Boolean,
                send: (CaptureRequest) -> Unit) {
+        require(mode == null || mode == 3 || mode == 4) { "仅允许原值、模式3或模式4" }
         val key = requestKey
         val saved = original
         if (!available || key == null || saved == null) {
             send(builder.build())
             return
         }
-        if (!enabled) rejected = false
-        val active = enabled && !suspended && !rejected
-        val target = if (active) 4 else saved
+        if (mode != rejectedMode) rejectedMode = null
+        val rejected = mode != null && mode == rejectedMode
+        val active = mode != null && !suspended && !rejected
+        val target = if (active) mode!! else saved
         prefix = when {
             rejected -> "三星测光：请求失败，已恢复"
-            !enabled -> "三星测光：关闭"
+            mode == null -> "三星测光：关闭"
             suspended -> "三星测光：暂停"
             else -> "三星测光：开启"
         }
@@ -66,7 +68,7 @@ class SamsungMeteringRequest {
         } catch (error: Exception) {
             // 只对私有模式开启失败进行一次恢复重试，不误把普通请求错误归给此功能。
             if (!active) throw error
-            rejected = true
+            rejectedMode = mode
             builder.set(key, saved)
             try {
                 val restored = builder.build()

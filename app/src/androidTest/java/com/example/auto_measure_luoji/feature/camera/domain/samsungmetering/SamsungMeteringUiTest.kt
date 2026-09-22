@@ -24,6 +24,13 @@ class SamsungMeteringUiTest {
             .fetchSemanticsNodes().isNotEmpty()
     }
 
+    private fun selectMode(label: String, previous: String) {
+        compose.onNodeWithText("更多").performClick()
+        compose.onNodeWithText("三星测光（实验）").performScrollTo().performClick()
+        compose.onNodeWithText(previous).assertIsSelected()
+        compose.onNodeWithText(label).performClick()
+    }
+
     @Test fun toggleRestoresTemplateAndDoesNotPersistInTextureAndGl() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("samsungMeteringProbe") == "true")
         assumeTrue(Build.MANUFACTURER.equals("samsung", ignoreCase = true))
@@ -44,15 +51,14 @@ class SamsungMeteringUiTest {
                 prefs.edit().putBoolean(keys[0], gl).putBoolean(keys[1], false).commit()
                 ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                     waitStatus("关闭（请求 0，回传 0）")
-                    compose.onNodeWithText("更多").performClick()
-                    compose.onNodeWithText("三星测光模式4（实验）").performScrollTo().assertIsOff().performClick()
+                    selectMode("模式3", "关闭（恢复原值）")
+                    waitStatus("开启（请求 3，回传 3）")
+                    selectMode("模式4", "模式3")
                     waitStatus("开启（请求 4，回传 4）")
-                    compose.onNodeWithText("更多").performClick()
-                    compose.onNodeWithText("三星测光模式4（实验）").performScrollTo().assertIsOn().performClick()
+                    selectMode("关闭（恢复原值）", "模式4")
                     waitStatus("关闭（请求 0，回传 0）")
-                    compose.onNodeWithText("更多").performClick()
-                    compose.onNodeWithText("三星测光模式4（实验）").performScrollTo().performClick()
-                    waitStatus("开启（请求 4，回传 4）")
+                    selectMode("模式3", "关闭（恢复原值）")
+                    waitStatus("开启（请求 3，回传 3）")
                     scenario.recreate()
                     waitStatus("关闭（请求 0，回传 0）")
                 }
