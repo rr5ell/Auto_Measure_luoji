@@ -10,10 +10,10 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `fix/tap-metering-exposure-bounds` |
+| 当前主要分支 | `fix/tap-exposure-subject-priority` |
 
 ## 可复用能力
-- [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：普通/GL 已显示画面反向坐标、全画面 AE 与点击限幅微调、高光/暗部保护、自动控制隔离与关闭恢复。
+- [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：普通/GL 已显示画面反向坐标、全画面 AE 与主体优先点击微调、±1 EV 限幅及高光软限制、自动控制隔离与关闭恢复。
 - [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：五区截尾亮度统计、对数域综合测光、受限正负 EV 闭环、中心保护、自动 HDR 隔离及局部预览映射。
 - [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。
 - [android-preview-glare-suppression](entries/android-preview-glare-suppression.md)：显示端受限白雾扣除、平坦区与高光保护、普通/GL 共享 Shader 和互斥设置。

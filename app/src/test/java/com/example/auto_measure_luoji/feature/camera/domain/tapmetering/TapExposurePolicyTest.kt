@@ -19,14 +19,13 @@ class TapExposurePolicyTest {
                      bright: Float = 0f, dark: Float = 0f) =
         policy.update(sample(ms, local, global, bright, dark), ms * 1_000_000)
 
-    @Test fun waitsForThreeIndependentReadingsAfterSettling() {
+    @Test fun waitsForTwoIndependentReadingsAfterSettling() {
         val policy = TapExposurePolicy(range, 0f, point, 0)
         assertNull(feed(policy, 0)); assertNull(feed(policy, 500))
-        assertNull(feed(policy, 1000)); assertNull(feed(policy, 1000))
-        assertNull(feed(policy, 1100)); assertNull(feed(policy, 1500))
-        assertEquals(1f / 3, feed(policy, 2000)!!, 0.0001f)
-        assertNull(feed(policy, 2500)); assertNull(feed(policy, 3000)); assertNull(feed(policy, 3500))
-        assertEquals(2f / 3, feed(policy, 4000)!!, 0.0001f)
+        assertNull(feed(policy, 500)); assertNull(feed(policy, 600))
+        assertEquals(1f / 3, feed(policy, 1000)!!, 0.0001f)
+        assertNull(feed(policy, 1000)); assertNull(feed(policy, 1100)); assertNull(feed(policy, 1500))
+        assertEquals(2f / 3, feed(policy, 2000)!!, 0.0001f)
     }
 
     @Test fun neverAccumulatesPastBothLimitsRelativeToManualBaseline() {
@@ -34,12 +33,12 @@ class TapExposurePolicyTest {
             val policy = TapExposurePolicy(range, baseline, point, 0)
             for (ms in 0L..30000L step 500) {
                 feed(policy, ms)
-                assertTrue(policy.correctionEv <= 2f / 3 + 0.0001f)
+                assertTrue(policy.correctionEv <= 1.0001f)
                 assertTrue(baseline + policy.correctionEv <= 3.0001f)
             }
             for (ms in 30500L..60000L step 500) {
                 feed(policy, ms, 240f, 150f)
-                assertTrue(policy.correctionEv >= -2f / 3 - 0.0001f)
+                assertTrue(policy.correctionEv >= -1.0001f)
                 assertTrue(baseline + policy.correctionEv >= -3.0001f)
             }
         }
@@ -58,18 +57,28 @@ class TapExposurePolicyTest {
         assertEquals("全画面暗部保护", policy.decisionText)
     }
 
-    @Test fun darkTargetCannotBlowOutBroadHighlights() {
+    @Test fun ordinaryBrightBackgroundDoesNotVetoDarkTarget() {
         val policy = TapExposurePolicy(range, 0f, point, 0)
-        for (ms in 0L..6000L step 500) assertNull(feed(policy, ms, bright = 0.25f))
-        assertEquals("高光保护", policy.decisionText)
+        for (ms in 0L..6000L step 500) feed(policy, ms, local = 70f, global = 200f, bright = 0.3f)
+        assertEquals(1f, policy.correctionEv, 0.0001f)
+        assertEquals("已达微调上限", policy.decisionText)
+    }
+
+    @Test fun severeHighlightsLimitButDoNotVetoBrightening() {
+        for ((global, bright) in listOf(150f to 0.5f, 210f to 0.1f)) {
+            val policy = TapExposurePolicy(range, 0f, point, 0)
+            for (ms in 0L..6000L step 500) feed(policy, ms, global = global, bright = bright)
+            assertEquals(2f / 3, policy.correctionEv, 0.0001f)
+            assertEquals("高光限幅", policy.decisionText)
+        }
     }
 
     @Test fun protectionUnwindsExistingCorrectionInsteadOfHoldingIt() {
         val positive = TapExposurePolicy(range, 0f, point, 0)
         for (ms in 0L..4000L step 500) feed(positive, ms)
         assertTrue(positive.correctionEv > 0f)
-        for (ms in 4500L..12000L step 500) feed(positive, ms, bright = 0.3f)
-        assertEquals(0f, positive.correctionEv, 0.0001f)
+        for (ms in 4500L..12000L step 500) feed(positive, ms, bright = 0.6f)
+        assertEquals(2f / 3, positive.correctionEv, 0.0001f)
         val negative = TapExposurePolicy(range, 0f, point, 0)
         for (ms in 0L..4000L step 500) feed(negative, ms, 250f, 150f)
         assertTrue(negative.correctionEv < 0f)
@@ -85,21 +94,21 @@ class TapExposurePolicyTest {
             sample(4001), sample(0), null)
         for (bad in invalid) {
             val policy = TapExposurePolicy(range, 0f, point, 0)
-            feed(policy, 1000); feed(policy, 1500)
+            feed(policy, 1500)
             assertNull(policy.update(bad, 2000_000_000))
-            assertNull(feed(policy, 2500)); assertNull(feed(policy, 3000))
-            assertNotNull(feed(policy, 3500))
+            assertNull(feed(policy, 2500))
+            assertNotNull(feed(policy, 3000))
         }
     }
 
     @Test fun changingDirectionOrPausingClearsConfirmations() {
         val policy = TapExposurePolicy(range, 0f, point, 0)
-        feed(policy, 1000); feed(policy, 1500)
+        feed(policy, 1500)
         assertNull(feed(policy, 2000, 240f, 150f))
-        assertNull(feed(policy, 2500)); assertNull(feed(policy, 3000))
-        policy.pause(3000_000_000)
-        assertNull(feed(policy, 3500)); assertNull(feed(policy, 4000)); assertNull(feed(policy, 4500))
-        assertNotNull(feed(policy, 5000))
+        assertNull(feed(policy, 2500))
+        policy.pause(2700_000_000)
+        assertNull(feed(policy, 3000)); assertNull(feed(policy, 3500))
+        assertNotNull(feed(policy, 4000))
     }
 
     @Test fun neutralSceneAndCoarseOrUnsupportedHardwareDoNotChangeEv() {
@@ -119,21 +128,35 @@ class TapExposurePolicyTest {
             assertTrue(it - previous <= 1f / 3 + 0.0001f)
             previous = it
         }
+        assertEquals(1f, policy.correctionEv, 0.0001f)
+    }
+
+    @Test fun tighteningHighlightLimitNeverExceedsOneStep() {
+        val policy = TapExposurePolicy(ExposureCompensationRange(-20, 20, 0.1f), 0f, point, 0)
+        for (ms in 0L..6000L step 500) feed(policy, ms)
+        assertEquals(1f, policy.correctionEv, 0.0001f)
+        var previous = policy.correctionEv
+        for (ms in 6500L..12000L step 500) feed(policy, ms, bright = 0.6f)?.let {
+            assertTrue(previous - it <= 1f / 3 + 0.0001f)
+            assertTrue(it <= previous)
+            previous = it
+        }
         assertEquals(0.6f, policy.correctionEv, 0.0001f)
     }
 
     @Test fun gapResetsConfirmationAndProtectionHasHysteresis() {
         val policy = TapExposurePolicy(range, 0f, point, 0)
-        feed(policy, 1000); feed(policy, 1500)
-        assertNull(feed(policy, 4000)); assertNull(feed(policy, 4500))
-        assertNotNull(feed(policy, 5000))
+        feed(policy, 1500)
+        assertNull(feed(policy, 4000))
+        assertNotNull(feed(policy, 4500))
         val protected = TapExposurePolicy(range, 0f, point, 0)
-        feed(protected, 1000, bright = 0.21f)
-        for (ms in 1500L..5000L step 500) assertNull(feed(protected, ms, bright = 0.15f))
-        assertEquals("高光保护", protected.decisionText)
-        assertNull(feed(protected, 5500, bright = 0.1f))
-        assertNull(feed(protected, 6000, bright = 0.1f))
-        assertNotNull(feed(protected, 6500, bright = 0.1f))
+        feed(protected, 1000, bright = 0.5f)
+        for (ms in 1500L..5000L step 500) feed(protected, ms, bright = 0.4f)
+        assertEquals(2f / 3, protected.correctionEv, 0.0001f)
+        assertEquals("高光限幅", protected.decisionText)
+        assertNull(feed(protected, 5500, bright = 0.3f))
+        assertNotNull(feed(protected, 6000, bright = 0.3f))
+        assertEquals(1f, protected.correctionEv, 0.0001f)
     }
 
     @Test fun sparseSamplingUsesUnrotatedTapCoordinatesAndPreservesStridesAndPosition() {
