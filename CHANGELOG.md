@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.36] - 2026-09-22
+
+作者：Codex Agent。
+
+### 测试分发
+- 版本递增至 `0.8.36 / 836`，包含逆光平衡开关参数面板与14项判断参数，功能提交 `3eae5fc`。
+- Debug APK离线构建成功，包内版本及v2签名通过校验；119项单测零失败（复用有效缓存），功能阶段5项模拟器回归通过，本轮不安装真机。
+- APK SHA-256：`D829D81FE14B2891CC9A50DE52D2E924FFE4F1D24FBDE9CFD3444E372CF4E886`。
+- 沿用既有蒲公英脚本分发；用户PPT编辑、删除和新增文件不纳入发布提交。
+- 蒲公英上传与解析成功，平台回传 `Auto_Measure_luoji / 0.8.36 (836)`，下载：https://www.pgyer.com/automeasureluoji 。
+
 ## [backlight-balance-settings-2026-09-22] - 2026-09-22
 
 作者：Codex Agent。
