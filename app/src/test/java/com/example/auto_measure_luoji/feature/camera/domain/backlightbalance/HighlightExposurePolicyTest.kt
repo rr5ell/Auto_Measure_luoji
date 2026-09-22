@@ -7,7 +7,12 @@ import java.nio.ByteBuffer
 
 class HighlightExposurePolicyTest {
     private val range = ExposureCompensationRange(-9, 9, 1f / 3f)
-    private fun sample(ms: Long, bright: Float = 0.1f) = HighlightStatistics(ms * 1_000_000L, bright, if (bright == 0f) 80 else 250, 120)
+    private fun regions(mean: Float, bright: Float = 0f) = MeteringZone(mean, bright, 100).let {
+        RegionalMetering(it, it, it, it, it)
+    }
+    private fun sample(ms: Long, bright: Float = 0.1f) = HighlightStatistics(ms * 1_000_000L, bright,
+        if (bright == 0f) 80 else 250, 120,
+        regions(when (bright) { 0f -> 60f; 0.01f -> 112f; else -> 200f }, bright))
     private fun update(p: HighlightExposurePolicy, ms: Long, bright: Float = 0.1f) = p.update(sample(ms, bright), ms * 1_000_000L)
 
     @Test fun requiresThreeDistinctSamplesAndWaitsForAeToSettle() {
@@ -33,14 +38,14 @@ class HighlightExposurePolicyTest {
         assertEquals(-1f / 3f, p.correctionEv, 0.0001f)
     }
 
-    @Test fun boundedNegativeCorrectionRecoversOnlyToManualBaseline() {
+    @Test fun boundedTwoSidedCorrectionUsesManualBaseline() {
         val p = HighlightExposurePolicy(range, 1f)
         for (ms in 0L..40000L step 500) update(p, ms)
         assertEquals(-2f / 3f, p.correctionEv, 0.0001f)
         assertEquals(1f / 3f, p.ev, 0.0001f)
         for (ms in 41000L..90000L step 500) update(p, ms, 0f)
-        assertEquals(0f, p.correctionEv, 0.0001f)
-        assertEquals(1f, p.ev, 0.0001f)
+        assertEquals(1f, p.correctionEv, 0.0001f)
+        assertEquals(2f, p.ev, 0.0001f)
     }
 
     @Test fun invalidStaleFutureAndPausedSamplesDoNotTrigger() {
@@ -68,7 +73,7 @@ class HighlightExposurePolicyTest {
         val p = HighlightExposurePolicy(range, 0f)
         update(p, 0); update(p, 500); update(p, 1000)
         for (ms in 2500L..20000L step 500) {
-            assertNull(p.update(HighlightStatistics(ms * 1_000_000L, 0f, 228, 120), ms * 1_000_000L))
+            assertNull(p.update(HighlightStatistics(ms * 1_000_000L, 0f, 228, 120, regions(60f)), ms * 1_000_000L))
         }
         assertEquals(-1f / 3f, p.ev, 0.0001f)
         assertNull(update(p, 20500, 0f)); assertNull(update(p, 21000, 0f))
@@ -93,7 +98,7 @@ class HighlightExposurePolicyTest {
     @Test fun darkCenterPreventsSkyFromDrivingExposureDown() {
         val p = HighlightExposurePolicy(range, 0f)
         for (ms in 0L..10000L step 500) {
-            assertNull(p.update(HighlightStatistics(ms * 1_000_000L, 0.7f, 255, 35), ms * 1_000_000L))
+            assertNull(p.update(HighlightStatistics(ms * 1_000_000L, 0.7f, 255, 35, regions(112f, 0.7f)), ms * 1_000_000L))
         }
         assertTrue(p.subjectProtected)
         assertEquals(0f, p.correctionEv, 0f)
@@ -102,7 +107,8 @@ class HighlightExposurePolicyTest {
     @Test fun newlyDarkCenterRestoresBaselineDespiteBrightSkyAndHysteresisHolds() {
         val p = HighlightExposurePolicy(range, 0f)
         update(p, 0); update(p, 500); update(p, 1000)
-        fun center(ms: Long, y: Int) = p.update(HighlightStatistics(ms * 1_000_000L, 0.6f, 255, y), ms * 1_000_000L)
+        fun center(ms: Long, y: Int) = p.update(HighlightStatistics(ms * 1_000_000L, 0.6f, 255, y,
+            regions(if (y >= 96) 200f else 112f, 0.6f)), ms * 1_000_000L)
         assertNull(center(2500, 30)); assertNull(center(3000, 30))
         assertEquals(0f, center(3500, 30)!!, 0f)
         for (ms in 5000L..10000L step 500) assertNull(center(ms, 80))

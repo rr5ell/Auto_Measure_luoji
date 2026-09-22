@@ -366,7 +366,8 @@ class Camera2Controller(private val context: Context) {
                             } != false)) {
                             val plane = image.planes[0]
                             HighlightStatistics.sample(
-                                plane.buffer, image.width, image.height, plane.rowStride, plane.pixelStride, now
+                                plane.buffer, image.width, image.height, plane.rowStride, plane.pixelStride, now,
+                                rotationDegrees = sensorOrientation
                             )?.let { if (reader === analysisImageReader && generation == cameraGeneration) highlightSnapshot = generation to it }
                         }
                         onAnalysisImageAvailable?.invoke(image, sensorOrientation)

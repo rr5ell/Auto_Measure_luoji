@@ -4661,25 +4661,27 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     continue
                 }
                 val sample = cameraController.latestHighlightStatistics?.takeIf {
-                    now >= it.sampledAtNs && now - it.sampledAtNs <= 1_500_000_000L
+                    now >= it.sampledAtNs && now - it.sampledAtNs <= 1_500_000_000L && it.regions?.valid == true
                 }
                 if (sample == null) {
-                    // 数据丢失时撤销自动负补偿，不能把画面永久留在较暗的曝光。
+                    // 数据丢失时撤销自动正负补偿，恢复用户的手动基线。
                     if (policy.correctionEv != 0f) {
                         cameraController.setExposureCompensationEv(targetEv).getOrThrow()
                         policy = HighlightExposurePolicy(range, targetEv)
                     }
                     policy.pause(now)
-                    backlightBalanceText = "逆光平衡：等待亮度数据"
+                    backlightBalanceText = "逆光平衡：等待五区亮度"
                 } else {
+                    val regions = sample.regions!!
                     policy.update(sample, now)?.let { ev ->
                         cameraController.setExposureCompensationEv(ev).getOrThrow()
-                        Log.i("BacklightBalance", "bright=${sample.brightFraction} p99=${sample.percentile99} centerP20=${sample.centerDarkLuma} requestedEV=$ev")
+                        Log.i("BacklightBalance", "regions=$regions weighted=${regions.weightedLuma} " +
+                            "p99=${sample.percentile99} centerP20=${sample.centerDarkLuma} requestedEV=$ev reason=${policy.decisionText}")
                     }
                     backlightBalanceText = String.format(java.util.Locale.US,
-                        "逆光平衡：高亮 %.1f%%，中心暗部 %d，补偿 %+.2f EV%s",
-                        sample.brightFraction * 100f, sample.centerDarkLuma, policy.correctionEv,
-                        if (policy.subjectProtected) "（暗部保护）" else "")
+                        "五区测光 %+.2f EV\n上%.0f 下%.0f\n左%.0f 右%.0f\n中%.0f 合%.0f\n%s",
+                        policy.correctionEv, regions.top.mean, regions.bottom.mean, regions.left.mean, regions.right.mean,
+                        regions.center.mean, regions.weightedLuma, policy.decisionText)
                 }
                 delay(500)
             }
@@ -7512,7 +7514,7 @@ private fun StatusHud(
         )
         if (backlightBalanceText.isNotEmpty()) Text(
             text = backlightBalanceText,
-            color = Color(0xFFFFCC80), fontSize = 10.sp, lineHeight = 13.sp,
+            color = Color(0xFFFFCC80), fontSize = 9.sp, lineHeight = 12.sp,
             modifier = Modifier.semantics { contentDescription = "逆光平衡状态" },
         )
         lines.take(6).forEachIndexed { index, text ->
