@@ -51,3 +51,26 @@
 - 后续限幅实现（`ecb1133`、`c5386b0` 中的 TapExposurePolicy）状态：superseded，已由本条目的原生 AE 区域实现替代；历史验证记录保留在 CHANGELOG 与 ERROR_REPORT，不能视为当前版本验证。
 - 不重新引入固定 112 亮度目标、点击 EV 累加和“已达微调上限”提示；原生 AE 仍可能有较大亮暗变化，不能承诺厂商内部 HDR 行为。
 - 本轮 107 项单测、Debug 应用/测试 APK 与 laserCompare Kotlin 编译通过，app 目录与 `94fbea4` 无差异；当前无 ADB 设备，未安装及执行真机回归。
+
+## 三星私有测光探针
+- 2026-09-22，Codex Agent。标准测试路径：`E:\StudioProjects\Auto_Measure_luoji\app\src\androidTest\java\com\example\auto_measure_luoji\feature\camera\domain\samsungmetering\SamsungMeteringProbeTest.kt`。
+- 用途：验证 `samsung.android.control.meteringMode` 是否可请求及读回，并恢复模板原值；不是生产设置开关，不推断私有枚举 4 的含义。
+- 参数：`samsungMeteringProbe=true` 显式运行；另需 `allowUnlistedVendorKey=true` 才允许直接构造未列举的公开 Key。无参数默认跳过，原值无法读取时拒绝写入。
+- 禁止启用 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。本测试不启用任何防抖功能，不使用反射或 Root，不更改正式应用偏好。
+- 测试条件：公开镜头 0，1920x1080 YUV 单输出；复用 CenterMeteringRequest，缓冲区归一化点 (0.65, 0.6)，区域 (2040, 1415, 1224, 689)，权重 1000、EV 0，固定 AF。各阶段跳过前 3 秒，再采集 12 帧。
+
+| SM_S9480 阶段 | 请求/回传 | 曝光时间 | ISO | 光圈 | AE 状态 |
+|---|---|---|---|---|---|
+| 基线 | 0 / 0 | 9.991324 ms | 72 | f/1.4 | 2 |
+| 模式 4 | 4 / 4 | 9.991324 ms | 72 | f/1.4 | 2 |
+| 恢复 | 0 / 0 | 9.991324 ms | 72 | f/1.4 | 2 |
+
+- 请求/结果枚举列表均不包含此字段：保守路径预期停止；直接公开 Key 路径真机测试通过。camera-service watch 同样记录请求/结果的 0 -> 4 -> 0，测试后已停止监控并释放相机。
+- 构建：`gradlew.bat :app:assembleDebugAndroidTest :app:testDebugUnitTest --offline --console=plain --max-workers=4` 通过，单测任务复用缓存。另验证无启用参数时按预期跳过。
+- 未覆盖风险：仅一台设备一个场景，未验证正式 GL/HDR 会话，也不是此前用户手动点击的精确目标；未观察到 ISO/快门变化，不代表模式 4 永远无效或已触发原相机处理。
+- 复测命令（仅连接并解锁测试设备、确认可临时占用相机后运行）：
+
+```powershell
+& 'D:\Android\Sdk\platform-tools\adb.exe' shell am instrument -w -r -e samsungMeteringProbe true -e allowUnlistedVendorKey true -e class com.example.auto_measure_luoji.feature.camera.domain.samsungmetering.SamsungMeteringProbeTest com.example.auto_measure_luoji.test/androidx.test.runner.AndroidJUnitRunner
+& 'D:\Android\Sdk\platform-tools\adb.exe' logcat -d -s SamsungMeterProbe:I '*:S'
+```

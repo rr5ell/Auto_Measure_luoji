@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [samsung-metering-probe-2026-09-22] - 2026-09-22
+
+作者：Codex Agent。
+
+### 新增
+- 独立 Android 仪器测试 SamsungMeteringProbeTest，显式启用后验证三星私有 meteringMode 的原值、4、恢复原值；不接入正式应用，不持久化参数。
+- 复用点击 AE 区域计算，三个阶段固定区域、EV 和 AF，禁用 EIS；按传感器时间跳过各阶段前 3 秒，再核对 12 帧真实结果。
+
+### 验证
+- SM_S9480 公开镜头 0 未在请求/结果列表枚举此字段，保守路径按预期停止。额外启用公开 Key 构造方式后，实际请求与结果均为 0 -> 4 -> 0，测试通过并恢复、释放相机。
+- 三阶段均为 9.991324 ms、ISO 72、f/1.4；没有观察到曝光变化，不能认定已启用原厂测光算法。仅验证 1920x1080 YUV 会话，不代表完整 GL/HDR 预览效果。
+- 测试 APK 构建通过，JVM 单测任务通过（复用缓存）；未传启用参数时测试按预期跳过。正式 app/src/main 与 app/src/debug 无修改。
+
 ## [restore-native-tap-metering-2026-09-22] - 2026-09-22
 
 作者：Codex Agent。
