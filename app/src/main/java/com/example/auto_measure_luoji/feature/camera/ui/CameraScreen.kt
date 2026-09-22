@@ -86,6 +86,8 @@ import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPolic
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
 import com.example.auto_measure_luoji.feature.camera.ui.autohdr.AutoHdrDialog
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ImageAdjustments
+import com.example.auto_measure_luoji.feature.camera.domain.manualsensor.ManualExposure
+import com.example.auto_measure_luoji.feature.camera.domain.manualsensor.ManualSensorCapabilities
 import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdjustmentDialog
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
@@ -794,6 +796,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         ).sanitized())
     }
     var imageAdjustmentError by remember { mutableStateOf<String?>(null) }
+    var manualExposure by remember { mutableStateOf<ManualExposure?>(null) }
+    var manualSensorCapabilities by remember { mutableStateOf(ManualSensorCapabilities()) }
+    var manualExposureError by remember { mutableStateOf<String?>(null) }
     var backlightBalanceText by remember { mutableStateOf("") }
     var previewToneMode by remember {
         mutableStateOf(PreviewToneMode.fromPreference(
@@ -2575,7 +2580,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     fun requestHdrPreview(enabled: Boolean, automatic: Boolean = false) {
         if (hdrPreviewChecking || hdrTransitionPending != null || hdrSwitchBlocked()) return
         if (automatic != autoHdrEnabled || enabled == hdrPreviewEnabled) return
-        if (automatic && (autoHdrFault != null || previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled)) return
+        if (automatic && (autoHdrFault != null || previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled || cameraController.manualExposure != null)) return
         if (!isCameraReady && (automatic || enabled)) return
         // 自动开启和关闭共用入口校验，手动操作不走四条确认。
         if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(enabled, hdrPreviewEnabled,
@@ -2601,7 +2606,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
                 if (selectedLens != lens || !isCameraReady || hdrSwitchBlocked() ||
                     automatic != autoHdrEnabled || revision != autoHdrRevision) return@launch
-                if (automatic && (previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled)) return@launch
+                if (automatic && (previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled || cameraController.manualExposure != null)) return@launch
                 if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(true, hdrPreviewEnabled,
                         cameraController.latestExposureReading, autoHdrSettings,
                         android.os.SystemClock.elapsedRealtimeNanos())) return@launch
@@ -2627,7 +2632,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             cameraParametersText = reading?.cameraParametersText(nowNs) ?: "ISO：--\n光圈：--"
             if (reading != null) Log.i("CameraExposure", "${reading.logText} $exposureTimeText")
             val decisionBlocked = !isCameraReady || hdrTransitionPending != null || hdrSwitchBlocked() || autoHdrFault != null ||
-                previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled
+                previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled || cameraController.manualExposure != null
             // 能力检查保留已确认批次；业务暂停或自动关闭仍会作废批次。
             if (!hdrPreviewChecking || decisionBlocked || !autoHdrEnabled) autoHdrPolicy.decide(
                 enabled = autoHdrEnabled,
@@ -2651,6 +2656,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             val automaticText = when {
                 !autoHdrEnabled -> "手动"
                 autoHdrFault != null -> "自动，故障暂停"
+                cameraController.manualExposure != null -> "自动，手动曝光暂停判断"
                 tapMeteringEnabled -> "自动，点击测光暂停判断"
                 previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE -> "自动，逆光平衡暂停判断"
                 cooldown > 0 -> "自动，停判 ${cooldown}s"
@@ -4150,6 +4156,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
+        cameraController.onManualSensorChanged = {
+            mainHandler.post {
+                manualExposure = cameraController.manualExposure
+                manualSensorCapabilities = cameraController.manualSensorCapabilities
+            }
+        }
         cameraController.onFrameTimingChanged = { timing ->
             mainHandler.post {
                 if (!canApplyGyroPreviewStabilization() || !gyroPreviewFrameSyncEnabled) return@post
@@ -4645,13 +4657,17 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(isCameraReady, selectedLens, showCalPanel, showDualCalPanel, isDualCalibMode,
         imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled,
-        tapMeteringEnabled) {
+        tapMeteringEnabled, manualExposure) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
         val balance = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
         cameraController.highlightAnalysisEnabled = false
         backlightBalanceText = if (balance) "逆光平衡：等待相机" else ""
         imageAdjustmentError = null
+        if (cameraController.manualExposure != null && !calibrationActive) {
+            backlightBalanceText = if (balance) "逆光平衡：手动曝光暂停自动 EV" else ""
+            return@LaunchedEffect
+        }
         val initial = cameraController.setExposureCompensationEv(targetEv)
             .onFailure { error ->
                 imageAdjustmentError = "EV 设置失败：${error.message}"
@@ -5437,7 +5453,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         )
                         ToolMenuItem(
                             text = "EV / 对比度",
-                            active = imageAdjustments != ImageAdjustments(),
+                            active = imageAdjustments != ImageAdjustments() || manualExposure != null,
                             onClick = { toolsMenuExpanded = false; showImageAdjustmentDialog = true },
                         )
                         ToolMenuItem(
@@ -6424,6 +6440,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     calibrationActive -> "校准中：EV -2.00，对比度 1.00"
                     !isCameraReady -> "相机未就绪"
                     !canAdjust -> "当前流程中不可调节"
+                    manualExposureError != null -> manualExposureError
                     imageAdjustmentError != null -> imageAdjustmentError
                     else -> null
                 },
@@ -6435,6 +6452,23 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 },
                 onChangeFinished = { saveImageAdjustments() },
                 onDismiss = { saveImageAdjustments(); showImageAdjustmentDialog = false },
+                manual = manualExposure,
+                sensorCapabilities = manualSensorCapabilities,
+                actualSensorText = "$exposureTimeText\n$cameraParametersText",
+                onManualEnabledChange = { enabled ->
+                    if (canAdjust) {
+                        val result = if (enabled) cameraController.enableManualExposure() else cameraController.setManualExposure(null)
+                        manualExposureError = result.exceptionOrNull()?.let { "手动曝光设置失败：${it.message}" }
+                        manualExposure = cameraController.manualExposure
+                        autoHdrPolicy.resetConfirmation()
+                    }
+                },
+                onManualChange = { value ->
+                    if (canAdjust && cameraController.manualExposure != null) {
+                        manualExposureError = cameraController.setManualExposure(value).exceptionOrNull()?.let { "手动曝光设置失败：${it.message}" }
+                        manualExposure = cameraController.manualExposure
+                    }
+                },
             )
         }
 

@@ -25,6 +25,8 @@ import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureRea
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRequest
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.camera.domain.tapfocus.TapFocusRequest
+import com.example.auto_measure_luoji.feature.camera.domain.manualsensor.ManualExposure
+import com.example.auto_measure_luoji.feature.camera.domain.manualsensor.ManualSensorRequest
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightStatistics
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
 import java.util.Locale
@@ -105,6 +107,10 @@ class Camera2Controller(private val context: Context) {
     private var pendingShadingMode = SHADING_MODE_AUTO
     private var centerMetering = CenterMeteringRequest()
     private var tapFocus = TapFocusRequest()
+    @Volatile private var manualSensor = ManualSensorRequest()
+    val manualSensorCapabilities get() = manualSensor.capabilities
+    val manualExposure get() = manualSensor.selection
+    var onManualSensorChanged: (() -> Unit)? = null
     private var tapFocusId = 0L
     @Volatile var tapFocusStatus = "对焦：等待相机"
         private set
@@ -243,6 +249,9 @@ class Camera2Controller(private val context: Context) {
             if (currentStrictPhysical) lens.physicalId!! else lens.cameraId)
         sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         updateExposureCompensationCharacteristics(chars)
+        manualSensor = ManualSensorRequest()
+        if (!currentStrictPhysical) manualSensor.configure(chars)
+        onManualSensorChanged?.invoke()
         updateVideoStabilizationCharacteristics(chars)
         updateShadingCharacteristics(chars)
         // AE 请求发给父逻辑设备；双摄物理校准会暂停中心测光，不能拿物理阵列冒充逻辑坐标。
@@ -647,6 +656,10 @@ class Camera2Controller(private val context: Context) {
             return Result.success(Unit)
         }
         return runCatching {
+            if (suspended && manualExposure != null) {
+                manualSensor.select(builder, null)
+                onManualSensorChanged?.invoke()
+            }
             submitMeteredPreview(session, builder)
             Unit
         }.onFailure {
@@ -670,6 +683,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun submitPreviewRequest(session: CameraCaptureSession, builder: CaptureRequest.Builder) {
         if (session !== captureSession || builder !== previewRequestBuilder) return
+        manualSensor.apply(builder)
         session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
     }
 
@@ -683,11 +697,11 @@ class Camera2Controller(private val context: Context) {
         var region: android.graphics.Rect? = null
         try {
             region = centerMetering.apply(builder, previewSize, enabled, centerMeteringDisplayScale,
-                if (tapMeteringRequested) tapMeteringPoint else null)
+                if (tapMeteringRequested) tapMeteringPoint else null, allowTapAe = manualExposure == null)
             submitPreviewRequest(session, builder)
         } catch (error: Exception) {
             if (session !== captureSession || builder !== previewRequestBuilder) return false
-            if (!enabled || centerMetering.supported != true) throw error
+            if (manualExposure != null || !enabled || centerMetering.supported != true) throw error
             centerMetering.reject(builder)
             Log.w("Camera2Ctrl", "center-metering: rejected, restoring template regions", error)
             submitPreviewRequest(session, builder)
@@ -699,6 +713,7 @@ class Camera2Controller(private val context: Context) {
             centerMeteringSuspended || currentStrictPhysical -> "测光：默认（校准暂停中心测光）"
             tapMeteringRequested && centerMetering.rejected -> "测光：默认（点击区域被设备拒绝）"
             tapMeteringRequested && centerMetering.supported != true -> "测光：默认（镜头不支持点击区域）"
+            tapMeteringRequested && region != null && manualExposure != null -> "测光：手动曝光（点击仅对焦）"
             tapMeteringRequested && region != null -> "测光：点击区域（已请求）"
             tapMeteringRequested -> "测光：等待点击"
             centerMetering.rejected -> "测光：默认（中心区域被设备拒绝）"
@@ -736,6 +751,38 @@ class Camera2Controller(private val context: Context) {
     fun exposureCompensationRange() = ExposureCompensationRange(
         exposureCompensationRange.lower, exposureCompensationRange.upper, exposureCompensationStep.toFloat(),
     )
+
+    fun enableManualExposure(): Result<Unit> = runCatching {
+        val reading = latestExposureReading?.takeIf { it.isFresh(android.os.SystemClock.elapsedRealtimeNanos()) }
+            ?: error("等待相机回传有效曝光")
+        val caps = manualSensorCapabilities
+        check(caps.supported) { "当前镜头不支持手动曝光" }
+        val time = reading.exposureTimeNs?.takeIf { it > 0 } ?: error("未获取有效快门时间")
+        val iso = reading.iso?.takeIf { it > 0 } ?: error("未获取有效 ISO")
+        val aperture = if (caps.variableAperture) reading.aperture?.takeIf { it in caps.apertures }
+            ?: error("等待当前光圈档位") else null
+        check(latestExposureReading?.sessionGeneration == reading.sessionGeneration) { "相机会话已变更" }
+        setManualExposure(ManualExposure(time.coerceIn(caps.minTimeNs, caps.maxTimeNs),
+            iso.coerceIn(caps.minIso, caps.maxIso), aperture)).getOrThrow()
+    }
+
+    fun setManualExposure(value: ManualExposure?): Result<Unit> {
+        val builder = previewRequestBuilder ?: return Result.failure(IllegalStateException("相机未就绪"))
+        val session = captureSession ?: return Result.failure(IllegalStateException("相机未就绪"))
+        val sensor = manualSensor
+        return runCatching {
+            sensor.select(builder, value)
+            check(submitMeteredPreview(session, builder)) { "相机会话已变更" }
+            Unit
+        }.onFailure { error ->
+            // 厂商拒绝手动请求时恢复自动模板，不重建 HDR 会话。
+            if (sensor === manualSensor && builder === previewRequestBuilder && session === captureSession) {
+                runCatching { sensor.select(builder, null); submitMeteredPreview(session, builder) }
+                    .onFailure { error.addSuppressed(it) }
+            }
+            Log.w("Camera2Ctrl", "manual-sensor: rejected", error)
+        }.also { onManualSensorChanged?.invoke() }
+    }
 
     fun setExposureCompensationEv(ev: Float): Result<Int> {
         if (!ev.isFinite()) return Result.failure(IllegalArgumentException("EV 必须为有限数值"))
@@ -1090,6 +1137,8 @@ class Camera2Controller(private val context: Context) {
         exposureSnapshot = null
         centerMetering = CenterMeteringRequest()
         tapFocus = TapFocusRequest()
+        manualSensor = ManualSensorRequest()
+        onManualSensorChanged?.invoke()
         publishTapFocusState()
         tapMeteringPoint = null
         lastMeteringResult = null

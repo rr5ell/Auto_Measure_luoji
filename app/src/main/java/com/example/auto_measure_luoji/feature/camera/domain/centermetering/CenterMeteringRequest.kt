@@ -66,13 +66,13 @@ class CenterMeteringRequest {
     }
 
     fun apply(builder: CaptureRequest.Builder, preview: Size, enabled: Boolean, displayScale: Float = 1f,
-              tap: TapMeteringPoint? = null): Rect? {
+              tap: TapMeteringPoint? = null, allowTapAe: Boolean = true): Rect? {
         if (!enabled || supported != true) {
             restore(builder)
             return null
         }
         require(tap == null || tap.valid) { "点击测光位置无效" }
-        if (tap == null) restoreTapAe(builder)
+        if (tap == null || !allowTapAe) restoreTapAe(builder)
         // 畸变校正关闭时 AE 与 crop 使用校正前坐标；不主动改变相机模板的校正模式。
         val bounds = coordinateArray(builder) ?: error("缺少测光坐标范围")
         val crop = Rect(builder.get(CaptureRequest.SCALER_CROP_REGION) ?: bounds)
@@ -84,7 +84,7 @@ class CenterMeteringRequest {
         val rect = Rect(region.left, region.top, region.right, region.bottom)
         // 单一区域任意非零权重等价；1000 不是让厂商无条件忽略其他区域的保证。
         builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(MeteringRectangle(rect, 1000)))
-        if (tap != null) {
+        if (tap != null && allowTapAe) {
             if (!tapAeApplied) {
                 previousAeMode = builder.get(CaptureRequest.CONTROL_AE_MODE)
                 previousAeLock = builder.get(CaptureRequest.CONTROL_AE_LOCK)

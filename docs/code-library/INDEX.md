@@ -10,7 +10,7 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/tap-metering-focus` |
+| 当前主要分支 | `feature/manual-shutter-aperture` |
 
 ## 可复用能力
 - [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：点击 AE/AF 同区域、普通/GL 坐标反算、单次对焦触发、5秒恢复及真实曝光/AF 状态；三星模式3/4和探针已移除，禁止复用其历史实现。
@@ -20,7 +20,7 @@
 - [android-preview-local-tone-retinex](entries/android-preview-local-tone-retinex.md)：保边局部色调映射、单尺度 Retinex、普通/GL 显示端共用邻域滤波及互斥开关。
 - [android-preview-shadow-enhancement](entries/android-preview-shadow-enhancement.md)：预览端非线性暗部增益、AGSL/GL 共用曲线、校准暂停与原始取帧隔离。
 
-- [android-camera-manual-image-adjustments](entries/android-camera-manual-image-adjustments.md)：手动 EV、硬件档位量化、显示端对比度、校准覆盖恢复与自动 HDR 互斥。
+- [android-camera-manual-image-adjustments](entries/android-camera-manual-image-adjustments.md)：手动 EV/快门、硬件光圈档位、固定 ISO、显示端对比度、自动曝光恢复与 HDR/点击测光互斥。
 
 - [android-camera2-auto-hdr-exposure](entries/android-camera2-auto-hdr-exposure.md)：曝光阈值自动 HDR、四条主面板同步采样确认、双向停判、故障暂停保留自动开关、手动互斥及参数持久化。
 

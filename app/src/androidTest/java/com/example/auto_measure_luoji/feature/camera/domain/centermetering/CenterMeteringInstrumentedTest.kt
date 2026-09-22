@@ -24,6 +24,8 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.camera.domain.tapfocus.TapFocusRequest
+import com.example.auto_measure_luoji.feature.camera.domain.manualsensor.ManualExposure
+import com.example.auto_measure_luoji.feature.camera.domain.manualsensor.ManualSensorRequest
 
 @RunWith(AndroidJUnit4::class)
 class CenterMeteringInstrumentedTest {
@@ -46,6 +48,7 @@ class CenterMeteringInstrumentedTest {
             }, Handler(handlerThread.looper))
             device = opened.poll(10, TimeUnit.SECONDS) ?: error("打开相机失败：${errors.peek()}")
             verifyTapFocusRequest(device, chars)
+            verifyManualSensorTemplate(device, chars)
             val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             val defaults = builder.get(CaptureRequest.CONTROL_AE_REGIONS)
             val af = builder.get(CaptureRequest.CONTROL_AF_MODE)
@@ -168,6 +171,38 @@ class CenterMeteringInstrumentedTest {
         assertEquals(baseline.get(CaptureRequest.CONTROL_AF_MODE), builder.get(CaptureRequest.CONTROL_AF_MODE))
     }
 
+    private fun verifyManualSensorTemplate(device: CameraDevice, chars: CameraCharacteristics) {
+        val sensor = ManualSensorRequest().apply { configure(chars) }
+        if (!sensor.capabilities.supported) return
+        val caps = sensor.capabilities
+        val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+        val baseline = builder.build()
+        val metering = CenterMeteringRequest().apply { configure(chars); rememberTemplate(builder) }
+        val focus = TapFocusRequest().apply { configure(chars); rememberTemplate(builder) }
+        val selection = ManualExposure(10_000_000L.coerceIn(caps.minTimeNs, caps.maxTimeNs),
+            100.coerceIn(caps.minIso, caps.maxIso), if (caps.variableAperture) caps.apertures.first() else null)
+        metering.apply(builder, Size(1920, 1080), true, tap = TapMeteringPoint(0.5f, 0.5f))
+        sensor.select(builder, selection)
+        val region = metering.apply(builder, Size(1920, 1080), true, tap = TapMeteringPoint(0.5f, 0.5f), allowTapAe = false)
+        sensor.apply(builder)
+        fun verify(request: CaptureRequest) {
+            assertEquals(CaptureRequest.CONTROL_AE_MODE_OFF, request.get(CaptureRequest.CONTROL_AE_MODE))
+            assertEquals(selection.timeNs, request.get(CaptureRequest.SENSOR_EXPOSURE_TIME))
+            assertEquals(selection.iso, request.get(CaptureRequest.SENSOR_SENSITIVITY))
+            assertEquals(baseline.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE), request.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE))
+        }
+        verify(builder.build())
+        val token = focus.update(builder, region, 1, ::verify, ::verify)
+        token?.let { focus.expire(builder, it, ::verify, ::verify) }
+        sensor.select(builder, null)
+        assertNull(sensor.selection)
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AE_MODE), builder.get(CaptureRequest.CONTROL_AE_MODE))
+        assertEquals(baseline.get(CaptureRequest.SENSOR_EXPOSURE_TIME), builder.get(CaptureRequest.SENSOR_EXPOSURE_TIME))
+        assertEquals(baseline.get(CaptureRequest.SENSOR_SENSITIVITY), builder.get(CaptureRequest.SENSOR_SENSITIVITY))
+        assertEquals(baseline.get(CaptureRequest.SENSOR_FRAME_DURATION), builder.get(CaptureRequest.SENSOR_FRAME_DURATION))
+        assertEquals(baseline.get(CaptureRequest.LENS_APERTURE), builder.get(CaptureRequest.LENS_APERTURE))
+    }
+
     private fun verifyActualRegions(device: CameraDevice, chars: CameraCharacteristics,
         state: CenterMeteringRequest, handler: Handler) {
         if (chars.availableCaptureResultKeys?.contains(CaptureResult.CONTROL_AE_REGIONS) != true) return
@@ -202,6 +237,28 @@ class CenterMeteringInstrumentedTest {
                 } else {
                     assertTrue("关闭后不能残留旧中心加权区域", regions.all { it.meteringWeight == 0 })
                 }
+            }
+            val sensor = ManualSensorRequest().apply { configure(chars) }
+            val caps = sensor.capabilities
+            if (caps.supported) {
+                for (requested in listOf(1_000_000L, 10_000_000L, 20_000_000L)) {
+                    val value = ManualExposure(requested.coerceIn(caps.minTimeNs, caps.maxTimeNs), 100.coerceIn(caps.minIso, caps.maxIso))
+                    sensor.select(builder, value)
+                    sensor.apply(builder)
+                    val results = LinkedBlockingQueue<TotalCaptureResult>()
+                    session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                            results.offer(result)
+                        }
+                    }, handler)
+                    val result = results.poll(10, TimeUnit.SECONDS) ?: error("手动曝光未回传")
+                    assertEquals(CaptureResult.CONTROL_AE_MODE_OFF, result.get(CaptureResult.CONTROL_AE_MODE))
+                    assertEquals(value.timeNs.toDouble(), result.get(CaptureResult.SENSOR_EXPOSURE_TIME)!!.toDouble(), value.timeNs * 0.05)
+                    assertEquals(value.iso.toDouble(), result.get(CaptureResult.SENSOR_SENSITIVITY)!!.toDouble(), value.iso * 0.05)
+                    android.util.Log.i("ManualSensorTest", "requested=$value actualTime=${result.get(CaptureResult.SENSOR_EXPOSURE_TIME)} actualISO=${result.get(CaptureResult.SENSOR_SENSITIVITY)} aperture=${result.get(CaptureResult.LENS_APERTURE)}")
+                }
+                sensor.select(builder, null)
+                assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, builder.get(CaptureRequest.CONTROL_AE_MODE))
             }
         } finally {
             session?.close()
