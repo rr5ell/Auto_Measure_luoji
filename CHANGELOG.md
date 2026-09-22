@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [five-zone-diagram-portrait-2026-09-22] - 2026-09-22
+
+作者：Codex Agent。
+
+- 按最新要求将五区面积示意图改为宽180 pt、高320 pt（宽:高=9:16），保留中心9%、四边各22.75%的面积与原权重。
+- 重新排列分区标签和面积公式，另存“9比16”PPT/PDF，保留用户正在编辑的原文件；两页内容及相机代码不变。
+- 已完成 PowerPoint 渲染、文本溢出与几何尺寸验证。
+
 ## [five-zone-metering-presentation-2026-09-22] - 2026-09-22
 
 作者：Codex Agent。
