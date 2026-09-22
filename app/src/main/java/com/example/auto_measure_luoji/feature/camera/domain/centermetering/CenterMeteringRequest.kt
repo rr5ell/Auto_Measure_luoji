@@ -66,29 +66,25 @@ class CenterMeteringRequest {
     }
 
     fun apply(builder: CaptureRequest.Builder, preview: Size, enabled: Boolean, displayScale: Float = 1f,
-              tap: TapMeteringPoint? = null, fullFrame: Boolean = false): Rect? {
+              tap: TapMeteringPoint? = null): Rect? {
         if (!enabled || supported != true) {
             restore(builder)
             return null
         }
         require(tap == null || tap.valid) { "点击测光位置无效" }
-        val balancedTap = fullFrame || tap != null
-        if (!balancedTap) restoreTapAe(builder)
+        if (tap == null) restoreTapAe(builder)
         // 畸变校正关闭时 AE 与 crop 使用校正前坐标；不主动改变相机模板的校正模式。
         val bounds = coordinateArray(builder) ?: error("缺少测光坐标范围")
         val crop = Rect(builder.get(CaptureRequest.SCALER_CROP_REGION) ?: bounds)
         check(crop.intersect(bounds)) { "测光裁切窗口超出传感器范围" }
-        // 点击只影响应用层受限 EV；HAL 始终参考完整预览，避免单个暗部/天空主导快门。
-        // fraction=1 覆盖宽高比裁切后的完整缓冲区，不跟随点击位置或纯显示放大。
         val region = CenterMeteringRegion.calculate(
-            CenterMeteringRegion.Bounds(crop.left, crop.top, crop.right, crop.bottom), preview.width, preview.height,
-            displayScale = if (balancedTap) 1f else displayScale,
-            fraction = if (balancedTap) 1.0 else CenterMeteringRegion.FRACTION)
+            CenterMeteringRegion.Bounds(crop.left, crop.top, crop.right, crop.bottom), preview.width, preview.height, displayScale,
+            tap?.x ?: 0.5f, tap?.y ?: 0.5f)
             ?: error("测光窗口无效")
         val rect = Rect(region.left, region.top, region.right, region.bottom)
         // 单一区域任意非零权重等价；1000 不是让厂商无条件忽略其他区域的保证。
         builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(MeteringRectangle(rect, 1000)))
-        if (balancedTap) {
+        if (tap != null) {
             if (!tapAeApplied) {
                 previousAeMode = builder.get(CaptureRequest.CONTROL_AE_MODE)
                 previousAeLock = builder.get(CaptureRequest.CONTROL_AE_LOCK)

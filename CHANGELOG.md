@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [restore-native-tap-metering-2026-09-22] - 2026-09-22
+
+作者：Codex Agent。
+
+### 变更
+- 按用户要求，将应用源码与测试恢复至 `94fbea4`（新增点击区域测光及实时 ISO、光圈显示），保留 Git 历史，不重置分支历史。
+- 点击区域直接通过 Camera2 AE 区域请求交给设备决定 ISO/快门，保留手动 EV 和实际曝光参数显示；撤销随后两版点击亮度统计、应用层 EV 追加及限幅提示。
+- 未提交的 TapExposurePolicy 参数修改已保存到 Git stash，备注“回退原生点击测光前备份未提交曝光参数”。此策略文件在目标版本不存在，随回退移除。
+- 不修改显示滤镜、AF、光圈或 EIS；原版可能在高反差场景产生较大的曝光变化，不保证原厂 HDR 效果。
+
+### 验证
+- 107 项单测通过；Debug 应用/测试 APK、laserCompare Kotlin 编译与差异检查通过。app 目录与 `94fbea4` 无差异；当前 ADB 无设备，未安装及真机验证。
+
 ## [tap-exposure-subject-priority-2026-09-22] - 2026-09-22
 
 作者：Codex Agent。

@@ -93,7 +93,6 @@ import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMod
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightExposurePolicy
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
-import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapExposurePolicy
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.TapMeteringOverlay
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.meteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
@@ -794,7 +793,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
     var imageAdjustmentError by remember { mutableStateOf<String?>(null) }
     var backlightBalanceText by remember { mutableStateOf("") }
-    var tapExposureText by remember { mutableStateOf("") }
     var previewToneMode by remember {
         mutableStateOf(PreviewToneMode.fromPreference(
             runCatching { cameraPrefs.getString(PreviewToneMode.PREFERENCE_KEY, null) }.getOrNull()))
@@ -4637,12 +4635,11 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(isCameraReady, selectedLens, showCalPanel, showDualCalPanel, isDualCalibMode,
         imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled,
-        tapMeteringEnabled, tapMeteringPoint, tapMeteringEpoch, hdrPreviewEnabled, currentEquivRatio) {
+        tapMeteringEnabled) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
         val balance = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
         cameraController.highlightAnalysisEnabled = false
-        tapExposureText = ""
         backlightBalanceText = if (balance) "逆光平衡：等待相机" else ""
         imageAdjustmentError = null
         val initial = cameraController.setExposureCompensationEv(targetEv)
@@ -4653,60 +4650,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     statusText = "校准 EV 设置失败: ${error.message}"
                 }
             }
-        if (tapMeteringEnabled) {
-            if (balance) backlightBalanceText = "逆光平衡：点击测光暂停自动 EV"
-            if (initial.isFailure) { tapExposureText = "点击微调：EV 设置失败"; return@LaunchedEffect }
-            val point = tapMeteringPoint ?: return@LaunchedEffect
-            if (calibrationActive || showImageAdjustmentDialog || !cameraScreenResumed || !isCameraReady) return@LaunchedEffect
-            val range = cameraController.exposureCompensationRange()
-            if (!range.supported || cameraController.analysisImageReader == null || centerMeteringSupported != true) {
-                tapExposureText = "点击微调：不可用，保持全画面"
-                return@LaunchedEffect
-            }
-            var policy = TapExposurePolicy(range, targetEv, point, android.os.SystemClock.elapsedRealtimeNanos())
-            cameraController.highlightAnalysisEnabled = true
-            try {
-                while (true) {
-                    val now = android.os.SystemClock.elapsedRealtimeNanos()
-                    if (hdrSwitchBlocked() || hdrPreviewChecking || hdrTransitionPending != null) {
-                        policy.pause(now)
-                        tapExposureText = "点击微调：暂停"
-                        delay(500)
-                        continue
-                    }
-                    val sample = cameraController.latestHighlightStatistics
-                    if (!policy.accepts(sample, now)) {
-                        // 分析流中断/点位变化时撤销微调，不能沿用上一目标的亮度闭环。
-                        if (policy.correctionEv != 0f) {
-                            cameraController.setExposureCompensationEv(targetEv).getOrThrow()
-                            policy = TapExposurePolicy(range, targetEv, point, now)
-                        }
-                        policy.pause(now)
-                        tapExposureText = "点击微调：等待亮度，保持基线"
-                    } else {
-                        policy.update(sample, now)?.let { ev ->
-                            cameraController.setExposureCompensationEv(ev).getOrThrow()
-                            Log.i("TapExposure", "point=$point local=${sample?.tapZone?.mean} global=${sample?.globalZone?.mean} " +
-                                "requestedEV=$ev correction=${policy.correctionEv} reason=${policy.decisionText}")
-                        }
-                        tapExposureText = String.format(java.util.Locale.US, "点击微调 %+.2f EV\n%s",
-                            policy.correctionEv, policy.decisionText)
-                    }
-                    delay(500)
-                }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                val restored = cameraController.setExposureCompensationEv(targetEv)
-                tapExposureText = if (restored.isSuccess) "点击微调：失败，已恢复手动 EV" else "点击微调：曝光恢复失败"
-                Log.w("TapExposure", tapExposureText, error)
-            } finally {
-                cameraController.highlightAnalysisEnabled = false
-            }
-            return@LaunchedEffect
-        }
         if (!balance) return@LaunchedEffect
         if (initial.isFailure) { backlightBalanceText = "逆光平衡：EV 设置失败"; return@LaunchedEffect }
+        if (tapMeteringEnabled) { backlightBalanceText = "逆光平衡：点击测光暂停自动 EV"; return@LaunchedEffect }
         if (calibrationActive || showImageAdjustmentDialog || !cameraScreenResumed) {
             backlightBalanceText = "逆光平衡：曝光调节暂停"
             return@LaunchedEffect
@@ -5726,7 +5672,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     cameraParametersText = cameraParametersText,
                     hdrStatusText = hdrStatusText,
                     centerMeteringText = centerMeteringText,
-                    tapExposureText = tapExposureText,
                     backlightBalanceText = backlightBalanceText,
                     statusText = statusText,
                     gyroText = gyroHudText,
@@ -7578,7 +7523,6 @@ private fun StatusHud(
     centerMeteringText: String,
     cameraParametersText: String,
     backlightBalanceText: String,
-    tapExposureText: String,
     statusText: String,
     gyroText: String,
     modelText: String,
@@ -7637,11 +7581,6 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "测光状态" },
-        )
-        if (tapExposureText.isNotEmpty()) Text(
-            text = tapExposureText,
-            color = Color(0xFFB0BEC5), fontSize = 10.sp, lineHeight = 13.sp,
-            modifier = Modifier.semantics { contentDescription = "点击曝光状态" },
         )
         if (backlightBalanceText.isNotEmpty()) Text(
             text = backlightBalanceText,
