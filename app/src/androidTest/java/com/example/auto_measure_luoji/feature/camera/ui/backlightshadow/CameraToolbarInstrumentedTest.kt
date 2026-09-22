@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalancePreferences
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -32,6 +33,7 @@ class CameraToolbarInstrumentedTest {
         val prefs = context.getSharedPreferences("camera_screen_settings", Context.MODE_PRIVATE)
         val originalAuto = AutoHdrPreferences.loadEnabled(prefs)
         val originalTone = prefs.getString(PreviewToneMode.PREFERENCE_KEY, null)
+        val originalBalance = BacklightBalancePreferences.load(prefs)
         val keys = listOf(ShadowEnhancement.PREFERENCE_KEY, "tap_exposure_metering_enabled",
             "gyro_preview_gl_render_enabled", "gyro_preview_stabilization_enabled")
         val original = keys.associateWith { if (prefs.contains(it)) prefs.getBoolean(it, false) else null }
@@ -80,7 +82,11 @@ class CameraToolbarInstrumentedTest {
                 compose.onNodeWithText("更多").performClick()
                 compose.onNodeWithText("轻量眩光抑制").performScrollTo().assertIsOff().performClick()
                 compose.onNodeWithText("更多").performClick()
-                compose.onNodeWithText("逆光平衡").performScrollTo().assertIsOff().performClick()
+                compose.onNodeWithText("逆光平衡").performScrollTo().performClick()
+                compose.onNodeWithContentDescription("逆光平衡开关").assertIsOff().performClick()
+                compose.onNodeWithText("综合亮度目标（Y）").performScrollTo().performTextReplacement("100")
+                compose.onNodeWithText("保存并应用").performClick()
+                compose.runOnIdle { assertEquals(100f, BacklightBalancePreferences.load(prefs).targetLuma, 0f) }
                 AutoHdrPreferences.saveEnabled(prefs, true)
                 scenario.recreate()
                 waitForCamera()
@@ -89,7 +95,11 @@ class CameraToolbarInstrumentedTest {
                 }
                 compose.onNodeWithContentDescription("逆光平衡状态").assertExists()
                 compose.onNodeWithText("更多").performClick()
-                compose.onNodeWithText("逆光平衡").performScrollTo().assertIsOn()
+                compose.onNodeWithText("逆光平衡").performScrollTo().performClick()
+                compose.onNodeWithContentDescription("逆光平衡开关").assertIsOn()
+                compose.onNodeWithText("综合亮度目标（Y）").performScrollTo().assertTextContains("100.0")
+                compose.onNodeWithText("取消").performClick()
+                compose.onNodeWithText("更多").performClick()
                 compose.onNodeWithText("轻量眩光抑制").performScrollTo().assertIsOff()
                 compose.onNodeWithText("逆光暗部增强").performScrollTo()
                 compose.onNodeWithText("逆光暗部增强").performClick()
@@ -103,6 +113,7 @@ class CameraToolbarInstrumentedTest {
                 compose.onNodeWithContentDescription("手动 EV").assertIsDisplayed()
             }
         } finally {
+            BacklightBalancePreferences.save(prefs, originalBalance)
             AutoHdrPreferences.saveEnabled(prefs, originalAuto)
             prefs.edit().putString(PreviewToneMode.PREFERENCE_KEY, originalTone).commit()
             prefs.edit().apply { original.forEach { (key, value) ->

@@ -93,6 +93,9 @@ import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEn
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightExposurePolicy
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalanceSettings
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalancePreferences
+import com.example.auto_measure_luoji.feature.camera.ui.backlightbalance.BacklightBalanceDialog
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.TapMeteringOverlay
@@ -800,6 +803,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var manualSensorCapabilities by remember { mutableStateOf(ManualSensorCapabilities()) }
     var manualExposureError by remember { mutableStateOf<String?>(null) }
     var backlightBalanceText by remember { mutableStateOf("") }
+    var showBacklightBalanceDialog by remember { mutableStateOf(false) }
+    var backlightBalanceSettings by remember { mutableStateOf(BacklightBalancePreferences.load(cameraPrefs)) }
     var previewToneMode by remember {
         mutableStateOf(PreviewToneMode.fromPreference(
             runCatching { cameraPrefs.getString(PreviewToneMode.PREFERENCE_KEY, null) }.getOrNull()))
@@ -2529,7 +2534,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         resetGyroPreviewRenderTransformToBase()
     }
 
-    fun hdrSwitchBlocked(): Boolean = !cameraScreenResumed || showImageAdjustmentDialog || isProcessing || showCalPanel || showDualCalPanel ||
+    fun hdrSwitchBlocked(): Boolean = !cameraScreenResumed || showImageAdjustmentDialog || showBacklightBalanceDialog || isProcessing || showCalPanel || showDualCalPanel ||
         isDualCalibMode || statMeasuring || isDeviceMeasuring || measureTrigger ||
         laserCompareEnabled || showLaserComparePanel || gyroStabilizationCalibrationEnabled
 
@@ -4657,7 +4662,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(isCameraReady, selectedLens, showCalPanel, showDualCalPanel, isDualCalibMode,
         imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled,
-        tapMeteringEnabled, manualExposure) {
+        tapMeteringEnabled, manualExposure, backlightBalanceSettings, showBacklightBalanceDialog) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
         val balance = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
@@ -4679,7 +4684,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         if (!balance) return@LaunchedEffect
         if (initial.isFailure) { backlightBalanceText = "逆光平衡：EV 设置失败"; return@LaunchedEffect }
         if (tapMeteringEnabled) { backlightBalanceText = "逆光平衡：点击测光暂停自动 EV"; return@LaunchedEffect }
-        if (calibrationActive || showImageAdjustmentDialog || !cameraScreenResumed) {
+        if (calibrationActive || showImageAdjustmentDialog || showBacklightBalanceDialog || !cameraScreenResumed) {
             backlightBalanceText = "逆光平衡：曝光调节暂停"
             return@LaunchedEffect
         }
@@ -4693,7 +4698,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             backlightBalanceText = "逆光平衡：仅局部映射（无" + (if (!range.supported) "曝光补偿）" else "分析流）")
             return@LaunchedEffect
         }
-        var policy = HighlightExposurePolicy(range, targetEv)
+        var policy = HighlightExposurePolicy(range, targetEv, backlightBalanceSettings)
         policy.pause(android.os.SystemClock.elapsedRealtimeNanos())
         cameraController.highlightAnalysisEnabled = true
         try {
@@ -4706,13 +4711,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     continue
                 }
                 val sample = cameraController.latestHighlightStatistics?.takeIf {
-                    now >= it.sampledAtNs && now - it.sampledAtNs <= 1_500_000_000L && it.regions?.valid == true
+                    now >= it.sampledAtNs && now - it.sampledAtNs <= BacklightBalanceSettings.MAX_SAMPLE_AGE_NS && it.regions?.valid == true
                 }
                 if (sample == null) {
                     // 数据丢失时撤销自动正负补偿，恢复用户的手动基线。
                     if (policy.correctionEv != 0f) {
                         cameraController.setExposureCompensationEv(targetEv).getOrThrow()
-                        policy = HighlightExposurePolicy(range, targetEv)
+                        policy = HighlightExposurePolicy(range, targetEv, backlightBalanceSettings)
                     }
                     policy.pause(now)
                     backlightBalanceText = "逆光平衡：等待五区亮度"
@@ -5408,7 +5413,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 statusText = if (shadowEnhancementEnabled) "逆光暗部增强已开启" else "逆光暗部增强已关闭"
                             },
                         )
-                        for (mode in PreviewToneMode.entries.filter { it != PreviewToneMode.OFF }) {
+                        ToolMenuItem(
+                            text = "逆光平衡",
+                            active = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE,
+                            onClick = { toolsMenuExpanded = false; showBacklightBalanceDialog = true },
+                        )
+                        for (mode in PreviewToneMode.entries.filter { it != PreviewToneMode.OFF && it != PreviewToneMode.BACKLIGHT_BALANCE }) {
                             val selected = previewToneMode == mode
                             val enabled = (shadowSupported || selected) && isCameraReady &&
                                 !showCalPanel && !showDualCalPanel && !isDualCalibMode
@@ -6469,6 +6479,43 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         manualExposure = cameraController.manualExposure
                     }
                 },
+            )
+        }
+
+        if (showBacklightBalanceDialog) {
+            val canEnable = isCameraReady && cameraScreenResumed && !showCalPanel && !showDualCalPanel &&
+                !isDualCalibMode && !isProcessing && !statMeasuring && !isDeviceMeasuring && !measureTrigger &&
+                !laserCompareEnabled && !gyroStabilizationCalibrationEnabled && !hdrPreviewChecking &&
+                hdrTransitionPending == null && (TexturePreviewAdjustments.supported || gyroPreviewGlRenderEnabled)
+            BacklightBalanceDialog(
+                settings = backlightBalanceSettings,
+                enabled = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE,
+                canEnable = canEnable,
+                status = when {
+                    !isCameraReady -> "相机未就绪"
+                    !canEnable -> "当前流程不可开启逆光平衡"
+                    tapMeteringEnabled -> "点击测光开启：自动 EV 暂停"
+                    manualExposure != null -> "手动曝光开启：自动 EV 暂停"
+                    else -> backlightBalanceText.ifEmpty { "逆光平衡已关闭" }
+                },
+                onSave = { settings, enabled ->
+                    if (!enabled || canEnable) {
+                        BacklightBalancePreferences.save(cameraPrefs, settings)
+                        backlightBalanceSettings = settings
+                        if (enabled) {
+                            previewToneMode = PreviewToneMode.BACKLIGHT_BALANCE
+                            shadowEnhancementEnabled = false
+                        } else if (previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE) {
+                            previewToneMode = PreviewToneMode.OFF
+                        }
+                        cameraPrefs.edit().putString(PreviewToneMode.PREFERENCE_KEY, previewToneMode.name)
+                            .putBoolean(ShadowEnhancement.PREFERENCE_KEY, shadowEnhancementEnabled).apply()
+                        autoHdrPolicy.resetConfirmation()
+                        showBacklightBalanceDialog = false
+                        statusText = if (enabled) "逆光平衡参数已应用" else "逆光平衡已关闭，参数已保存"
+                    }
+                },
+                onDismiss = { showBacklightBalanceDialog = false },
             )
         }
 

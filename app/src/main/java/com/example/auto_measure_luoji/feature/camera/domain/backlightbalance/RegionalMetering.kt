@@ -59,5 +59,9 @@ data class RegionalMetering(val top: MeteringZone, val bottom: MeteringZone,
 
     val weightedHighlights: Float get() = 0.4f * center.brightFraction + 0.15f *
         (top.brightFraction + bottom.brightFraction + left.brightFraction + right.brightFraction)
-    val broadClipping: Boolean get() = weightedHighlights >= 0.35f || all.count { it.brightFraction >= 0.25f } >= 3
+    val broadClipping: Boolean get() = hasBroadClipping(BacklightBalanceSettings())
+
+    fun hasBroadClipping(settings: BacklightBalanceSettings): Boolean =
+        weightedHighlights >= settings.weightedHighlightPercent / 100f ||
+            all.count { it.brightFraction >= settings.zoneHighlightPercent / 100f } >= settings.highlightZoneCount
 }

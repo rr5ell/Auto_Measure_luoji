@@ -5,6 +5,9 @@
 - 技术栈：Android、Kotlin、Camera2、AGSL、OpenGL ES
 - 标签：camera, exposure, histogram, regional-metering, local-tone-mapping
 - 标准代码路径：
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\BacklightBalanceSettings.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\BacklightBalancePreferences.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\backlightbalance\BacklightBalanceDialog.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\HighlightStatistics.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\HighlightExposurePolicy.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\RegionalMetering.kt
@@ -36,6 +39,10 @@
 | 显示 | 暗部最多 3 倍，高光最多压低 15% | Y=0.005..0.03 平滑开放增益，纯黑不变；通道同比例缩放，最后应用用户对比度 |
 
 ## 复用方式
+- “更多 -> 逆光平衡”打开草稿面板，保存并应用同时更新参数与开关；取消不保存，恢复默认只修改草稿。关闭状态也可编辑参数，编辑期间恢复手动EV基线并暂停自动EV/HDR判断，关闭面板重建策略，不能沿用旧确认计数。
+- 可调范围：目标Y 1..254，死区0.05..2档，深暗P20 0..254、保护P20 1..254、解除P20 2..255且深暗<=保护<解除；高亮加权/单区占比各1..100%，区域数1..5；目标步幅0.1..1 EV、相对增减上限各0..3 EV；连续确认1..10次、等待0.5..10秒；P99额外余量0..64。默认值仍取上表。
+- `BacklightParameter`统一定义标签、范围、整数约束和稳定存储键。构造策略必须校验设置；存储于现有SharedPreferences的`backlight_balance_*`字段，非法存储整体回退默认，不引入第二份曝光状态。
+- 五区面积/权重、采样、Y>=235及1.5秒过期上限保持固定；等待时间变长不得放宽旧帧有效期，P99门槛随实际硬件步幅及余量重算。旧PPT说明的是默认参数，不代表用户自定义后的阈值。
 - 两页说明与精确边界：[PPT（含讲者备注）](../../presentations/四边测光逻辑_两页说明_9比16.pptx) / [PDF](../../presentations/四边测光逻辑_两页说明_9比16.pdf)，基于 `0.8.35 / fb348fb`。示意图宽:高=9:16，面积不等于权重，按代码首条命中决策，不可省略中心暗部恢复优先级。
 - 分析线程先取统计快照再转交其他借用者，不持有 Image，不改变缓冲区位置；代际检查拒绝旧会话数据。
 - 区域方向依赖本项目锁定竖屏、后摄，按 SENSOR_ORIENTATION 置换四边；不包含纯 UI 放大、显示平移或运动补偿。跨项目横屏/前摄必须重新适配方向，不直接复制参数。
@@ -48,7 +55,7 @@
 - 中心暗部回归：暗中心亮天空不减曝、突然变暗恢复、64/96 迟滞、小尺寸与背景隔离、5/255 深暗输入的两路实际渲染。
 - 设备回归：TextureShadowInstrumentedTest、GlFrameBindingInstrumentedTest、CameraToolbarInstrumentedTest。
 - 五区回归：方向与角点归属、截尾均值、边缘变化贡献、单区高光/多区反差保护、正负补偿上限、无效数据及简化场景闭环稳定性。
-- 最新结果：102 项单测、Debug 应用/测试 APK、laserCompare Kotlin 编译通过；以上 3 项模拟器专项回归通过；窄屏大字体读数改为上下、左右分行。
+- 最新结果：119项单测、Debug应用/测试APK、laserCompare Kotlin编译通过；BacklightBalanceDialogTest四项及CameraToolbarInstrumentedTest一项模拟器回归通过，1.3倍字体截图检查通过。先前显示/GL专项验证沿用历史记录，本轮未重复验证全部渲染模式。
 - 风险：真实手机 AE/HLG 的响应、运动闪烁、ISP YUV 处理差异、模型准确率与长期帧率，不能由模拟器确认。
 
 ## 给 AI 的指令
