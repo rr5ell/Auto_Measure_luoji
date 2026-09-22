@@ -94,7 +94,6 @@ import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.Hig
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.TapMeteringOverlay
-import com.example.auto_measure_luoji.feature.camera.ui.samsungmetering.SamsungMeteringDialog
 import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.meteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
@@ -771,10 +770,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var centerMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(CenterMeteringRegion.PREFERENCE_KEY, false)) }
     var centerMeteringSupported by remember { mutableStateOf<Boolean?>(null) }
     var centerMeteringText by remember { mutableStateOf("测光：等待相机") }
-    var samsungMeteringMode by remember { mutableStateOf<Int?>(null) }
-    var showSamsungMeteringDialog by remember { mutableStateOf(false) }
-    var samsungMeteringAvailable by remember { mutableStateOf(false) }
-    var samsungMeteringText by remember { mutableStateOf("三星测光：等待相机") }
+    var tapFocusText by remember { mutableStateOf("对焦：等待相机") }
+    var tapFocusId by remember { mutableStateOf(0L) }
     var tapMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(TapMeteringPoint.PREFERENCE_KEY, false)) }
     var tapMeteringPoint by remember { mutableStateOf<TapMeteringPoint?>(null) }
     var tapMeteringEpoch by remember { mutableStateOf(0) }
@@ -4146,11 +4143,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
-        cameraController.onSamsungMeteringStateChanged = { message ->
+        cameraController.onTapFocusStateChanged = { message ->
             mainHandler.post {
-                if (cameraController.samsungMeteringStatus == message) {
-                    samsungMeteringText = message
-                    samsungMeteringAvailable = cameraController.samsungMeteringAvailable
+                if (cameraController.tapFocusStatus == message) {
+                    tapFocusText = message
                 }
             }
         }
@@ -4635,18 +4631,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(isCameraReady, centerMeteringEnabled, showCalPanel, showDualCalPanel, isDualCalibMode,
         uiZoomOnlyEnabled, currentEquivRatio, selectedLens, tapMeteringEnabled, tapMeteringPoint,
-        cameraScreenResumed, tapMeteringEpoch) {
+        cameraScreenResumed, tapMeteringEpoch, tapFocusId) {
         cameraController.setCenterMeteringEnabled(centerMeteringEnabled,
             suspended = showCalPanel || showDualCalPanel || isDualCalibMode || !cameraScreenResumed,
-            displayScale = uiZoomDisplayScale(), tapEnabled = tapMeteringEnabled, tapPoint = tapMeteringPoint)
+            displayScale = uiZoomDisplayScale(), tapEnabled = tapMeteringEnabled, tapPoint = tapMeteringPoint,
+            tapId = tapFocusId)
             .onFailure { statusText = "测光设置失败：${it.message}" }
-    }
-
-    LaunchedEffect(isCameraReady, samsungMeteringMode, showCalPanel, showDualCalPanel,
-        isDualCalibMode, cameraScreenResumed, selectedLens) {
-        cameraController.setSamsungMeteringMode(samsungMeteringMode,
-            suspended = showCalPanel || showDualCalPanel || isDualCalibMode || !cameraScreenResumed)
-            .onFailure { statusText = "三星测光设置失败：${it.message}" }
     }
 
     DisposableEffect(cameraController) {
@@ -5248,6 +5238,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         false
                     } else {
                         tapMeteringPoint = TapMeteringPoint(mapped.x, mapped.y)
+                        tapFocusId++
                         true
                     }
                 })
@@ -5345,7 +5336,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             shadowEnhancementEnabled ||
-                            centerMeteringEnabled || tapMeteringEnabled || samsungMeteringMode != null ||
+                            centerMeteringEnabled || tapMeteringEnabled ||
                             previewToneMode != PreviewToneMode.OFF ||
                             imageAdjustments != ImageAdjustments() ||
                             autoHdrEnabled || hdrPreviewEnabled ||
@@ -5365,7 +5356,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         val shadowControlEnabled = (shadowSupported || shadowEnhancementEnabled) && isCameraReady &&
                             !showCalPanel && !showDualCalPanel && !isDualCalibMode
                         DropdownMenuItem(
-                            text = { Text("点击区域测光" + if (centerMeteringSupported == false) "（不可用）" else "") },
+                            text = { Text("点击测光与对焦" + if (centerMeteringSupported == false) "（不可用）" else "") },
                             trailingIcon = { Switch(checked = tapMeteringEnabled, onCheckedChange = null) },
                             colors = androidx.compose.material3.MenuDefaults.itemColors(
                                 textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
@@ -5380,16 +5371,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 tapMeteringPoint = null
                                 cameraPrefs.edit().putBoolean(TapMeteringPoint.PREFERENCE_KEY, tapMeteringEnabled).apply()
                                 toolsMenuExpanded = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("三星测光（实验）") },
-                            trailingIcon = { Text(samsungMeteringMode?.toString() ?: "关", color = Color.White) },
-                            colors = androidx.compose.material3.MenuDefaults.itemColors(
-                                textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
-                            onClick = {
-                                toolsMenuExpanded = false
-                                showSamsungMeteringDialog = true
                             },
                         )
                         DropdownMenuItem(
@@ -5702,7 +5683,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     cameraParametersText = cameraParametersText,
                     hdrStatusText = hdrStatusText,
                     centerMeteringText = centerMeteringText,
-                    samsungMeteringText = samsungMeteringText,
+                    tapFocusText = tapFocusText,
                     backlightBalanceText = backlightBalanceText,
                     statusText = statusText,
                     gyroText = gyroHudText,
@@ -6427,16 +6408,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 dismissButton = {
                     TextButton(onClick = { showYoloFilterDialog = false }) { Text("取消") }
                 },
-            )
-        }
-
-        if (showSamsungMeteringDialog) {
-            SamsungMeteringDialog(
-                mode = samsungMeteringMode,
-                canEnable = isCameraReady && samsungMeteringAvailable && !hdrSwitchBlocked() &&
-                    !showCalPanel && !showDualCalPanel && !isDualCalibMode,
-                onModeChanged = { samsungMeteringMode = it; showSamsungMeteringDialog = false },
-                onDismiss = { showSamsungMeteringDialog = false },
             )
         }
 
@@ -7562,7 +7533,7 @@ private fun StatusHud(
     exposureTimeText: String,
     hdrStatusText: String,
     centerMeteringText: String,
-    samsungMeteringText: String,
+    tapFocusText: String,
     cameraParametersText: String,
     backlightBalanceText: String,
     statusText: String,
@@ -7625,9 +7596,9 @@ private fun StatusHud(
             modifier = Modifier.semantics { contentDescription = "测光状态" },
         )
         Text(
-            text = samsungMeteringText,
+            text = tapFocusText,
             color = Color(0xFFB0BEC5), fontSize = 10.sp, lineHeight = 13.sp,
-            modifier = Modifier.semantics { contentDescription = "三星测光状态" },
+            modifier = Modifier.semantics { contentDescription = "点击对焦状态" },
         )
         if (backlightBalanceText.isNotEmpty()) Text(
             text = backlightBalanceText,

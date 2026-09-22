@@ -16,7 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** 只拦截有效单击；拖动/多指不提交曝光，标记仅表示点击已受理而非 AE 已收敛。 */
+/** 只拦截有效单击；拖动/多指不提交测光对焦，黄色标记只表示受理，合焦结果由主面板显示。 */
 @Composable
 fun TapMeteringOverlay(epoch: Any, onTap: suspend (Offset) -> Boolean, modifier: Modifier = Modifier) {
     val callback by rememberUpdatedState(onTap)

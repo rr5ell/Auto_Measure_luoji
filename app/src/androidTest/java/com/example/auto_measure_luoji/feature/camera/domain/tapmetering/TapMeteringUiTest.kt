@@ -27,6 +27,12 @@ class TapMeteringUiTest {
         compose.onAllNodes(hasContentDescription("测光状态") and hasText(text)).fetchSemanticsNodes().isNotEmpty()
     }
 
+    private fun waitFocus(active: Boolean) = compose.waitUntil(10_000) {
+        val states = if (active) listOf("对焦：已触发，等待结果", "对焦：搜索中", "对焦：已合焦（点击）", "对焦：未合焦（可重新点击）")
+            else listOf("对焦：自动", "对焦：超时，已恢复自动")
+        states.any { compose.onAllNodes(hasContentDescription("点击对焦状态") and hasText(it)).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @Test fun tapWorksInTextureAndGlPersistsSwitchButResetsPointAndRestoresCenter() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -64,11 +70,20 @@ class TapMeteringUiTest {
                         click(Offset(width * 0.65f, height * 0.60f))
                     }
                     waitStatus("测光：点击区域（已请求）")
+                    waitFocus(true)
+                    waitFocus(false)
+                    // 同一个点再次点击也必须重新触发，不能被 Compose 相等坐标去重。
+                    compose.onNodeWithContentDescription("点击测光预览").performTouchInput {
+                        click(Offset(width * 0.65f, height * 0.60f))
+                    }
+                    waitFocus(true)
                     scenario.recreate()
                     waitStatus("测光：等待点击")
+                    waitFocus(false)
                     compose.onNodeWithText("更多").performClick()
-                    compose.onNodeWithText("点击区域测光").performScrollTo().assertIsOn().performClick()
+                    compose.onNodeWithText("点击测光与对焦").performScrollTo().assertIsOn().performClick()
                     waitStatus("测光：中心 30%（已请求）")
+                    waitFocus(false)
                     assertFalse(prefs.getBoolean(TapMeteringPoint.PREFERENCE_KEY, true))
                     compose.onNodeWithContentDescription("点击测光预览").assertDoesNotExist()
                 }

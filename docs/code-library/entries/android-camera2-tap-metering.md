@@ -6,6 +6,7 @@
 - 标签：camera2, metering, coordinate-map, exposure
 - 标准代码路径：
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\tapmetering\TapMeteringPoint.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\tapfocus\TapFocusRequest.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\gldetection\GlDetectionCoordinates.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\centermetering\CenterMeteringRequest.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\tapmetering\TextureMeteringPoint.kt
@@ -19,7 +20,7 @@
 
 ## 禁止场景
 - 禁止启用 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。
-- 不用于自动跟踪对象、恢复过曝纹理或承诺原厂 HDR 效果；不改 AF、光圈或显示滤镜。
+- 不用于自动跟踪对象、恢复过曝纹理或承诺原厂 HDR 效果；不改光圈或显示滤镜。区域 AF 使用公开 API，不引入已移除的三星私有模式。
 
 ## 核心参数
 | 参数 | 默认值 | 边界 |
@@ -28,15 +29,20 @@
 | AE 区域宽高 | 可见预览 30%，纯 UI 放大再除显示倍率 | 复用中心区域计算，区域限制在有效预览裁切内 |
 | 区域权重 | 1000 | 不保证设备忽略其他区域 |
 | 点击标记 | 1500 ms | 只表示点击受理，不代表 AE 已收敛 |
+| AF 恢复时间 | 5000 ms | 最新有效点击计时；关闭、暂停及清除目标立即恢复 |
+| AF 区域 | 与 AE 区域一致，权重1000 | 支持 AUTO 且至少一个 AF 区域，使用同一 crop/畸变坐标系，不再次旋转 |
+| AF 触发 | 单次 CANCEL 后 START | 重复预览必须为 IDLE，禁止每帧 START；同点再点递增点击编号 |
 | GL 坐标请求 | 300 ms 超时、已显示帧不超过 1500 ms | 旧会话/无效矩阵/黑边拒绝 |
 
 ## 复用方式
 - screenToBuffer 为现有检测坐标正向映射的逆向，输入采样矩阵 S、显示矩阵 D 与屏幕像素，输出原始缓冲区归一化坐标；不要再次按传感器角度旋转。
 - TextureView 先读取 getTransform 并求逆，再使用同一 SurfaceTexture 采样矩阵约定；GL 在 GL 线程使用 displayedSampling/displayedTransform，不能取下一帧矩阵。
 - 点击 AE 临时设置 ON/解锁，关闭或暂停恢复此前模式/锁定及区域；区域拒绝复用中心测光恢复逻辑。
+- TapFocusRequest 保存原 AF 模式、区域及 tag，临时 AUTO 对焦；5秒恢复、结果回调及取消校验点击序号，控制器额外校验会话实例。AF 错误独立处理，不把测光撤销或触发 HDR 切换。主面板只根据真实 AF_STATE 报合焦。
 - 切镜头、变焦、预览重建、前后台和校准变化清空目标；测量期间拒绝新点击。自动 HDR 和五区 EV 暂停但不清除偏好。
 
 ## 测试与验证
+- 当前点击对焦（2026-09-22，Codex Agent）：107 项单测、Debug/仪器 APK 与 laserCompare 编译通过。CenterMeteringInstrumentedTest 覆盖单次触发/重复 IDLE、同点重触发、旧定时器、取消/恢复及故障注入；TapMeteringUiTest 普通/GL 合焦状态、5秒恢复和重建回归通过，日志实际返回已合焦。HDR 手动验证受锁屏/防误触阻挡未完成；其他机型、固定焦点镜头和全部镜头组合仍待实测。
 - 命令：gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:compileLaserCompareKotlin --offline --no-daemon。
 - 单测：TapMeteringTest、ExposureReadingTest。
 - 设备：CenterMeteringInstrumentedTest、TapMeteringUiTest，及既有 GL/显示回归。
@@ -52,7 +58,8 @@
 - 不重新引入固定 112 亮度目标、点击 EV 累加和“已达微调上限”提示；原生 AE 仍可能有较大亮暗变化，不能承诺厂商内部 HDR 行为。
 - 本轮 107 项单测、Debug 应用/测试 APK 与 laserCompare Kotlin 编译通过，app 目录与 `94fbea4` 无差异；当前无 ADB 设备，未安装及执行真机回归。
 
-## 三星私有测光探针
+## 历史：三星私有测光探针（已移除）
+状态：deprecated。2026-09-22 按用户要求删除以下测试和私有字段请求代码；历史路径和命令不可再用，不得重新生成替代探针。
 - 2026-09-22，Codex Agent。标准测试路径：`E:\StudioProjects\Auto_Measure_luoji\app\src\androidTest\java\com\example\auto_measure_luoji\feature\camera\domain\samsungmetering\SamsungMeteringProbeTest.kt`。
 - 用途：验证 `samsung.android.control.meteringMode` 是否可请求及读回，并恢复模板原值；不是生产设置开关，不推断私有枚举 4 的含义。
 - 参数：`samsungMeteringProbe=true` 显式运行；另需 `allowUnlistedVendorKey=true` 才允许直接构造未列举的公开 Key。无参数默认跳过，原值无法读取时拒绝写入。
@@ -75,7 +82,8 @@
 & 'D:\Android\Sdk\platform-tools\adb.exe' logcat -d -s SamsungMeterProbe:I '*:S'
 ```
 
-## 三星私有测光实验开关
+## 历史：三星私有测光实验开关（已移除）
+状态：deprecated。2026-09-22 按用户要求删除以下封装、单选界面与测试，当前入口为“点击测光与对焦”，不再访问三星私有字段。
 - 2026-09-22，Codex Agent。新增标准路径：`E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\samsungmetering\SamsungMeteringRequest.kt`，由 Camera2Controller 所有重复请求入口共用。
 - “更多 -> 三星测光（实验）”提供关闭、模式3、模式4单选，默认关闭，仅页面内 remember、不写偏好；重新创建页面或重启关闭。选择独立于点击 AE 区域，不自动调整 EV、ISO、快门、AF、测光窗口或防抖。
 - 仅三星且能读取当前模板 Int 原值时可用，不依赖 availableCaptureRequestKeys 枚举；失败不开启，不猜测原值。接口只允许 null（恢复原值）、3、4，非法值在写入前拒绝；关闭/校准/严格物理输出/后台暂停恢复当前模板原值，新会话重新读取。

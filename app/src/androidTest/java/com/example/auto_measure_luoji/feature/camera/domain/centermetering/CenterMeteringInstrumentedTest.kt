@@ -23,6 +23,7 @@ import org.junit.runner.RunWith
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
+import com.example.auto_measure_luoji.feature.camera.domain.tapfocus.TapFocusRequest
 
 @RunWith(AndroidJUnit4::class)
 class CenterMeteringInstrumentedTest {
@@ -44,6 +45,7 @@ class CenterMeteringInstrumentedTest {
                 override fun onError(camera: CameraDevice, error: Int) { errors.offer(error); camera.close() }
             }, Handler(handlerThread.looper))
             device = opened.poll(10, TimeUnit.SECONDS) ?: error("打开相机失败：${errors.peek()}")
+            verifyTapFocusRequest(device, chars)
             val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             val defaults = builder.get(CaptureRequest.CONTROL_AE_REGIONS)
             val af = builder.get(CaptureRequest.CONTROL_AF_MODE)
@@ -101,6 +103,69 @@ class CenterMeteringInstrumentedTest {
             handlerThread.quitSafely()
             handlerThread.join(5_000)
         }
+    }
+
+    private fun verifyTapFocusRequest(device: CameraDevice, chars: CameraCharacteristics) {
+        val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+        val focus = TapFocusRequest().apply { configure(chars) }
+        builder.set(CaptureRequest.CONTROL_AF_MODE, focus.previewMode)
+        builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+        focus.rememberTemplate(builder)
+        val baseline = builder.build()
+        val bounds = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)!!
+        val region = Rect(bounds.centerX() - 50, bounds.centerY() - 50, bounds.centerX() + 50, bounds.centerY() + 50)
+        val single = mutableListOf<CaptureRequest>()
+        val repeating = mutableListOf<CaptureRequest>()
+        val token = focus.update(builder, region, 1, { single.add(it) }, { repeating.add(it) })
+        if (token == null) {
+            assertTrue(focus.status.contains("不支持"))
+            assertTrue(single.isEmpty())
+            return
+        }
+        assertEquals(listOf(CaptureRequest.CONTROL_AF_TRIGGER_CANCEL, CaptureRequest.CONTROL_AF_TRIGGER_START),
+            single.map { it.get(CaptureRequest.CONTROL_AF_TRIGGER) })
+        assertEquals(CaptureRequest.CONTROL_AF_TRIGGER_IDLE, repeating.last().get(CaptureRequest.CONTROL_AF_TRIGGER))
+        assertEquals(region, repeating.last().get(CaptureRequest.CONTROL_AF_REGIONS)!![0].rect)
+        assertEquals(CaptureRequest.CONTROL_AF_MODE_AUTO, repeating.last().get(CaptureRequest.CONTROL_AF_MODE))
+        assertNull(focus.update(builder, region, 1, { single.add(it) }, { repeating.add(it) }))
+        assertEquals(2, single.size)
+        val next = focus.update(builder, region, 2, { single.add(it) }, { repeating.add(it) })!!
+        assertEquals(4, single.size)
+        focus.expire(builder, token, { single.add(it) }, { repeating.add(it) })
+        assertEquals(4, single.size)
+        focus.expire(builder, next, { single.add(it) }, { repeating.add(it) })
+        assertEquals(5, single.size)
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AF_MODE), builder.get(CaptureRequest.CONTROL_AF_MODE))
+        assertTrue(builder.get(CaptureRequest.CONTROL_AF_REGIONS)!!.all { it.meteringWeight == 0 })
+        assertNull(focus.update(builder, region, 2, { single.add(it) }, { repeating.add(it) }))
+        focus.update(builder, region, 3, { single.add(it) }, { repeating.add(it) })
+        focus.update(builder, null, 3, { single.add(it) }, { repeating.add(it) })
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AF_MODE), builder.get(CaptureRequest.CONTROL_AF_MODE))
+        try {
+            focus.update(builder, region, 4, {
+                if (it.get(CaptureRequest.CONTROL_AF_TRIGGER) == CaptureRequest.CONTROL_AF_TRIGGER_START)
+                    throw IllegalArgumentException("模拟 AF 拒绝")
+            }, { repeating.add(it) })
+            fail("AF 拒绝应报告")
+        } catch (_: IllegalArgumentException) {
+            assertTrue(focus.status.contains("已恢复"))
+        }
+        assertEquals(CaptureRequest.CONTROL_AF_TRIGGER_IDLE, builder.get(CaptureRequest.CONTROL_AF_TRIGGER))
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AF_MODE), builder.get(CaptureRequest.CONTROL_AF_MODE))
+        assertArrayEquals(baseline.get(CaptureRequest.CONTROL_AE_REGIONS), builder.get(CaptureRequest.CONTROL_AE_REGIONS))
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AE_MODE), builder.get(CaptureRequest.CONTROL_AE_MODE))
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION), builder.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION))
+        assertEquals(baseline.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE), builder.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE))
+        try {
+            focus.update(builder, region, 5, {}, { throw IllegalArgumentException("模拟恢复提交失败") })
+            fail("恢复失败应报告")
+        } catch (_: IllegalArgumentException) {
+            assertEquals("对焦：恢复失败", focus.status)
+        }
+        var recoverySent = false
+        focus.update(builder, null, 5, {}, { recoverySent = true })
+        assertTrue("关闭必须重试失败的恢复", recoverySent)
+        assertEquals(baseline.get(CaptureRequest.CONTROL_AF_MODE), builder.get(CaptureRequest.CONTROL_AF_MODE))
     }
 
     private fun verifyActualRegions(device: CameraDevice, chars: CameraCharacteristics,

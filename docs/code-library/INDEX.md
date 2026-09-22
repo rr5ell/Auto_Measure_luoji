@@ -10,10 +10,10 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/samsung-metering-mode3` |
+| 当前主要分支 | `feature/tap-metering-focus` |
 
 ## 可复用能力
-- [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：原生点击 AE 区域、普通/GL 坐标反算、实际 ISO/快门/光圈读数与关闭恢复；附默认关闭的三星模式3/4实验选择、模板恢复、真实回传及显式启用的真机探针。
+- [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：点击 AE/AF 同区域、普通/GL 坐标反算、单次对焦触发、5秒恢复及真实曝光/AF 状态；三星模式3/4和探针已移除，禁止复用其历史实现。
 - [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：五区截尾亮度统计、对数域综合测光、受限正负 EV 闭环、中心保护、自动 HDR 隔离及局部预览映射。
 - [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。
 - [android-preview-glare-suppression](entries/android-preview-glare-suppression.md)：显示端受限白雾扣除、平坦区与高光保护、普通/GL 共享 Shader 和互斥设置。
@@ -71,6 +71,9 @@
 - VAD 参考文档：`E:\StudioProjects\Auto_Measure_luoji\关于VAD.md`
 
 ## 最后更新
+2026-09-22，Codex Agent。按用户要求删除三星私有模式代码，点击测光增加独立区域 AF 触发与恢复；标准路径见 TapFocusRequest。107 项单测、构建、底层仪器测试通过，普通/GL 实际合焦、重触发和恢复回归通过；HDR 手动验证受锁屏/防误触阻挡未完成。
+
+以下三星实验代码现已删除，仅保留验证历史：
 2026-09-22，Codex Agent。新增原值/模式3/模式4单选面板与非法值拦截；107 项单测、构建、三星探针通过，UI 解锁后重跑通过，HDR 请求3/回传3和单选面板截图已验证。
 
 以下为模式4开关验证历史：

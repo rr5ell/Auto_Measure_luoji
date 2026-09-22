@@ -24,7 +24,7 @@ import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureReading
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRequest
 import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
-import com.example.auto_measure_luoji.feature.camera.domain.samsungmetering.SamsungMeteringRequest
+import com.example.auto_measure_luoji.feature.camera.domain.tapfocus.TapFocusRequest
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightStatistics
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
 import java.util.Locale
@@ -104,13 +104,11 @@ class Camera2Controller(private val context: Context) {
     private var hdrPreviewRequested = false
     private var pendingShadingMode = SHADING_MODE_AUTO
     private var centerMetering = CenterMeteringRequest()
-    private var samsungMetering = SamsungMeteringRequest()
-    private var samsungMeteringRequested: Int? = null
-    private var samsungMeteringSuspended = false
-    val samsungMeteringAvailable: Boolean get() = samsungMetering.available
-    @Volatile var samsungMeteringStatus = "三星测光：等待相机"
+    private var tapFocus = TapFocusRequest()
+    private var tapFocusId = 0L
+    @Volatile var tapFocusStatus = "对焦：等待相机"
         private set
-    var onSamsungMeteringStateChanged: ((String) -> Unit)? = null
+    var onTapFocusStateChanged: ((String) -> Unit)? = null
     private var centerMeteringRequested = false
     private var centerMeteringSuspended = false
     private var centerMeteringDisplayScale = 1f
@@ -249,6 +247,7 @@ class Camera2Controller(private val context: Context) {
         updateShadingCharacteristics(chars)
         // AE 请求发给父逻辑设备；双摄物理校准会暂停中心测光，不能拿物理阵列冒充逻辑坐标。
         centerMetering.configure(manager.getCameraCharacteristics(lens.cameraId))
+        tapFocus.configure(manager.getCameraCharacteristics(lens.cameraId))
         lastMeteringResult = null
 
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -401,8 +400,6 @@ class Camera2Controller(private val context: Context) {
             addTarget(surface)
             analysisImageReader?.surface?.let { addTarget(it) }
             centerMetering.rememberTemplate(this)
-            samsungMetering.rememberTemplate(this, Build.MANUFACTURER)
-            publishSamsungMeteringState()
         }
 
         if (hdrPreviewRequested && Build.VERSION.SDK_INT >= 33) createHdrSession(camera, lens, surface)
@@ -577,7 +574,9 @@ class Camera2Controller(private val context: Context) {
         resetStabilizationCaptureResultLog()
 
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        builder.set(CaptureRequest.CONTROL_AF_MODE, tapFocus.previewMode)
+        tapFocus.rememberTemplate(builder)
+        publishTapFocusState()
 
         applyStabilization(builder, lens, notifyUnsupported = true)
         applyExposureCompensation(builder)
@@ -633,12 +632,14 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setCenterMeteringEnabled(enabled: Boolean, suspended: Boolean = false, displayScale: Float = 1f,
-                                 tapEnabled: Boolean = false, tapPoint: TapMeteringPoint? = null): Result<Unit> {
+                                 tapEnabled: Boolean = false, tapPoint: TapMeteringPoint? = null,
+                                 tapId: Long = 0L): Result<Unit> {
         centerMeteringRequested = enabled
         centerMeteringSuspended = suspended
         centerMeteringDisplayScale = displayScale
         tapMeteringRequested = tapEnabled
         tapMeteringPoint = tapPoint?.takeIf { tapEnabled && it.valid }
+        tapFocusId = tapId
         val builder = previewRequestBuilder
         val session = captureSession
         if (builder == null || session == null) {
@@ -659,36 +660,17 @@ class Camera2Controller(private val context: Context) {
         onCenterMeteringStateChanged?.invoke(message)
     }
 
-    fun setSamsungMeteringMode(mode: Int?, suspended: Boolean = false): Result<Unit> {
-        if (mode != null && mode != 3 && mode != 4) {
-            return Result.failure(IllegalArgumentException("仅允许原值、模式3或模式4"))
-        }
-        samsungMeteringRequested = mode
-        samsungMeteringSuspended = suspended
-        val builder = previewRequestBuilder ?: return Result.success(Unit)
-        val session = captureSession ?: return Result.success(Unit)
-        return runCatching { submitMeteredPreview(session, builder); Unit }
-            .onFailure { Log.w("Camera2Ctrl", "samsung-metering: submission failed", it) }
-    }
-
-    private fun publishSamsungMeteringState() {
-        val status = samsungMetering.status
-        if (samsungMeteringStatus == status) return
-        samsungMeteringStatus = status
-        Log.i("Camera2Ctrl", "samsung-metering: $status")
-        onSamsungMeteringStateChanged?.invoke(status)
+    private fun publishTapFocusState() {
+        val status = tapFocus.status
+        if (tapFocusStatus == status) return
+        tapFocusStatus = status
+        Log.i("Camera2Ctrl", "tap-focus: $status")
+        onTapFocusStateChanged?.invoke(status)
     }
 
     private fun submitPreviewRequest(session: CameraCaptureSession, builder: CaptureRequest.Builder) {
         if (session !== captureSession || builder !== previewRequestBuilder) return
-        try {
-            samsungMetering.submit(builder, samsungMeteringRequested,
-                samsungMeteringSuspended || currentStrictPhysical) { request ->
-                session.setRepeatingRequest(request, captureCallback, cameraHandler)
-            }
-        } finally {
-            publishSamsungMeteringState()
-        }
+        session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
     }
 
     /** 新区域被厂商拒绝时只撤销区域并重试一次，不重建相机、不触发 HDR 切换。 */
@@ -726,7 +708,29 @@ class Camera2Controller(private val context: Context) {
         }
         Log.i("Camera2Ctrl", "center-metering: requested=$centerMeteringRequested region=$region status=$state")
         publishCenterMeteringState(state)
+        updateTapFocus(session, builder, region?.takeIf { enabled && tapMeteringRequested })
         return true
+    }
+
+    private fun updateTapFocus(session: CameraCaptureSession, builder: CaptureRequest.Builder,
+                               region: android.graphics.Rect?) {
+        val focus = tapFocus
+        val single: (CaptureRequest) -> Unit = { session.capture(it, captureCallback, cameraHandler); Unit }
+        val repeating: (CaptureRequest) -> Unit = { session.setRepeatingRequest(it, captureCallback, cameraHandler); Unit }
+        try {
+            val token = focus.update(builder, region, tapFocusId, single, repeating) ?: return
+            cameraHandler?.postDelayed({
+                if (focus !== tapFocus || session !== captureSession || builder !== previewRequestBuilder) return@postDelayed
+                try { focus.expire(builder, token, single, repeating) }
+                catch (error: Exception) { Log.w("Camera2Ctrl", "tap-focus: restore failed", error) }
+                publishTapFocusState()
+            }, TapFocusRequest.RESTORE_DELAY_MS)
+        } catch (error: Exception) {
+            // AF 错误不撤销已成功提交的 AE 区域，也不触发 HDR 会话重建。
+            Log.w("Camera2Ctrl", "tap-focus: request failed", error)
+        } finally {
+            publishTapFocusState()
+        }
     }
 
     fun exposureCompensationRange() = ExposureCompensationRange(
@@ -1085,8 +1089,8 @@ class Camera2Controller(private val context: Context) {
         cameraGeneration++
         exposureSnapshot = null
         centerMetering = CenterMeteringRequest()
-        samsungMetering = SamsungMeteringRequest()
-        publishSamsungMeteringState()
+        tapFocus = TapFocusRequest()
+        publishTapFocusState()
         tapMeteringPoint = null
         lastMeteringResult = null
         publishCenterMeteringState("测光：等待相机")
@@ -1113,8 +1117,8 @@ class Camera2Controller(private val context: Context) {
         ) {
             val generation = cameraGeneration
             if (session !== captureSession) return
-            samsungMetering.onResult(request, result)
-            publishSamsungMeteringState()
+            tapFocus.onResult(request, result)
+            publishTapFocusState()
             val requestedRegions = request.get(CaptureRequest.CONTROL_AE_REGIONS)
             val meteringResult = "request=${requestedRegions?.contentToString()} result=${result.get(CaptureResult.CONTROL_AE_REGIONS)?.contentToString()}"
             if (meteringResult != lastMeteringResult) {

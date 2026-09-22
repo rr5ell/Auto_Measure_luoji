@@ -5,6 +5,21 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [tap-metering-focus-2026-09-22] - 2026-09-22
+
+作者：Codex Agent。
+
+### 变更
+- 按用户要求删除三星模式3/4实验请求、选择界面及两项专用测试；保留 Git 和文档历史，不回退其他功能。
+- “点击区域测光”升级为“点击测光与对焦”，新增独立 TapFocusRequest，复用 AE 传感器区域设置 AF，单次 CANCEL/START，重复请求为 IDLE。
+- 主面板新增真实 AF 状态；5秒后、关闭或目标清除恢复原 AF 模式及区域，旧会话/旧点击回调和定时器不影响新点击；相同坐标再次点击也触发对焦。
+- 不支持 AUTO/区域 AF 的镜头仅测光；AF 失败尽力恢复，不撤销已提交 AE，不触发 HDR 重建；不改 EV/光圈、不启用 EIS。
+
+### 验证
+- 107 项 JVM 单测、Debug 应用/仪器测试 APK、laserCompare Kotlin 编译通过，最终 APK 已安装到三星手机。
+- 底层仪器测试通过：单次 CANCEL/START、重复 IDLE、同点重触发、旧超时忽略、暂停/5秒恢复、AF 失败回退及恢复失败后关闭重试，AE/EV/EIS 请求保持不变。
+- 普通/GL 点击界面回归通过，实际日志记录搜索、已合焦及5秒恢复自动；同点重触发、重建、关闭恢复通过。早期 UI 测试受锁屏阻挡，解锁后通过；HDR 手动回归遇到锁屏/防误触保护，本轮未完成，不将共用请求路径视为已验证 HDR 实际合焦。
+
 ## [samsung-metering-mode3-2026-09-22] - 2026-09-22
 
 作者：Codex Agent。
