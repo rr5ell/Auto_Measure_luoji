@@ -2,6 +2,8 @@ package com.example.auto_measure_luoji.feature.camera.domain.centermetering
 
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.ceil
+import kotlin.math.floor
 
 object CenterMeteringRegion {
     const val PREFERENCE_KEY = "center_exposure_metering_enabled"
@@ -18,16 +20,30 @@ object CenterMeteringRegion {
      * CONTROL_ZOOM_RATIO 的 AE 坐标本来就是变焦后的视场，不能再除以 zoom；
      * SCALER_CROP_REGION 路径由调用者传入缩小后的 crop，避免高倍率时测光区域跑到画外。
      */
-    fun calculate(crop: Bounds, previewWidth: Int, previewHeight: Int, displayScale: Float = 1f): Bounds? {
+    fun calculate(crop: Bounds, previewWidth: Int, previewHeight: Int, displayScale: Float = 1f,
+                  centerX: Float = 0.5f, centerY: Float = 0.5f): Bounds? {
         val width = crop.right.toDouble() - crop.left
         val height = crop.bottom.toDouble() - crop.top
-        if (width <= 0 || height <= 0 || previewWidth <= 0 || previewHeight <= 0) return null
+        if (width <= 0 || height <= 0 || previewWidth <= 0 || previewHeight <= 0 ||
+            !centerX.isFinite() || !centerY.isFinite() || centerX !in 0f..1f || centerY !in 0f..1f) return null
         val ratio = previewWidth.toDouble() / previewHeight
         val scale = displayScale.takeIf { it.isFinite() && it >= 1f } ?: 1f
         val regionW = (min(width, height * ratio) * FRACTION / scale).roundToInt().coerceIn(1, width.toInt())
         val regionH = (min(height, width / ratio) * FRACTION / scale).roundToInt().coerceIn(1, height.toInt())
-        val left = (crop.left + (width - regionW) / 2).roundToInt().coerceIn(crop.left, crop.right - regionW)
-        val top = (crop.top + (height - regionH) / 2).roundToInt().coerceIn(crop.top, crop.bottom - regionH)
+        // 点击坐标已撤销显示矩阵/纹理旋转，属于原始预览的 [0,1] 坐标域。
+        // 有效预览范围关于 crop 中心裁切：origin=(cropSize-visibleSize)/2。
+        // 传感器目标位置=原点+归一化位置*visibleSize，再减区域半宽得到矩形左上角。
+        // 靠边时整体平移区域保证合法，不改变 crop 或重复除以相机 zoomRatio。
+        val visibleW = min(width, height * ratio)
+        val visibleH = min(height, width / ratio)
+        val minLeft = ceil(crop.left + (width - visibleW) / 2).toInt().coerceIn(crop.left, crop.right - regionW)
+        val maxLeft = floor(crop.left + (width + visibleW) / 2 - regionW).toInt().coerceIn(minLeft, crop.right - regionW)
+        val minTop = ceil(crop.top + (height - visibleH) / 2).toInt().coerceIn(crop.top, crop.bottom - regionH)
+        val maxTop = floor(crop.top + (height + visibleH) / 2 - regionH).toInt().coerceIn(minTop, crop.bottom - regionH)
+        val left = (crop.left + (width - visibleW) / 2 + centerX * visibleW - regionW / 2.0)
+            .roundToInt().coerceIn(minLeft, maxLeft)
+        val top = (crop.top + (height - visibleH) / 2 + centerY * visibleH - regionH / 2.0)
+            .roundToInt().coerceIn(minTop, maxTop)
         return Bounds(left, top, left + regionW, top + regionH)
     }
 }

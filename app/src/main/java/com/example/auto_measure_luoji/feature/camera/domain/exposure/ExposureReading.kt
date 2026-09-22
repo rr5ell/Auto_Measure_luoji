@@ -9,6 +9,8 @@ data class ExposureReading(
     val cameraId: String,
     val physical: Boolean,
     val sessionGeneration: Long = 0L,
+    val iso: Int? = null,
+    val aperture: Float? = null,
 ) {
     fun isFresh(nowNs: Long): Boolean = nowNs >= receivedAtNs && nowNs - receivedAtNs <= 2_000_000_000L
 
@@ -21,5 +23,16 @@ data class ExposureReading(
     }
 
     val logText: String
-        get() = "SENSOR_EXPOSURE_TIME=$exposureTimeNs ns camera=$cameraId output=${if (physical) "physical" else "logical"} generation=$sessionGeneration"
+        get() = "SENSOR_EXPOSURE_TIME=$exposureTimeNs ns SENSOR_SENSITIVITY=$iso LENS_APERTURE=$aperture camera=$cameraId output=${if (physical) "physical" else "logical"} generation=$sessionGeneration"
+
+    fun cameraParametersText(nowNs: Long): String {
+        if (!isFresh(nowNs)) return "ISO：等待新帧\n光圈：等待新帧"
+        val isoText = when { iso == null -> "未提供"; iso <= 0 -> "读数异常"; else -> iso.toString() }
+        val apertureText = when {
+            aperture == null -> "未提供"
+            !aperture.isFinite() || aperture <= 0f -> "读数异常"
+            else -> String.format(Locale.ROOT, "f/%.1f", aperture)
+        }
+        return "ISO：$isoText\n光圈：$apertureText"
+    }
 }

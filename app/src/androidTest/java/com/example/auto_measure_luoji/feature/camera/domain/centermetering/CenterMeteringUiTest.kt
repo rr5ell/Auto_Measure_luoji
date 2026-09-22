@@ -28,7 +28,8 @@ class CenterMeteringUiTest {
             instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.BLUETOOTH_CONNECT)
         }
         val prefs = context.getSharedPreferences("camera_screen_settings", Context.MODE_PRIVATE)
-        val keys = listOf(CenterMeteringRegion.PREFERENCE_KEY, "gyro_preview_gl_render_enabled", "gyro_preview_stabilization_enabled")
+        val keys = listOf(CenterMeteringRegion.PREFERENCE_KEY, "tap_exposure_metering_enabled",
+            "gyro_preview_gl_render_enabled", "gyro_preview_stabilization_enabled")
         val old = keys.associateWith { if (prefs.contains(it)) prefs.getBoolean(it, false) else null }
         val oldAuto = AutoHdrPreferences.loadEnabled(prefs)
         AutoHdrPreferences.saveEnabled(prefs, false)

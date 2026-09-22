@@ -92,6 +92,9 @@ import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TextureP
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightExposurePolicy
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
+import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
+import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.TapMeteringOverlay
+import com.example.auto_measure_luoji.feature.camera.ui.tapmetering.meteringPoint
 import com.example.auto_measure_luoji.feature.camera.ui.hdr.HlgPreviewGl
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -767,6 +770,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var centerMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(CenterMeteringRegion.PREFERENCE_KEY, false)) }
     var centerMeteringSupported by remember { mutableStateOf<Boolean?>(null) }
     var centerMeteringText by remember { mutableStateOf("测光：等待相机") }
+    var tapMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(TapMeteringPoint.PREFERENCE_KEY, false)) }
+    var tapMeteringPoint by remember { mutableStateOf<TapMeteringPoint?>(null) }
+    var tapMeteringEpoch by remember { mutableStateOf(0) }
+    var cameraParametersText by remember { mutableStateOf("ISO：--\n光圈：--") }
     var ambientLightText by remember { mutableStateOf(AmbientLightReading(AmbientLightReading.Status.WAITING).panelText) }
     var hdrPreviewEnabled by remember { mutableStateOf(false) }
     var hdrYoloAvailable by remember { mutableStateOf(false) }
@@ -2566,7 +2573,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     fun requestHdrPreview(enabled: Boolean, automatic: Boolean = false) {
         if (hdrPreviewChecking || hdrTransitionPending != null || hdrSwitchBlocked()) return
         if (automatic != autoHdrEnabled || enabled == hdrPreviewEnabled) return
-        if (automatic && (autoHdrFault != null || previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE)) return
+        if (automatic && (autoHdrFault != null || previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled)) return
         if (!isCameraReady && (automatic || enabled)) return
         // 自动开启和关闭共用入口校验，手动操作不走四条确认。
         if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(enabled, hdrPreviewEnabled,
@@ -2592,7 +2599,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
                 if (selectedLens != lens || !isCameraReady || hdrSwitchBlocked() ||
                     automatic != autoHdrEnabled || revision != autoHdrRevision) return@launch
-                if (automatic && previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE) return@launch
+                if (automatic && (previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled)) return@launch
                 if (automatic && !autoHdrPolicy.canApplyConfirmedDecision(true, hdrPreviewEnabled,
                         cameraController.latestExposureReading, autoHdrSettings,
                         android.os.SystemClock.elapsedRealtimeNanos())) return@launch
@@ -2615,9 +2622,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             // 显示与判断使用同一条 500 ms 采样，不能在两次显示之间暗中累计额外数据。
             val reading = if (isCameraReady) cameraController.latestExposureReading else null
             exposureTimeText = reading?.panelText(nowNs) ?: "曝光时间：--"
+            cameraParametersText = reading?.cameraParametersText(nowNs) ?: "ISO：--\n光圈：--"
             if (reading != null) Log.i("CameraExposure", "${reading.logText} $exposureTimeText")
             val decisionBlocked = !isCameraReady || hdrTransitionPending != null || hdrSwitchBlocked() || autoHdrFault != null ||
-                previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
+                previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE || tapMeteringEnabled
             // 能力检查保留已确认批次；业务暂停或自动关闭仍会作废批次。
             if (!hdrPreviewChecking || decisionBlocked || !autoHdrEnabled) autoHdrPolicy.decide(
                 enabled = autoHdrEnabled,
@@ -2641,6 +2649,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             val automaticText = when {
                 !autoHdrEnabled -> "手动"
                 autoHdrFault != null -> "自动，故障暂停"
+                tapMeteringEnabled -> "自动，点击测光暂停判断"
                 previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE -> "自动，逆光平衡暂停判断"
                 cooldown > 0 -> "自动，停判 ${cooldown}s"
                 hdrSwitchBlocked() -> "自动，流程中暂停"
@@ -4604,12 +4613,20 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    LaunchedEffect(isCameraReady, selectedLens, currentEquivRatio, uiZoomOnlyEnabled, gyroPreviewGlRenderEnabled,
+        hdrPreviewEnabled, showCalPanel, showDualCalPanel, isDualCalibMode, cameraScreenResumed, tapMeteringEnabled,
+        texturePreviewSize) {
+        tapMeteringPoint = null
+        tapMeteringEpoch++
+    }
+
     LaunchedEffect(isCameraReady, centerMeteringEnabled, showCalPanel, showDualCalPanel, isDualCalibMode,
-        uiZoomOnlyEnabled, currentEquivRatio, selectedLens) {
+        uiZoomOnlyEnabled, currentEquivRatio, selectedLens, tapMeteringEnabled, tapMeteringPoint,
+        cameraScreenResumed, tapMeteringEpoch) {
         cameraController.setCenterMeteringEnabled(centerMeteringEnabled,
-            suspended = showCalPanel || showDualCalPanel || isDualCalibMode,
-            displayScale = uiZoomDisplayScale())
-            .onFailure { statusText = "中心测光设置失败：${it.message}" }
+            suspended = showCalPanel || showDualCalPanel || isDualCalibMode || !cameraScreenResumed,
+            displayScale = uiZoomDisplayScale(), tapEnabled = tapMeteringEnabled, tapPoint = tapMeteringPoint)
+            .onFailure { statusText = "测光设置失败：${it.message}" }
     }
 
     DisposableEffect(cameraController) {
@@ -4617,7 +4634,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     }
 
     LaunchedEffect(isCameraReady, selectedLens, showCalPanel, showDualCalPanel, isDualCalibMode,
-        imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled) {
+        imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled,
+        tapMeteringEnabled) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
         val balance = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
@@ -4634,6 +4652,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
         if (!balance) return@LaunchedEffect
         if (initial.isFailure) { backlightBalanceText = "逆光平衡：EV 设置失败"; return@LaunchedEffect }
+        if (tapMeteringEnabled) { backlightBalanceText = "逆光平衡：点击测光暂停自动 EV"; return@LaunchedEffect }
         if (calibrationActive || showImageAdjustmentDialog || !cameraScreenResumed) {
             backlightBalanceText = "逆光平衡：曝光调节暂停"
             return@LaunchedEffect
@@ -5186,6 +5205,33 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 )
             }
             CrosshairOverlay(modifier = Modifier.fillMaxSize())
+            if (tapMeteringEnabled && isCameraReady && cameraScreenResumed && centerMeteringSupported == true &&
+                !hdrSwitchBlocked() && !hdrPreviewChecking && hdrTransitionPending == null && !showImageAdjustmentDialog &&
+                !showCalPanel && !showDualCalPanel && !isDualCalibMode) {
+                TapMeteringOverlay(epoch = tapMeteringEpoch, modifier = Modifier.fillMaxSize(), onTap = { point ->
+                    val epoch = tapMeteringEpoch
+                    val reading = cameraController.latestExposureReading
+                    val generation = reading?.sessionGeneration
+                    val gl = glPreviewViewRef
+                    val texture = textureViewRef
+                    val mapped = if (gyroPreviewGlRenderEnabled) gl?.meteringPoint(point.x, point.y)
+                        else texture?.meteringPoint(point.x, point.y)
+                    val current = cameraController.latestExposureReading
+                    if (epoch != tapMeteringEpoch || !tapMeteringEnabled || !isCameraReady || !cameraScreenResumed ||
+                        hdrSwitchBlocked() || hdrPreviewChecking || hdrTransitionPending != null ||
+                        generation == null || current?.sessionGeneration != generation ||
+                        !current.isFresh(android.os.SystemClock.elapsedRealtimeNanos()) ||
+                        gl !== glPreviewViewRef || texture !== textureViewRef) {
+                        false
+                    } else if (mapped == null) {
+                        statusText = "点击测光：画面未就绪或位置在有效图像外"
+                        false
+                    } else {
+                        tapMeteringPoint = TapMeteringPoint(mapped.x, mapped.y)
+                        true
+                    }
+                })
+            }
             // 检测框跟随 wrapper 变换（与预览内容一致）
             DetectionOverlay(
                 boxes = detectionBoxes,
@@ -5279,7 +5325,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             shadowEnhancementEnabled ||
-                            centerMeteringEnabled ||
+                            centerMeteringEnabled || tapMeteringEnabled ||
                             previewToneMode != PreviewToneMode.OFF ||
                             imageAdjustments != ImageAdjustments() ||
                             autoHdrEnabled || hdrPreviewEnabled ||
@@ -5298,6 +5344,24 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         val shadowSupported = TexturePreviewAdjustments.supported || gyroPreviewGlRenderEnabled
                         val shadowControlEnabled = (shadowSupported || shadowEnhancementEnabled) && isCameraReady &&
                             !showCalPanel && !showDualCalPanel && !isDualCalibMode
+                        DropdownMenuItem(
+                            text = { Text("点击区域测光" + if (centerMeteringSupported == false) "（不可用）" else "") },
+                            trailingIcon = { Switch(checked = tapMeteringEnabled, onCheckedChange = null) },
+                            colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
+                            modifier = Modifier.semantics {
+                                toggleableState = androidx.compose.ui.state.ToggleableState(tapMeteringEnabled)
+                                role = androidx.compose.ui.semantics.Role.Switch
+                            },
+                            enabled = tapMeteringEnabled || (isCameraReady && centerMeteringSupported == true &&
+                                !hdrSwitchBlocked() && !showCalPanel && !showDualCalPanel && !isDualCalibMode),
+                            onClick = {
+                                tapMeteringEnabled = !tapMeteringEnabled
+                                tapMeteringPoint = null
+                                cameraPrefs.edit().putBoolean(TapMeteringPoint.PREFERENCE_KEY, tapMeteringEnabled).apply()
+                                toolsMenuExpanded = false
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(if (shadowSupported) "逆光暗部增强" else "逆光暗部增强（需 GL）") },
                             trailingIcon = { Switch(checked = shadowEnhancementEnabled, onCheckedChange = null, enabled = shadowControlEnabled) },
@@ -5344,7 +5408,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         DropdownMenuItem(
                             text = { Text("中心区域测光" + if (centerMeteringSupported == false) "（不可用）" else "") },
                             trailingIcon = { Switch(checked = centerMeteringEnabled, onCheckedChange = null,
-                                enabled = isCameraReady && (centerMeteringSupported == true || centerMeteringEnabled) &&
+                                enabled = !tapMeteringEnabled && isCameraReady && (centerMeteringSupported == true || centerMeteringEnabled) &&
                                     !showCalPanel && !showDualCalPanel && !isDualCalibMode) },
                             colors = androidx.compose.material3.MenuDefaults.itemColors(
                                 textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
@@ -5352,7 +5416,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 toggleableState = androidx.compose.ui.state.ToggleableState(centerMeteringEnabled)
                                 role = androidx.compose.ui.semantics.Role.Switch
                             },
-                            enabled = isCameraReady && (centerMeteringSupported == true || centerMeteringEnabled) &&
+                            enabled = !tapMeteringEnabled && isCameraReady && (centerMeteringSupported == true || centerMeteringEnabled) &&
                                 !showCalPanel && !showDualCalPanel && !isDualCalibMode,
                             onClick = {
                                 centerMeteringEnabled = !centerMeteringEnabled
@@ -5605,6 +5669,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     fpsText = previewFpsText,
                     ambientLightText = ambientLightText,
                     exposureTimeText = exposureTimeText,
+                    cameraParametersText = cameraParametersText,
                     hdrStatusText = hdrStatusText,
                     centerMeteringText = centerMeteringText,
                     backlightBalanceText = backlightBalanceText,
@@ -7456,6 +7521,7 @@ private fun StatusHud(
     exposureTimeText: String,
     hdrStatusText: String,
     centerMeteringText: String,
+    cameraParametersText: String,
     backlightBalanceText: String,
     statusText: String,
     gyroText: String,
@@ -7497,6 +7563,10 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "曝光时间" },
+        )
+        Text(
+            text = cameraParametersText, color = Color(0xFF90CAF9), fontSize = 10.sp, lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "ISO 和光圈" },
         )
         Text(
             text = hdrStatusText,

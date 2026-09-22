@@ -59,6 +59,33 @@ class GlDetectionCoordinates(
     private val viewHeight: Int,
     private val ticket: GlDetectionTicket,
 ) {
+    companion object {
+        /**
+         * point() 的反向链路，供点击测光复用，与检测模型无关。
+         * 屏幕像素 -> NDC=(2x/W-1,1-2y/H) -> D^-1 -> uv=(ndc+1)/2 -> q=S*uv。
+         * D、S 均为列主序二维仿射矩阵；先扣平移，再用伴随矩阵除行列式求逆。
+         * q 是未旋转相机缓冲区的归一化坐标，S 已含方向与裁切，不可再次旋转。
+         * 显示变换露出的黑边不对应相机像素；uv/q 越界直接拒绝，不将其钳到错误目标。
+         */
+        fun screenToBuffer(s: FloatArray, d: FloatArray, width: Int, height: Int,
+                           x: Float, y: Float): GlDetectionPoint? {
+            if (width <= 0 || height <= 0 || !x.isFinite() || !y.isFinite() ||
+                x !in 0f..width.toFloat() || y !in 0f..height.toFloat() || s.size != 16 || d.size != 16 ||
+                s.any { !it.isFinite() } || d.any { !it.isFinite() }) return null
+            if (abs(d[3]) > 1e-6f || abs(d[7]) > 1e-6f || abs(d[15] - 1f) > 1e-6f ||
+                abs(s[3]) > 1e-6f || abs(s[7]) > 1e-6f || abs(s[15] - 1f) > 1e-6f) return null
+            val det = d[0] * d[5] - d[4] * d[1]
+            if (abs(det) < 1e-8f || abs(s[0] * s[5] - s[4] * s[1]) < 1e-8f) return null
+            val a = 2f * x / width - 1f - d[12]
+            val b = 1f - 2f * y / height - d[13]
+            val u = ((d[5] * a - d[4] * b) / det + 1f) / 2f
+            val v = ((-d[1] * a + d[0] * b) / det + 1f) / 2f
+            if (u !in 0f..1f || v !in 0f..1f) return null
+            val qx = s[0] * u + s[4] * v + s[12]
+            val qy = s[1] * u + s[5] * v + s[13]
+            return if (qx in 0f..1f && qy in 0f..1f) GlDetectionPoint(qx, qy) else null
+        }
+    }
     private val s = sampling.copyOf()
     private val d = display.copyOf()
     private val determinant: Float

@@ -10,9 +10,10 @@
 | 项目名称 | Auto_Measure_luoji |
 | 项目根目录 | `E:\StudioProjects\Auto_Measure_luoji` |
 | 应用类型 | Android Kotlin / Jetpack Compose 自动测量 App |
-| 当前主要分支 | `feature/regional-exposure-metering` |
+| 当前主要分支 | `feature/tap-exposure-metering` |
 
 ## 可复用能力
+- [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：普通/GL 已显示画面反向坐标、点击 AE、自动控制隔离与关闭恢复。
 - [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：五区截尾亮度统计、对数域综合测光、受限正负 EV 闭环、中心保护、自动 HDR 隔离及局部预览映射。
 - [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。
 - [android-preview-glare-suppression](entries/android-preview-glare-suppression.md)：显示端受限白雾扣除、平坦区与高光保护、普通/GL 共享 Shader 和互斥设置。
@@ -71,4 +72,4 @@
 
 ## 最后更新
 
-2026-09-22，Codex Agent。逆光平衡增加五区截尾统计、对数域综合测光、约 -2/3..+1 EV 受限反馈及主面板分区读数；102 项单元测试和三项模拟器专项回归通过。P99 防振荡及中心保护保留；无真机 HDR/逆光效果结论，不启用系统 EIS。
+2026-09-22，Codex Agent。在既有五区测光基础上新增点击区域 AE、显示坐标反算和实时 ISO/光圈显示；107 项单测、7 项模拟器回归通过，三星真机安装后断开，真机/HDR 效果未验证。不启用 EIS。

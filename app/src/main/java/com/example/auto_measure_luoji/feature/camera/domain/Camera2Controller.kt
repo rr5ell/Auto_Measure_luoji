@@ -23,6 +23,7 @@ import android.view.Surface
 import com.example.auto_measure_luoji.feature.camera.data.LensCandidate
 import com.example.auto_measure_luoji.feature.camera.domain.exposure.ExposureReading
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRequest
+import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightStatistics
 import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
 import java.util.Locale
@@ -105,6 +106,8 @@ class Camera2Controller(private val context: Context) {
     private var centerMeteringRequested = false
     private var centerMeteringSuspended = false
     private var centerMeteringDisplayScale = 1f
+    private var tapMeteringRequested = false
+    private var tapMeteringPoint: TapMeteringPoint? = null
     private var lastMeteringResult: String? = null
     @Volatile var highlightAnalysisEnabled = false
     @Volatile private var highlightSnapshot: Pair<Long, HighlightStatistics>? = null
@@ -619,10 +622,13 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    fun setCenterMeteringEnabled(enabled: Boolean, suspended: Boolean = false, displayScale: Float = 1f): Result<Unit> {
+    fun setCenterMeteringEnabled(enabled: Boolean, suspended: Boolean = false, displayScale: Float = 1f,
+                                 tapEnabled: Boolean = false, tapPoint: TapMeteringPoint? = null): Result<Unit> {
         centerMeteringRequested = enabled
         centerMeteringSuspended = suspended
         centerMeteringDisplayScale = displayScale
+        tapMeteringRequested = tapEnabled
+        tapMeteringPoint = tapPoint?.takeIf { tapEnabled && it.valid }
         val builder = previewRequestBuilder
         val session = captureSession
         if (builder == null || session == null) {
@@ -647,10 +653,13 @@ class Camera2Controller(private val context: Context) {
     private fun submitMeteredPreview(session: CameraCaptureSession, builder: CaptureRequest.Builder): Boolean {
         // 关闭/重建时旧回调可能晚到；丢弃旧提交，不把它误报成新会话的 HDR 故障。
         if (session !== captureSession || builder !== previewRequestBuilder) return false
-        val enabled = centerMeteringRequested && !centerMeteringSuspended && !currentStrictPhysical
+        val requested = tapMeteringRequested || centerMeteringRequested
+        val enabled = (if (tapMeteringRequested) tapMeteringPoint != null else centerMeteringRequested) &&
+            !centerMeteringSuspended && !currentStrictPhysical
         var region: android.graphics.Rect? = null
         try {
-            region = centerMetering.apply(builder, previewSize, enabled, centerMeteringDisplayScale)
+            region = centerMetering.apply(builder, previewSize, enabled, centerMeteringDisplayScale,
+                if (tapMeteringRequested) tapMeteringPoint else null)
             session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
         } catch (error: Exception) {
             if (session !== captureSession || builder !== previewRequestBuilder) return false
@@ -661,8 +670,13 @@ class Camera2Controller(private val context: Context) {
             region = null
         }
         val state = when {
-            !centerMeteringRequested -> "测光：默认"
+            !requested -> "测光：默认"
+            (centerMeteringSuspended || currentStrictPhysical) && tapMeteringRequested -> "测光：点击测光暂停"
             centerMeteringSuspended || currentStrictPhysical -> "测光：默认（校准暂停中心测光）"
+            tapMeteringRequested && centerMetering.rejected -> "测光：默认（点击区域被设备拒绝）"
+            tapMeteringRequested && centerMetering.supported != true -> "测光：默认（镜头不支持点击区域）"
+            tapMeteringRequested && region != null -> "测光：点击区域（已请求）"
+            tapMeteringRequested -> "测光：等待点击"
             centerMetering.rejected -> "测光：默认（中心区域被设备拒绝）"
             centerMetering.supported != true -> "测光：默认（镜头不支持中心区域）"
             region != null -> "测光：中心 30%（已请求）"
@@ -1029,6 +1043,7 @@ class Camera2Controller(private val context: Context) {
         cameraGeneration++
         exposureSnapshot = null
         centerMetering = CenterMeteringRequest()
+        tapMeteringPoint = null
         lastMeteringResult = null
         publishCenterMeteringState("测光：等待相机")
         shadingCharacteristicsKnown = false
@@ -1072,6 +1087,8 @@ class Camera2Controller(private val context: Context) {
                 cameraId = physicalId ?: lens?.cameraId ?: "unknown",
                 physical = physicalId != null,
                 sessionGeneration = generation,
+                iso = exposureResult?.get(CaptureResult.SENSOR_SENSITIVITY),
+                aperture = exposureResult?.get(CaptureResult.LENS_APERTURE),
             )
             publishFrameTiming(result)
             publishActivePhysicalCameraId(result)

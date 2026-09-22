@@ -65,6 +65,15 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
     private val detectionIds = AtomicLong()
     private val captureBusy = AtomicBoolean(false)
 
+    /** 在 GL 线程读取最后已显示帧的矩阵，不能用尚未上屏的下一帧补偿。 */
+    suspend fun meteringPoint(x: Float, y: Float): GlDetectionPoint? {
+        val result = CompletableDeferred<GlDetectionPoint?>()
+        return try {
+            queueEvent { result.complete(previewRenderer.meteringPoint(x, y)) }
+            withTimeoutOrNull(300L) { result.await() }
+        } finally { result.cancel() }
+    }
+
     /** 只读下一张完成渲染的画面，不含检测框；超时/取消不遗留 Bitmap 或占用图像流。 */
     suspend fun capturePreviewBitmap(width: Int = 1080, height: Int = 1920,
         minimumTimestampNs: Long = 0L): Bitmap {
@@ -340,6 +349,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         private val frameMetadata = FrameTransformQueue<FrameMetadata>()
         private var displayedSampling: FloatArray? = null
         private var displayedTransform: PreviewTransform? = null
+        private var displayedAtNs = 0L
         private val asyncDetection = GlAsyncDetectionState()
         private var detectionEnabled = false
         private var detectionWork: DetectionWork? = null
@@ -450,6 +460,15 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 Log.w(TAG, "gl-yuv: invalid asynchronous coordinates", error)
                 null
             }
+        }
+        fun meteringPoint(x: Float, y: Float): GlDetectionPoint? {
+            if (!hasOutput || renderedTimestampNs <= 0L ||
+                SystemClock.elapsedRealtimeNanos() - displayedAtNs > 1_500_000_000L) return null
+            val sampling = displayedSampling ?: return null
+            val frame = displayedTransform ?: return null
+            val matrix = FloatArray(16)
+            buildDisplayMatrix(frame, matrix)
+            return GlDetectionCoordinates.screenToBuffer(sampling, matrix, viewportWidth, viewportHeight, x, y)
         }
         private val capturedFrames = java.util.ArrayDeque<CapturedFrame>()
         private val spareTargets = java.util.ArrayDeque<RenderTarget>()
@@ -620,6 +639,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
                 renderedTimestampNs = captured.timestampNs
                 displayedSampling = captured.sampling
                 displayedTransform = currentTransform
+                displayedAtNs = SystemClock.elapsedRealtimeNanos()
                 hasOutput = true
                 drawSequence++
                 if (diagnosticsEnabled) {

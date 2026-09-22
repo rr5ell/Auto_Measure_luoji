@@ -9,7 +9,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\centermetering\CenterMeteringRequest.kt
 - 接入路径：同项目 feature/camera/domain/Camera2Controller.kt 与 feature/camera/ui/CameraScreen.kt。
 - 相关文档：E:\StudioProjects\Auto_Measure_luoji\README.md
-- 最后更新：2026-09-21
+- 最后更新：2026-09-22
 - 作者：Codex Agent
 
 ## 适用场景
@@ -18,6 +18,7 @@
 ## 禁止场景
 - 禁止启用 EIS；如需稳定，仅允许 OIS 或算法层物理补偿。
 - 不强制更改 AF、AE 模式、EV 或 AE_LOCK；校准和严格物理会话暂停中心测光。
+- 上述约束针对中心模式；同一请求模块的点击扩展仅在点击期间使用 AE ON/解锁，并在退出后恢复，详见 android-camera2-tap-metering。
 - 不保证厂商完全忽略其他区域，也不能宣称解决所有逆光或光学眩光。
 
 ## 核心参数
@@ -30,6 +31,7 @@
 
 ## 复用方式
 - CenterMeteringRegion.calculate 接受相机坐标系 crop 和未旋转的预览尺寸；先做宽高比裁切，再取中心 30%，纯 UI 放大再除以显示倍率。
+- 可选 centerX/centerY 为原始缓冲区归一化坐标，默认 0.5 保持中心语义；点击扩展复用此接口，靠边矩形限制在可见预览范围内，不覆盖传感器画外区域。
 - CONTROL_ZOOM_RATIO 已使用变焦后坐标域，不再除 zoom；SCALER_CROP_REGION 必须传缩小后的实际请求 crop。
 - CenterMeteringRequest 按 CONTROL_MAX_REGIONS_AE、请求键和阵列能力判定支持，按畸变校正模式选择坐标边界。
 - 每次创建请求记忆 TEMPLATE_PREVIEW 原区域；关闭、校准或拒绝时恢复，不遗留旧手动区域。

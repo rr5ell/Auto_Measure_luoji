@@ -32,7 +32,8 @@ class CameraToolbarInstrumentedTest {
         val prefs = context.getSharedPreferences("camera_screen_settings", Context.MODE_PRIVATE)
         val originalAuto = AutoHdrPreferences.loadEnabled(prefs)
         val originalTone = prefs.getString(PreviewToneMode.PREFERENCE_KEY, null)
-        val keys = listOf(ShadowEnhancement.PREFERENCE_KEY, "gyro_preview_gl_render_enabled", "gyro_preview_stabilization_enabled")
+        val keys = listOf(ShadowEnhancement.PREFERENCE_KEY, "tap_exposure_metering_enabled",
+            "gyro_preview_gl_render_enabled", "gyro_preview_stabilization_enabled")
         val original = keys.associateWith { if (prefs.contains(it)) prefs.getBoolean(it, false) else null }
         AutoHdrPreferences.saveEnabled(prefs, false)
         prefs.edit().putString(PreviewToneMode.PREFERENCE_KEY, PreviewToneMode.OFF.name)

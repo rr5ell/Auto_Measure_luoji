@@ -8,7 +8,7 @@
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\exposure\ExposureReading.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\Camera2Controller.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\CameraScreen.kt
-- 最后更新：2026-09-20
+- 最后更新：2026-09-22
 - 作者：Codex Agent
 
 ## 适用场景
@@ -23,6 +23,8 @@
 | 参数名 | 类型 | 默认值 | 说明 | 边界条件 |
 |---|---|---|---|---|
 | SENSOR_EXPOSURE_TIME | Long? | 设备返回 | 原始单位 ns | null 为未提供，非正数异常 |
+| SENSOR_SENSITIVITY | Int? | 设备返回 | ISO | null 未提供，非正数异常 |
+| LENS_APERTURE | Float? | 设备返回 | f/光圈值 | null 未提供，非有限/非正数异常，不用静态列表冒充 |
 | 显示精度 | Int | 3 位小数 | ms = ns / 1,000,000.0 | 使用浮点除法，不丢失亚毫秒部分 |
 | 刷新间隔 | Long | 500 ms | 只采样最新快照 | 不阻塞相机回调 |
 | 过期时间 | Long | 2,000,000,000 ns | 接收时刻使用 elapsedRealtimeNanos | 过期或时间倒退不显示旧数值 |
@@ -30,6 +32,7 @@
 ## 复用方式
 - Camera2Controller.latestExposureReading 只提供当前会话代次快照；closeCamera 清空。
 - 使用 ExposureReading.panelText(nowNs) 统一格式和时效检查；日志 tag 为 CameraExposure。
+- ISO 与光圈用 cameraParametersText(nowNs)，与曝光时间共用来源、时间和会话代次；保持 panelText 原有格式以兼容自动 HDR 和现有测试。
 - CameraScreen 中显示与自动 HDR 判断共用同一 500 ms 采样循环，不得另起更快的计数循环；数据格式化不改变原始曝光，四条确认使用原始纳秒值。
 - ExposureReading.isFresh(nowNs) 也供 `android-camera2-auto-hdr-exposure` 复用，统一 2 秒时效；本条目的读取与显示保持只读，HDR 决策由独立状态机负责。
 - ExposureReading.sessionGeneration 由控制器写入真实会话代次，配合相机 ID、物理来源和接收时间，防止自动 HDR 四条采样混入旧会话；默认值 0 仅供独立构造和测试。
