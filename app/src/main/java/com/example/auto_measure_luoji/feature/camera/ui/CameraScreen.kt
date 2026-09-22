@@ -770,6 +770,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var centerMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(CenterMeteringRegion.PREFERENCE_KEY, false)) }
     var centerMeteringSupported by remember { mutableStateOf<Boolean?>(null) }
     var centerMeteringText by remember { mutableStateOf("测光：等待相机") }
+    var samsungMeteringEnabled by remember { mutableStateOf(false) }
+    var samsungMeteringAvailable by remember { mutableStateOf(false) }
+    var samsungMeteringText by remember { mutableStateOf("三星测光：等待相机") }
     var tapMeteringEnabled by remember { mutableStateOf(cameraPrefs.getBoolean(TapMeteringPoint.PREFERENCE_KEY, false)) }
     var tapMeteringPoint by remember { mutableStateOf<TapMeteringPoint?>(null) }
     var tapMeteringEpoch by remember { mutableStateOf(0) }
@@ -4141,6 +4144,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
+        cameraController.onSamsungMeteringStateChanged = { message ->
+            mainHandler.post {
+                if (cameraController.samsungMeteringStatus == message) {
+                    samsungMeteringText = message
+                    samsungMeteringAvailable = cameraController.samsungMeteringAvailable
+                }
+            }
+        }
         cameraController.onFrameTimingChanged = { timing ->
             mainHandler.post {
                 if (!canApplyGyroPreviewStabilization() || !gyroPreviewFrameSyncEnabled) return@post
@@ -4627,6 +4638,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             suspended = showCalPanel || showDualCalPanel || isDualCalibMode || !cameraScreenResumed,
             displayScale = uiZoomDisplayScale(), tapEnabled = tapMeteringEnabled, tapPoint = tapMeteringPoint)
             .onFailure { statusText = "测光设置失败：${it.message}" }
+    }
+
+    LaunchedEffect(isCameraReady, samsungMeteringEnabled, showCalPanel, showDualCalPanel,
+        isDualCalibMode, cameraScreenResumed, selectedLens) {
+        cameraController.setSamsungMeteringEnabled(samsungMeteringEnabled,
+            suspended = showCalPanel || showDualCalPanel || isDualCalibMode || !cameraScreenResumed)
+            .onFailure { statusText = "三星测光设置失败：${it.message}" }
     }
 
     DisposableEffect(cameraController) {
@@ -5325,7 +5343,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             gyroPreviewSettingsChanged() ||
                             uiZoomOnlyEnabled ||
                             shadowEnhancementEnabled ||
-                            centerMeteringEnabled || tapMeteringEnabled ||
+                            centerMeteringEnabled || tapMeteringEnabled || samsungMeteringEnabled ||
                             previewToneMode != PreviewToneMode.OFF ||
                             imageAdjustments != ImageAdjustments() ||
                             autoHdrEnabled || hdrPreviewEnabled ||
@@ -5359,6 +5377,22 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 tapMeteringEnabled = !tapMeteringEnabled
                                 tapMeteringPoint = null
                                 cameraPrefs.edit().putBoolean(TapMeteringPoint.PREFERENCE_KEY, tapMeteringEnabled).apply()
+                                toolsMenuExpanded = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("三星测光模式4（实验）") },
+                            trailingIcon = { Switch(checked = samsungMeteringEnabled, onCheckedChange = null) },
+                            colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                textColor = Color.White, disabledTextColor = Color.White.copy(alpha = 0.38f)),
+                            modifier = Modifier.semantics {
+                                toggleableState = androidx.compose.ui.state.ToggleableState(samsungMeteringEnabled)
+                                role = androidx.compose.ui.semantics.Role.Switch
+                            },
+                            enabled = samsungMeteringEnabled || (isCameraReady && samsungMeteringAvailable &&
+                                !hdrSwitchBlocked() && !showCalPanel && !showDualCalPanel && !isDualCalibMode),
+                            onClick = {
+                                samsungMeteringEnabled = !samsungMeteringEnabled
                                 toolsMenuExpanded = false
                             },
                         )
@@ -5672,6 +5706,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     cameraParametersText = cameraParametersText,
                     hdrStatusText = hdrStatusText,
                     centerMeteringText = centerMeteringText,
+                    samsungMeteringText = samsungMeteringText,
                     backlightBalanceText = backlightBalanceText,
                     statusText = statusText,
                     gyroText = gyroHudText,
@@ -7521,6 +7556,7 @@ private fun StatusHud(
     exposureTimeText: String,
     hdrStatusText: String,
     centerMeteringText: String,
+    samsungMeteringText: String,
     cameraParametersText: String,
     backlightBalanceText: String,
     statusText: String,
@@ -7581,6 +7617,11 @@ private fun StatusHud(
             fontSize = 10.sp,
             lineHeight = 13.sp,
             modifier = Modifier.semantics { contentDescription = "测光状态" },
+        )
+        Text(
+            text = samsungMeteringText,
+            color = Color(0xFFB0BEC5), fontSize = 10.sp, lineHeight = 13.sp,
+            modifier = Modifier.semantics { contentDescription = "三星测光状态" },
         )
         if (backlightBalanceText.isNotEmpty()) Text(
             text = backlightBalanceText,

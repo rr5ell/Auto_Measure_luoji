@@ -102,6 +102,8 @@ class SamsungMeteringProbeTest {
                 }
                 val original = builder.get(requestKey) ?: error("模板没有原值，停止试验，避免无法精确恢复")
                 Log.i(TAG, "模板模式=$original 直接构造字段=$direct")
+                verifyToggleGuards(builder, original, requestKey)
+                val modeRequest = SamsungMeteringRequest().apply { rememberTemplate(builder, Build.MANUFACTURER) }
                 val metering = CenterMeteringRequest().apply { configure(chars); rememberTemplate(builder) }
                 // 复用原有坐标换算；三个阶段的缓冲区归一化目标和 30% 窗口完全相同。
                 // 此点不声称等同前一轮用户点击物体，仅用于同一会话内单变量对照。
@@ -117,15 +119,17 @@ class SamsungMeteringProbeTest {
                 }
                 fun sample(label: String, mode: Int): List<TotalCaptureResult> {
                     frames.clear()
-                    builder.set(requestKey, mode)
                     builder.setTag(label)
-                    val request = builder.build()
+                    lateinit var request: CaptureRequest
+                    modeRequest.submit(builder, enabled = label == "模式4", suspended = false) {
+                        request = it
+                        captureSession.setRepeatingRequest(it, callback, handler)
+                    }
                     assertArrayEquals(baseline.get(CaptureRequest.CONTROL_AE_REGIONS), request.get(CaptureRequest.CONTROL_AE_REGIONS))
                     assertEquals(baseline.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION), request.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION))
                     assertEquals(baseline.get(CaptureRequest.CONTROL_AF_MODE), request.get(CaptureRequest.CONTROL_AF_MODE))
                     assertEquals(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF, request.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE))
                     Log.i(TAG, "开始=$label 请求模式=$mode EV=${request.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION)} 区域=${request.get(CaptureRequest.CONTROL_AE_REGIONS)?.contentToString()}")
-                    captureSession.setRepeatingRequest(request, callback, handler)
                     val deadline = SystemClock.elapsedRealtime() + 8_000
                     var firstSensorNs: Long? = null
                     val samples = mutableListOf<TotalCaptureResult>()
@@ -144,6 +148,8 @@ class SamsungMeteringProbeTest {
                         "曝光ns=${result.get(CaptureResult.SENSOR_EXPOSURE_TIME)} ISO=${result.get(CaptureResult.SENSOR_SENSITIVITY)} " +
                         "光圈=${result.get(CaptureResult.LENS_APERTURE)} AE=${result.get(CaptureResult.CONTROL_AE_STATE)}")
                     assertTrue("$label 回传模式未采用请求值 $mode", samples.all { it.get(resultKey) == mode })
+                    modeRequest.onResult(request, samples.last())
+                    assertTrue(modeRequest.status, modeRequest.status.contains("请求 $mode，回传 $mode"))
                     return samples
                 }
                 try {
@@ -165,6 +171,31 @@ class SamsungMeteringProbeTest {
                 thread.join(5_000)
             }
         }
+    }
+
+    private fun verifyToggleGuards(builder: CaptureRequest.Builder, original: Int, key: CaptureRequest.Key<Int>) {
+        val control = SamsungMeteringRequest()
+        control.rememberTemplate(builder, "other")
+        assertFalse(control.available)
+        control.submit(builder, true, false) { assertEquals(original, it.get(key)) }
+        control.rememberTemplate(builder, "samsung")
+        assertTrue(control.available)
+        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
+        control.submit(builder, true, false) { assertEquals(4, it.get(key)) }
+        control.submit(builder, true, true) { assertEquals(original, it.get(key)) }
+        control.submit(builder, true, false) { assertEquals(4, it.get(key)) }
+        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
+        var attempts = 0
+        control.submit(builder, true, false) {
+            if (++attempts == 1) throw IllegalArgumentException("模拟厂商拒绝")
+            assertEquals(original, it.get(key))
+        }
+        assertEquals(2, attempts)
+        assertTrue(control.status.contains("请求失败"))
+        control.submit(builder, true, false) { assertEquals(original, it.get(key)) }
+        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
+        control.submit(builder, true, false) { assertEquals(4, it.get(key)) }
+        control.submit(builder, false, false) { assertEquals(original, it.get(key)) }
     }
 
     companion object {
