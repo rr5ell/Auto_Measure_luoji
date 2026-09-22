@@ -30,7 +30,7 @@ Android 自动测量工具应用。
 
 相机状态区显示实时“预览 FPS”，每秒更新，支持普通 TextureView 和 GL/HDR。只统计新画面的更新次数，不是相机请求帧率或 YOLO 推理速度；停帧显示 0，尚未就绪显示 `--`。
 
-当前 Android 构建版本：`0.8.34 (834)`。
+当前 Android 构建版本：`0.8.35 (835)`。
 
 本版已知问题：HDR/SDR 切换过程中可能出现 `CameraDevice was already closed` 并暂停自动 HDR；本次测试分发未包含相机会话竞争修复。
 

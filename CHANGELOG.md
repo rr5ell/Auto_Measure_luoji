@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.35] - 2026-09-22
+
+作者：Codex Agent。
+
+### 测试分发
+- 版本递增为 `0.8.35 (835)`，按用户要求优先准备蒲公英上传；PPT 工作暂停，不纳入本次发布提交。
+- 包含现有手动快门与硬件光圈控制、点击测光与对焦、五区逆光平衡、EV/对比度和预览增强；三星私有测光模式3/4已移除。
+- 本次仅修改版本与分发记录，不改变相机算法，不开启 EIS。手动传感器控制的三星真机、可变光圈及 GL/HDR 组合验证仍未完成。
+
+### 验证
+- Debug APK 构建通过，签名校验通过；实际 APK 包名 `com.example.auto_measure_luoji`、版本 `0.8.35 (835)` 已核对。111 项 JVM 单测结果通过，本轮复用缓存。
+- APK SHA-256：`8F122BA826433140478A0353B0293C3FBF32D6E71971F7AF7AE056F0C34C35D1`。
+- 蒲公英上传及解析完成，平台确认为 `Auto_Measure_luoji 0.8.35 (835)`；[下载页面](https://www.pgyer.com/automeasureluoji)。本轮未进行新的真机回归。
+
 ## [manual-shutter-aperture-2026-09-22] - 2026-09-22
 
 作者：Codex Agent。
