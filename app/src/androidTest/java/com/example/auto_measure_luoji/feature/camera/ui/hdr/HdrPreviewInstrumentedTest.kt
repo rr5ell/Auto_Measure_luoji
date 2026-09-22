@@ -24,6 +24,7 @@ import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabi
 import com.example.auto_measure_luoji.feature.camera.ui.FrameBoundPreviewTestActivity
 import com.example.auto_measure_luoji.feature.camera.ui.GlStabilizedPreviewView
 import com.example.auto_measure_luoji.feature.camera.domain.gldetection.GlDetectionBox
+import com.example.auto_measure_luoji.feature.camera.domain.tapmetering.TapMeteringPoint
 import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
 import com.example.auto_measure_luoji.feature.calibration.detector.LaserDetector
 import com.example.auto_measure_luoji.feature.calibration.util.ImageUtils
@@ -168,6 +169,19 @@ class HdrPreviewInstrumentedTest {
                     val analysisSupported = HdrPreviewCapabilities.checkYuvAnalysis(context, lens).isSuccess
                     if (analysisSupported) {
                         assertNotNull("HDR session did not create YUV input", controller.analysisImageReader)
+                        val point = TapMeteringPoint(0.65f, 0.6f)
+                        controller.setCenterMeteringEnabled(false, tapEnabled = true, tapPoint = point).getOrThrow()
+                        controller.highlightAnalysisEnabled = true
+                        val sampleDeadline = SystemClock.elapsedRealtime() + 5000L
+                        while (controller.latestHighlightStatistics?.tapZone?.valid != true &&
+                            SystemClock.elapsedRealtime() < sampleDeadline) Thread.sleep(50)
+                        val statistics = controller.latestHighlightStatistics ?: error("HDR 点击亮度分析未返回")
+                        assertEquals(point, statistics.tapPoint)
+                        assertTrue(statistics.tapZone?.valid == true)
+                        assertTrue(statistics.globalZone?.valid == true)
+                        assertEquals("测光：全画面 + 点击微调", controller.centerMeteringStatus)
+                        assertEquals(DataSpace.TRANSFER_HLG, DataSpace.getTransfer(texture.dataSpace))
+                        controller.highlightAnalysisEnabled = false
                         preview.setDetectionEnabled(true)
                         YoloDetector(context, "bestV34_float32.tflite", "classes.txt", useGpu = false).use { model ->
                             val source = controller.acquireLatestAnalysisImage() ?: error("HDR YUV input missing")

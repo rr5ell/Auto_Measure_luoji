@@ -76,8 +76,10 @@ class CenterMeteringInstrumentedTest {
                 assertTrue(crop.contains(zoomed))
                 assertTrue(zoomed.width() < first.width())
                 val tap = state.apply(builder, Size(1920, 1080), true, tap = TapMeteringPoint(0.8f, 0.2f))!!
-                assertTrue(tap.centerX() > zoomed.centerX())
-                assertTrue(tap.centerY() < zoomed.centerY())
+                assertTrue(tap.width() > zoomed.width())
+                assertTrue(tap.height() > zoomed.height())
+                assertEquals(tap, state.apply(builder, Size(1920, 1080), true, tap = TapMeteringPoint(0.1f, 0.9f)))
+                assertEquals(tap, state.apply(builder, Size(1920, 1080), true, fullFrame = true))
                 assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, builder.get(CaptureRequest.CONTROL_AE_MODE))
                 if (chars.availableCaptureRequestKeys?.contains(CaptureRequest.CONTROL_AE_LOCK) == true)
                     assertEquals(false, builder.get(CaptureRequest.CONTROL_AE_LOCK))

@@ -54,6 +54,11 @@ class TapMeteringUiTest {
                         hasText("测光：等待相机").not()).fetchSemanticsNodes().isNotEmpty() }
                     assumeTrue(compose.onAllNodesWithText("测光：默认（镜头不支持点击区域）").fetchSemanticsNodes().isEmpty())
                     waitStatus("测光：等待点击")
+                    // 会话配置成功不等于已有有效相机帧；点击处理有意拒绝尚无曝光快照的输入。
+                    compose.waitUntil(30_000) {
+                        compose.onAllNodes(hasContentDescription("曝光时间") and hasText(" ms", substring = true))
+                            .fetchSemanticsNodes().isNotEmpty()
+                    }
                     compose.onNodeWithContentDescription("ISO 和光圈").assertTextContains("ISO：", substring = true)
                     compose.onNodeWithContentDescription("逆光平衡状态").assertTextEquals("逆光平衡：点击测光暂停自动 EV")
                     compose.onNodeWithContentDescription("点击测光预览").performTouchInput {
@@ -63,7 +68,12 @@ class TapMeteringUiTest {
                     compose.onNodeWithContentDescription("点击测光预览").performTouchInput {
                         click(Offset(width * 0.65f, height * 0.60f))
                     }
-                    waitStatus("测光：点击区域（已请求）")
+                    waitStatus("测光：全画面 + 点击微调")
+                    compose.waitUntil(10_000) {
+                        compose.onAllNodes(hasContentDescription("点击曝光状态") and
+                            hasText("点击微调 ", substring = true) and hasText("等待", substring = true).not())
+                            .fetchSemanticsNodes().isNotEmpty()
+                    }
                     scenario.recreate()
                     waitStatus("测光：等待点击")
                     compose.onNodeWithText("更多").performClick()

@@ -21,15 +21,16 @@ object CenterMeteringRegion {
      * SCALER_CROP_REGION 路径由调用者传入缩小后的 crop，避免高倍率时测光区域跑到画外。
      */
     fun calculate(crop: Bounds, previewWidth: Int, previewHeight: Int, displayScale: Float = 1f,
-                  centerX: Float = 0.5f, centerY: Float = 0.5f): Bounds? {
+                  centerX: Float = 0.5f, centerY: Float = 0.5f, fraction: Double = FRACTION): Bounds? {
         val width = crop.right.toDouble() - crop.left
         val height = crop.bottom.toDouble() - crop.top
         if (width <= 0 || height <= 0 || previewWidth <= 0 || previewHeight <= 0 ||
-            !centerX.isFinite() || !centerY.isFinite() || centerX !in 0f..1f || centerY !in 0f..1f) return null
+            !centerX.isFinite() || !centerY.isFinite() || centerX !in 0f..1f || centerY !in 0f..1f ||
+            !fraction.isFinite() || fraction <= 0.0 || fraction > 1.0) return null
         val ratio = previewWidth.toDouble() / previewHeight
         val scale = displayScale.takeIf { it.isFinite() && it >= 1f } ?: 1f
-        val regionW = (min(width, height * ratio) * FRACTION / scale).roundToInt().coerceIn(1, width.toInt())
-        val regionH = (min(height, width / ratio) * FRACTION / scale).roundToInt().coerceIn(1, height.toInt())
+        val regionW = (min(width, height * ratio) * fraction / scale).roundToInt().coerceIn(1, width.toInt())
+        val regionH = (min(height, width / ratio) * fraction / scale).roundToInt().coerceIn(1, height.toInt())
         // 点击坐标已撤销显示矩阵/纹理旋转，属于原始预览的 [0,1] 坐标域。
         // 有效预览范围关于 crop 中心裁切：origin=(cropSize-visibleSize)/2。
         // 传感器目标位置=原点+归一化位置*visibleSize，再减区域半宽得到矩形左上角。

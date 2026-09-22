@@ -105,9 +105,9 @@ class Camera2Controller(private val context: Context) {
     private var centerMetering = CenterMeteringRequest()
     private var centerMeteringRequested = false
     private var centerMeteringSuspended = false
-    private var centerMeteringDisplayScale = 1f
+    @Volatile private var centerMeteringDisplayScale = 1f
     private var tapMeteringRequested = false
-    private var tapMeteringPoint: TapMeteringPoint? = null
+    @Volatile private var tapMeteringPoint: TapMeteringPoint? = null
     private var lastMeteringResult: String? = null
     @Volatile var highlightAnalysisEnabled = false
     @Volatile private var highlightSnapshot: Pair<Long, HighlightStatistics>? = null
@@ -370,7 +370,8 @@ class Camera2Controller(private val context: Context) {
                             val plane = image.planes[0]
                             HighlightStatistics.sample(
                                 plane.buffer, image.width, image.height, plane.rowStride, plane.pixelStride, now,
-                                rotationDegrees = sensorOrientation
+                                rotationDegrees = sensorOrientation, tapPoint = tapMeteringPoint,
+                                tapDisplayScale = centerMeteringDisplayScale
                             )?.let { if (reader === analysisImageReader && generation == cameraGeneration) highlightSnapshot = generation to it }
                         }
                         onAnalysisImageAvailable?.invoke(image, sensorOrientation)
@@ -654,12 +655,12 @@ class Camera2Controller(private val context: Context) {
         // 关闭/重建时旧回调可能晚到；丢弃旧提交，不把它误报成新会话的 HDR 故障。
         if (session !== captureSession || builder !== previewRequestBuilder) return false
         val requested = tapMeteringRequested || centerMeteringRequested
-        val enabled = (if (tapMeteringRequested) tapMeteringPoint != null else centerMeteringRequested) &&
+        val enabled = (tapMeteringRequested || centerMeteringRequested) &&
             !centerMeteringSuspended && !currentStrictPhysical
         var region: android.graphics.Rect? = null
         try {
             region = centerMetering.apply(builder, previewSize, enabled, centerMeteringDisplayScale,
-                if (tapMeteringRequested) tapMeteringPoint else null)
+                if (tapMeteringRequested) tapMeteringPoint else null, fullFrame = tapMeteringRequested)
             session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
         } catch (error: Exception) {
             if (session !== captureSession || builder !== previewRequestBuilder) return false
@@ -675,7 +676,7 @@ class Camera2Controller(private val context: Context) {
             centerMeteringSuspended || currentStrictPhysical -> "测光：默认（校准暂停中心测光）"
             tapMeteringRequested && centerMetering.rejected -> "测光：默认（点击区域被设备拒绝）"
             tapMeteringRequested && centerMetering.supported != true -> "测光：默认（镜头不支持点击区域）"
-            tapMeteringRequested && region != null -> "测光：点击区域（已请求）"
+            tapMeteringRequested && region != null && tapMeteringPoint != null -> "测光：全画面 + 点击微调"
             tapMeteringRequested -> "测光：等待点击"
             centerMetering.rejected -> "测光：默认（中心区域被设备拒绝）"
             centerMetering.supported != true -> "测光：默认（镜头不支持中心区域）"
