@@ -93,6 +93,7 @@ import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEn
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightMeteringAlgorithm
+import com.example.auto_measure_luoji.feature.camera.ui.backlightbalance.TextureMeteringSource
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightExposureRange
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalancePreferences
 import com.example.auto_measure_luoji.feature.camera.ui.backlightbalance.BacklightBalanceDialog
@@ -803,6 +804,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var manualSensorCapabilities by remember { mutableStateOf(ManualSensorCapabilities()) }
     var manualExposureError by remember { mutableStateOf<String?>(null) }
     var backlightBalanceText by remember { mutableStateOf("") }
+    val textureMeteringSource = remember { TextureMeteringSource() }
     var showBacklightBalanceDialog by remember { mutableStateOf(false) }
     var backlightBalanceSettings by remember { mutableStateOf(BacklightBalancePreferences.load(cameraPrefs)) }
     var previewToneMode by remember {
@@ -4662,7 +4664,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(isCameraReady, selectedLens, showCalPanel, showDualCalPanel, isDualCalibMode,
         imageAdjustments.ev, previewToneMode, showImageAdjustmentDialog, cameraScreenResumed, gyroPreviewGlRenderEnabled,
-        tapMeteringEnabled, manualExposure, backlightBalanceSettings, showBacklightBalanceDialog) {
+        tapMeteringEnabled, manualExposure, backlightBalanceSettings, showBacklightBalanceDialog, textureViewRef) {
         val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
         val targetEv = imageAdjustments.forCalibration(calibrationActive).ev
         val balance = previewToneMode == PreviewToneMode.BACKLIGHT_BALANCE
@@ -4694,14 +4696,16 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             return@LaunchedEffect
         }
         val range = cameraController.exposureCompensationRange()
-        if (!range.supported || cameraController.analysisImageReader == null) {
+        if (!range.supported || (gyroPreviewGlRenderEnabled && cameraController.analysisImageReader == null)) {
             backlightBalanceText = "逆光平衡：仅局部映射（无" + (if (!range.supported) "曝光补偿）" else "分析流）")
             return@LaunchedEffect
         }
         val algorithm = BacklightMeteringAlgorithm(
             BacklightExposureRange(range.minimum, range.maximum, range.stepEv), targetEv, backlightBalanceSettings)
-        algorithm.pause(android.os.SystemClock.elapsedRealtimeNanos())
-        cameraController.highlightAnalysisEnabled = true
+        val startedAtNs = android.os.SystemClock.elapsedRealtimeNanos()
+        algorithm.pause(startedAtNs)
+        val sourceLabel = if (gyroPreviewGlRenderEnabled) "YUV（GL/HDR）" else "TextureView"
+        cameraController.highlightAnalysisEnabled = gyroPreviewGlRenderEnabled
         try {
             while (true) {
                 val now = android.os.SystemClock.elapsedRealtimeNanos()
@@ -4711,21 +4715,23 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     delay(500)
                     continue
                 }
-                val output = algorithm.evaluate(cameraController.latestHighlightStatistics, now)
+                val statistics = if (gyroPreviewGlRenderEnabled) cameraController.latestHighlightStatistics
+                    else textureMeteringSource.sample(textureViewRef, now, startedAtNs)
+                val output = algorithm.evaluate(statistics, android.os.SystemClock.elapsedRealtimeNanos())
                 output.requestedEv?.let { ev ->
                     cameraController.setExposureCompensationEv(ev).getOrThrow()
-                    Log.i("BacklightBalance", "statistics=${output.statistics} requestedEV=$ev reason=${output.reason}")
+                    Log.i("BacklightBalance", "source=$sourceLabel statistics=${output.statistics} requestedEV=$ev reason=${output.reason}")
                 }
                 val sample = output.statistics
                 if (output.status == BacklightMeteringAlgorithm.Status.INVALID_SAMPLE ||
                     output.status == BacklightMeteringAlgorithm.Status.RESTORE_BASELINE) {
-                    backlightBalanceText = "逆光平衡：等待五区亮度"
+                    backlightBalanceText = "逆光平衡：等待五区亮度（$sourceLabel）"
                 } else if (sample != null) {
                     val regions = sample.regions!!
                     backlightBalanceText = String.format(java.util.Locale.US,
-                        "五区测光 %+.2f EV\n上%.0f 下%.0f\n左%.0f 右%.0f\n中%.0f 合%.0f\n%s",
+                        "五区测光 %+.2f EV\n上%.0f 下%.0f\n左%.0f 右%.0f\n中%.0f 合%.0f\n%s\n来源：%s",
                         output.correctionEv, regions.top.mean, regions.bottom.mean, regions.left.mean, regions.right.mean,
-                        regions.center.mean, regions.weightedLuma, output.reason)
+                        regions.center.mean, regions.weightedLuma, output.reason, sourceLabel)
                 }
                 delay(500)
             }
@@ -5196,6 +5202,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                     }
                                     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
                                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                        textureMeteringSource.invalidate(this@apply)
                                         if (previewSurfaceTextureRef === st) {
                                             previewSurfaceTextureRef = null
                                             surfaceAvailable = false
@@ -5205,6 +5212,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                         return true
                                     }
                                     override fun onSurfaceTextureUpdated(st: SurfaceTexture) {
+                                        textureMeteringSource.onFrame(this@apply, st.timestamp, android.os.SystemClock.elapsedRealtimeNanos())
                                         frameRate.onFrame(st.timestamp)
                                         if (!canApplyGyroPreviewStabilization() || !gyroPreviewFrameSyncEnabled) return
                                         val transform = gyroPreviewTransformHistory.exact(st.timestamp) ?: return

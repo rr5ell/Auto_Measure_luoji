@@ -1,5 +1,23 @@
 # 错误报告
 
+## [2026-09-23] TextureView五区测光数据边界
+
+作者：Codex Agent。
+
+### 发现的问题
+- 中风险：ARGB不是原始YUV，直接混用编码值会改变阈值含义；对已增强显示再次测光还可能构成额外反馈。
+- 中风险：重复截取冻结预览并赋当前时间，会把同一帧累计成多条曝光确认；GL/HDR也没有可复用的普通TextureView来源。
+
+### 解决方案
+- 定义BT.601有限范围RGB亮度代理，拒绝透明/非法截图；普通预览从TextureView纹理取图而非窗口截图，不包含View的RenderEffect。GL/HDR明确保留原YUV路径。
+- onSurfaceTextureUpdated记录帧身份和单调接收时间；重复帧不刷新时间、1.5秒过期；切换视图使在途统计失效，新循环拒绝先前帧。新ARGB入口复用原有采样与EV策略。
+
+### 验证与预防
+- 131项项目单测、40项单文件独立JVM算法测试通过；Debug应用/测试APK与laserCompare Kotlin编译通过。
+- 新增真实TextureView小图取样、显示效果隔离、冻结和视图销毁测试；模拟器手动打开后已确认五区读数及EV下发，截图位于忽略的app/build/texture-metering.png。
+- 工具栏自动化起初在等待统计时超时，实际页面停在第一次旧帧拒绝状态。根因是测试时钟推进不足：Compose虚拟delay与Camera2真实帧时间不同步。改为显式推进500ms测试时钟并留出真实帧更新时间后，7项模拟器完整回归通过；生产过期阈值没有放宽。时钟差异参见[Android测试同步文档](https://developer.android.com/develop/ui/compose/testing/synchronization)。
+- RGB代理与ISP输出存在差异，真实手机AE效果和性能需后续验证；不把模拟器通过等同于逆光效果已验证。
+
 ## [2026-09-23] 五区测光单文件集成边界
 
 作者：Codex Agent。

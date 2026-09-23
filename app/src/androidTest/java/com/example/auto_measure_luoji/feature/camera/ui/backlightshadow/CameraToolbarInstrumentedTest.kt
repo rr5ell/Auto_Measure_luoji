@@ -87,6 +87,21 @@ class CameraToolbarInstrumentedTest {
                 compose.onNodeWithText("综合亮度目标（Y）").performScrollTo().performTextReplacement("100")
                 compose.onNodeWithText("保存并应用").performClick()
                 compose.runOnIdle { assertEquals(100f, BacklightBalancePreferences.load(prefs).targetLuma, 0f) }
+                val autoAdvance = compose.mainClock.autoAdvance
+                compose.mainClock.autoAdvance = false
+                try {
+                    compose.waitUntil(15_000) {
+                        // Camera2/TextureView使用真实时钟，曝光协程的delay由Compose测试时钟驱动。
+                        // 每轮同时留出真实帧更新时间并显式跨过500ms轮询，不能只等待语义树。
+                        Thread.sleep(250)
+                        compose.mainClock.advanceTimeBy(500)
+                        compose.onAllNodes(hasText("来源：TextureView", substring = true)).fetchSemanticsNodes().isNotEmpty()
+                    }
+                } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+                    throw AssertionError("TextureView测光未接通：" + compose.onRoot().printToString(), error)
+                } finally {
+                    compose.mainClock.autoAdvance = autoAdvance
+                }
                 AutoHdrPreferences.saveEnabled(prefs, true)
                 scenario.recreate()
                 waitForCamera()

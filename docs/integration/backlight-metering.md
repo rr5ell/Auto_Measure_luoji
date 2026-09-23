@@ -12,6 +12,25 @@
 
 ## 算法职责
 
+### TextureView接入方式
+
+本App普通预览已改用`TextureMeteringSource`：每500ms从TextureView读取最长边320像素的ARGB小图，再调用单文件中的`HighlightStatistics.sampleArgb`，把结果交给同一个`algorithm.evaluate`。GL/HDR预览仍使用原SDR YUV分析流，主面板显示实际来源；不对HLG截图直接套用SDR阈值，也不静默混用两路数据。
+
+```kotlin
+// pixels：从不透明SDR Bitmap.getPixels取得，按行连续存储，每项0xAARRGGBB。
+// frameReceivedNs：这一张新画面到达的单调时刻，不能每次截同一张图就更新。
+val statistics = HighlightStatistics.sampleArgb(pixels, width, height, frameReceivedNs)
+val output = algorithm.evaluate(statistics, nowNs)
+output.requestedIndex?.let { index -> /* 宿主向相机提交整数曝光补偿档位 */ }
+```
+
+- `pixels.size`必须等于`width*height`，不透明8-bit SDR RGB；空图、透明图、非法尺寸返回null。
+- RGB转换定义为`round(16+219*(0.299R+0.587G+0.114B)/255)`，黑16、白235；这是有限范围亮度代理，并非相机原始Y或物理照度。原默认阈值保留，真机效果需要复核。
+- TextureView截图已按输出方向排列，传旋转0；YUV路径仍按传感器方向旋转区域标签。
+- `TextureMeteringSource.onFrame`在`onSurfaceTextureUpdated`记录新帧身份和单调接收时间。相同帧不刷新年龄；冻结超过1.5秒输入null，算法撤销自动补偿。新曝光循环只接收开始之后更新的画面，视图销毁须调用`invalidate`。
+- 取图在主线程、统计在Default线程；Bitmap及时释放。截图不含检测框/按钮，也不含View的RenderEffect显示增强，避免显示提亮再反馈控制相机。不保证父布局变换或窗口裁剪与取图一致，不能将此称为完整屏幕截图。
+- TextureView适配器依赖Android，放在宿主UI目录；交付给其他平台的算法仍只需原单文件，新增ARGB接口不引入Android依赖。
+
 ```text
 8-bit SDR Y平面 + 图像布局 + 单调时钟时间
     -> 最多64×48点稀疏采样

@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [textureview-regional-metering-2026-09-23] - 2026-09-23
+
+作者：Codex Agent。
+
+### 变更
+- 普通预览五区测光改用TextureView小图，最长边320像素、每500ms一次；统计在后台执行，不再启用普通预览的YUV五区采样。GL/HDR保留SDR YUV并显示来源。
+- 单文件算法新增独立ARGB输入接口，明确0xAARRGGBB行布局、有限范围亮度公式、透明图拒绝和方向约定；不依赖Android，不改变五区权重、判断优先级和默认参数。
+- 用真实画面更新回调记录帧年龄，重复/冻结/销毁/模式切换不沿用旧截图计数，丢帧时恢复手动EV基线。
+- 新增ARGB格式与转换单测、TextureView取样/显示效果隔离/帧过期设备测试。未安装真机、未上传蒲公英，不启用EIS。
+- 验证：131项项目单测、40项独立算法测试、7项模拟器回归通过，Debug应用/测试APK及laserCompare编译通过。主页面测试修正虚拟时钟推进不足导致的等待超时，没有放宽生产帧过期阈值。
+
 ## [single-file-backlight-algorithm-2026-09-23] - 2026-09-23
 
 作者：Codex Agent。

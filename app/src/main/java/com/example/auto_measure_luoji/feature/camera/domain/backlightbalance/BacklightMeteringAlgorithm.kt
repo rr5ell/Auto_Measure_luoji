@@ -390,6 +390,34 @@ data class HighlightStatistics(val sampledAtNs: Long, val brightFraction: Float,
         const val INTERVAL_NS = 500_000_000L
 
         /**
+         * Bitmap适配入口，仍不依赖Android：输入按行紧密排列的0xAARRGGBB整数数组。
+         * width/height是像素数，数组长度必须恰好等于width*height；调用期间不得修改数组。
+         * 仅接收不透明8-bit SDR RGB；空截图/透明像素返回null，不把取图失败当成黑暗场景加曝。
+         *
+         * 采用BT.601有限范围亮度代理：Y=round(16+219*(0.299R+0.587G+0.114B)/255)。
+         * R/G/B是0..255编码值，不做线性化；黑映射16，白映射235，与策略中的16/219约定一致。
+         * 这不是还原相机原始Y：ISP色彩矩阵、色调映射和缩图都会影响统计，阈值需真机复核。
+         * nowNs是对应画面更新时的单调时间，不是反复截取同一画面的当前时间。
+         * TextureView截图已按显示方向排列时rotationDegrees传0，不再叠加传感器旋转。
+         * 返回值交给同一BacklightMeteringAlgorithm实例evaluate，禁止混合两路采样时钟/来源。
+         */
+        fun sampleArgb(pixels: IntArray, width: Int, height: Int, nowNs: Long,
+                       rotationDegrees: Int = 0): HighlightStatistics? {
+            if (width <= 0 || height <= 0 || width.toLong() * height != pixels.size.toLong()) return null
+            val y = ByteArray(pixels.size)
+            for (i in pixels.indices) {
+                val pixel = pixels[i]
+                if (pixel ushr 24 != 255) return null
+                val r = pixel ushr 16 and 255
+                val g = pixel ushr 8 and 255
+                val b = pixel and 255
+                // 系数和为1000，分母255000；加半分母实现正数四舍五入，无整数溢出。
+                y[i] = (16 + (219 * (299 * r + 587 * g + 114 * b) + 127500) / 255000).toByte()
+            }
+            return sample(ByteBuffer.wrap(y), width, height, width, 1, nowNs, rotationDegrees)
+        }
+
+        /**
          * 无状态采样入口；布局与FrameInput一致，rowStride/pixelStride的单位是字节。
          * buffer必须在同步调用期间有效，像素地址=position+y*rowStride+x*pixelStride。
          * null表示尺寸/步长/容量/旋转非法；返回非null仍需检查regions有效性。
