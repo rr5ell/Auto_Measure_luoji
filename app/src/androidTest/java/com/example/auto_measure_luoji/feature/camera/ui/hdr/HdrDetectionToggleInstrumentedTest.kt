@@ -23,6 +23,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.expandStatusPanel
 import com.example.auto_measure_luoji.feature.camera.data.LensScanner
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.camera.domain.hdr.HdrPreviewCapabilities
@@ -55,6 +56,7 @@ class HdrDetectionToggleInstrumentedTest {
         AutoHdrPreferences.saveEnabled(prefs, false)
         try {
         ActivityScenario.launch(MainActivity::class.java).use {
+            compose.expandStatusPanel()
             waitForRecognition("识别")
             compose.onNodeWithText("识别").performClick()
             waitForInference()

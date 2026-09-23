@@ -2,6 +2,8 @@
 
 Android 自动测量工具应用。
 
+主界面左侧状态区默认收起，保留实时帧率和当前状态；点击箭头展开曝光、ISO、HDR、五区测光及模型等详情，再点箭头收起。详情限制高度并支持滚动；展开状态随页面状态恢复，冷启动默认收起。折叠仅影响显示，不停止测光、识别或相机取帧，不折叠顶部操作栏和蓝牙控制。
+
 五区测光独立集成：[单文件算法源码](app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/backlightbalance/BacklightMeteringAlgorithm.kt) / [输入输出与接入说明](docs/integration/backlight-metering.md)。算法仅依赖Kotlin标准库与ByteBuffer，包含统计、曝光判断、配置及统一输入输出，不包含相机驱动和显示增强。
 
 当前蒲公英测试版：`0.8.36（836）`，包含逆光平衡参数面板。[下载测试版](https://www.pgyer.com/automeasureluoji)。

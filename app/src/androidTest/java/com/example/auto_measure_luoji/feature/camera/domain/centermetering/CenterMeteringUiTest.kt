@@ -9,6 +9,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.expandStatusPanel
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
 import org.junit.Assert.*
 import org.junit.Rule
@@ -35,6 +36,7 @@ class CenterMeteringUiTest {
         AutoHdrPreferences.saveEnabled(prefs, false)
         prefs.edit().apply { keys.forEach { putBoolean(it, false) } }.commit()
         fun waitForStatus(text: String) {
+            compose.expandStatusPanel()
             compose.waitUntil(30_000) {
                 compose.onAllNodes(hasContentDescription("测光状态") and hasText(text))
                     .fetchSemanticsNodes().isNotEmpty()

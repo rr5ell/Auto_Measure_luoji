@@ -12,6 +12,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.expandStatusPanel
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -83,6 +84,7 @@ class AmbientLightInstrumentedTest {
         val hasSensor = manager?.getDefaultSensor(Sensor.TYPE_LIGHT) != null
         val expected = if (hasSensor) hasText(" lx", substring = true) else hasText("环境照度：无光线传感器")
         fun verifyPanel() {
+            compose.expandStatusPanel()
             compose.waitUntil(20_000) {
                 compose.onAllNodes(hasContentDescription("环境照度") and expected).fetchSemanticsNodes().isNotEmpty()
             }

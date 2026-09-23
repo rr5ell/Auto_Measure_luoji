@@ -10,6 +10,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.expandStatusPanel
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
@@ -56,6 +57,7 @@ class TapMeteringUiTest {
                     .putBoolean("gyro_preview_stabilization_enabled", false)
                     .putString(PreviewToneMode.PREFERENCE_KEY, PreviewToneMode.BACKLIGHT_BALANCE.name).commit()
                 ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                    compose.expandStatusPanel()
                     compose.waitUntil(30_000) { compose.onAllNodes(hasContentDescription("测光状态") and
                         hasText("测光：等待相机").not()).fetchSemanticsNodes().isNotEmpty() }
                     assumeTrue(compose.onAllNodesWithText("测光：默认（镜头不支持点击区域）").fetchSemanticsNodes().isEmpty())

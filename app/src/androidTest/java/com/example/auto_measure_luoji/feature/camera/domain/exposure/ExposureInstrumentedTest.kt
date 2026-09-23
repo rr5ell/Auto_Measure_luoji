@@ -9,6 +9,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.expandStatusPanel
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,6 +27,7 @@ class ExposureInstrumentedTest {
             instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.BLUETOOTH_CONNECT)
         }
         fun verifyPanel() {
+            compose.expandStatusPanel()
             compose.waitUntil(30_000) {
                 compose.onAllNodes(hasContentDescription("曝光时间") and hasText(" ms", substring = true))
                     .fetchSemanticsNodes().isNotEmpty()

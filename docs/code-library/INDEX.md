@@ -13,6 +13,7 @@
 | 当前主要分支 | `feature/manual-shutter-aperture` |
 
 ## 可复用能力
+- [android-camera-collapsible-status-panel](entries/android-camera-collapsible-status-panel.md)：相机状态区默认收起、箭头展开、详情限高滚动和状态恢复；只管理显示，不拥有相机或算法生命周期。
 - [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：点击 AE/AF 同区域、普通/GL 坐标反算、单次对焦触发、5秒恢复及真实曝光/AF 状态；三星模式3/4和探针已移除，禁止复用其历史实现。
 - [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：独立单文件BacklightMeteringAlgorithm（Y/ARGB输入、五区统计、受限EV闭环、明确曝光决策与无命令原因、断流恢复），普通预览TextureView最长边640取样、GL/HDR保留YUV，配套14项参数面板及独立显示映射。
 - [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。

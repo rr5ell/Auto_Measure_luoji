@@ -9,6 +9,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.expandStatusPanel
 import com.example.auto_measure_luoji.feature.camera.domain.autohdr.AutoHdrPreferences
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalancePreferences
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
@@ -138,6 +139,7 @@ class CameraToolbarInstrumentedTest {
     }
 
     private fun waitForCamera() {
+        compose.expandStatusPanel()
         compose.waitUntil(30_000) {
             compose.onAllNodes(hasText("识别") and isEnabled()).fetchSemanticsNodes().size == 1
         }

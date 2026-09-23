@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [collapsible-status-panel-2026-09-23] - 2026-09-23
+
+作者：Codex Agent。
+
+### 新增
+- 主界面左侧状态区支持箭头展开/收起，默认仅保留帧率与当前状态；详情可滚动，限制高度，保留原数据语义与配色。
+- 折叠状态通过rememberSaveable恢复，实时读数不缓存；相机、测光与识别生命周期不受折叠控制。移除旧详情最多六行的截断，展开后可查看全部已有项目。
+- 新增展开/收起、最新读数、状态恢复及窄屏大字体回归；原相机状态测试先展开再检查详细读数。
+- 验证：139项项目单测、6项模拟器界面回归通过；Debug应用/测试APK及laserCompare Kotlin编译通过。已检查实际相机页收起/展开截图及窄屏大字体滚动；不启用EIS、不安装真实手机、不自动上传蒲公英。
+
 ## [metering-output-contract-2026-09-23] - 2026-09-23
 
 作者：Codex Agent。

@@ -94,6 +94,7 @@ import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TextureP
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightMeteringAlgorithm
 import com.example.auto_measure_luoji.feature.camera.ui.backlightbalance.TextureMeteringSource
+import com.example.auto_measure_luoji.feature.camera.ui.statuspanel.CollapsibleStatusPanel
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightExposureRange
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalancePreferences
 import com.example.auto_measure_luoji.feature.camera.ui.backlightbalance.BacklightBalanceDialog
@@ -7628,24 +7629,9 @@ private fun StatusHud(
     anchorText: String,
     modifier: Modifier = Modifier,
 ) {
-    val lines = listOf(statusText, lensText, gyroText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
+    val lines = listOf(lensText, gyroText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
 
-    Column(
-        modifier = modifier
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-            .background(Color.Black.copy(alpha = 0.45f))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(
-            text = fpsText,
-            color = Color(0xFFA5D6A7),
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+    CollapsibleStatusPanel(fpsText = fpsText, statusText = statusText, modifier = modifier) {
         Text(
             text = ambientLightText,
             color = Color(0xFFFFD54F),
@@ -7688,11 +7674,10 @@ private fun StatusHud(
             color = Color(0xFFFFCC80), fontSize = 9.sp, lineHeight = 12.sp,
             modifier = Modifier.semantics { contentDescription = "逆光平衡状态" },
         )
-        lines.take(6).forEachIndexed { index, text ->
+        lines.forEach { text ->
             Text(
                 text = text,
                 color = when {
-                    index == 0 -> Color.White.copy(alpha = 0.9f)
                     text.startsWith("画面镜头") -> Color(0xFFA5D6A7)
                     text.startsWith("自研EIS") || text.startsWith("防抖标定") -> Color(0xFF80DEEA)
                     text.startsWith("模型") -> Color(0xFFFF7043)
@@ -7701,7 +7686,7 @@ private fun StatusHud(
                     text.startsWith("锁定") -> Color(0xFF81C784)
                     else -> Color(0xFFFFB74D)
                 },
-                fontSize = if (index == 0) 11.sp else 10.sp,
+                fontSize = 10.sp,
                 lineHeight = 13.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
