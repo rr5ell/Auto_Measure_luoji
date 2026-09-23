@@ -37,6 +37,7 @@
 | 显示 | 暗部最多 3 倍，高光最多压低 15% | Y=0.005..0.03 平滑开放增益，纯黑不变；通道同比例缩放，最后应用用户对比度 |
 
 ## 复用方式
+- 接入方负责取图与等比例缩放，向算法传入实际像素数组和实际宽高；单文件不获取或缩放图片。640仅是本App普通TextureView取图上限，不是算法硬性限制；64x48是稀疏采样网格，不是输出缩图尺寸。完整职责表、尺寸公式和数组示例见接入说明。
 - 集成交付只需`BacklightMeteringAlgorithm.kt`，详细契约见[单文件集成说明](../../integration/backlight-metering.md)。旧四个算法源文件已合并，其同名类型保留在新文件中，旧文件路径标记为superseded；禁止再维护另一份算法副本。
 - 统一入口`process(FrameInput?, nowNs)`同步读取8-bit SDR Y平面，`evaluate(HighlightStatistics?, nowNs)`接收已有采样快照。输出包含统计、状态、可选完整EV和对应整数档位；`decision`明确增加/降低/保持/恢复/无法判断，`reason`区分确认进度、稳定期、保护、边界、重复/乱序/过密、无图/布局/时间/统计错误；每会话单实例串行使用，禁止逐帧重建。
 - 核心仅依赖Kotlin标准库与ByteBuffer；`BacklightExposureRange`承接硬件范围，UI侧从既有相机范围类型转换。显示Shader、SharedPreferences、Camera2仍留在宿主，不属于单文件。
