@@ -14,13 +14,32 @@
 
 ### TextureView接入方式
 
-本App普通预览已改用`TextureMeteringSource`：每500ms从TextureView读取最长边320像素的ARGB小图，再调用单文件中的`HighlightStatistics.sampleArgb`，把结果交给同一个`algorithm.evaluate`。GL/HDR预览仍使用原SDR YUV分析流，主面板显示实际来源；不对HLG截图直接套用SDR阈值，也不静默混用两路数据。
+本App普通预览使用`TextureMeteringSource`：每500ms从TextureView读取最长边640像素的ARGB小图，不放大小图。例如1080×1920缩成360×640，1920×1080缩成640×360。再调用单文件中的`HighlightStatistics.sampleArgb`，把结果交给同一个`algorithm.evaluate`。GL/HDR预览仍使用原SDR YUV分析流，主面板显示实际来源；不对HLG截图直接套用SDR阈值，也不静默混用两路数据。
+
+640是取图尺寸上限，不是640个采样点；统计仍最多64×48＝3072点。本次不改变采样网格、五区权重、曝光阈值或显示Shader。图像像素量最多约为原320版本的4倍，取图与RGB转换的耗时需真机复核；不能承诺提高截图尺寸就能精确保留所有细小高光。
+
+### 输入与曝光决策输出（优先阅读）
+
+曝光决策是算法的**返回结果**，不需要调用方预先作为输入传入。下面将输入和输出放在一起，避免只拿到五区读数而没有处理决策。
+
+| 方向 | 参数 | 格式与职责 |
+|---|---|---|
+| 初始化输入 | `range`、`manualEv`、`settings` | 相机整数EV档位范围及每档EV、用户基线、14项策略参数；同一会话只初始化一次 |
+| 每张图输入 | `pixels` | `IntArray`，每项`0xAARRGGBB`，按行连续、不透明8-bit SDR；不能传JPEG压缩字节或HLG编码值 |
+| 图像布局输入 | `width`、`height` | 缩图后的像素宽高，正整数；`pixels.size == width * height`，不是原图宽高 |
+| 时间输入 | `sampledAtNs`、`nowNs` | 新画面接收时间、当前决策时间；同一个单调时钟的纳秒，重复帧不更新接收时间 |
+| 曝光决策输出 | `output.decision` | `INCREASE_EV`增加、`DECREASE_EV`降低、`KEEP_EV`保持、`RESTORE_BASELINE`恢复、`NO_DECISION`无法判断或跳帧 |
+| 曝光命令输出 | `requestedEv` / `requestedIndex` | 新的完整EV / 对应整数档位，二选一下发；不是增量；`null`不下发，`0`需要下发 |
+| 原因输出 | `status`、`reason` | 稳定状态码和中文原因，包括确认进度、稳定等待、保护、边界或输入错误 |
+| 统计输出 | `statistics` | 五区均值、高亮占比、综合亮度G、P20、P99；不返回处理后的图像 |
 
 ```kotlin
 // pixels：从不透明SDR Bitmap.getPixels取得，按行连续存储，每项0xAARRGGBB。
 // frameReceivedNs：这一张新画面到达的单调时刻，不能每次截同一张图就更新。
 val statistics = HighlightStatistics.sampleArgb(pixels, width, height, frameReceivedNs)
 val output = algorithm.evaluate(statistics, nowNs)
+// output始终非null。先记录decision/status/reason；NO_DECISION也有原因。
+println("决策=${output.decision} 状态=${output.status} 原因=${output.reason}")
 output.requestedIndex?.let { index -> /* 宿主向相机提交整数曝光补偿档位 */ }
 ```
 
@@ -91,8 +110,11 @@ val algorithm = BacklightMeteringAlgorithm(
 | `subjectProtected` | `Boolean` | 中心暗部保护是否生效 |
 | `status` | `Status` | 稳定状态码，适合业务判断 |
 | `reason` | `String` | 中文状态说明，供显示/日志，禁止解析文案作为业务协议 |
+| `decision` | `ExposureDecision` | 明确曝光动作；增加/降低相对于本次调用前的期望EV，不是相对于0EV；恢复基线优先单独标记 |
 
 **`requestedEv=0f`意味着提交零补偿，不等于null。算法已更新内部期望值，但未操作相机，宿主必须成功执行请求。**
+
+例如从-2/3 EV回升到-1/3 EV，输出`INCREASE_EV`，尽管返回值仍为负数。数据异常后恢复0EV输出`RESTORE_BASELINE`，不能当作普通提亮。等待连续确认期间输出`KEEP_EV`，原因注明`等待连续确认 1/3：分区提亮`，这时仍不能提前写相机。
 
 统计字段：
 - `regions.top/bottom/left/right/center`各包含`mean`（各端裁去5%后的平均Y）、`brightFraction`（未截尾样本中Y>=235的比例0..1）、`count`（未截尾采样点数，不是区域总像素数）。
@@ -112,6 +134,26 @@ val algorithm = BacklightMeteringAlgorithm(
 | `HOLD` | 稳定等待、确认不足、死区、保护或到边界，保持曝光 |
 | `UPDATE_EXPOSURE` | 提交返回的新EV/档位 |
 
+## 为什么没有新的曝光命令
+
+每次正常调用都返回`Output`。需要区分“结果要求保持”与“本次无法判断”，不能把`requestedEv == null`一律当成算法失败。
+
+| 情况 | 决策 / 状态 | 原因与处理 |
+|---|---|---|
+| 首次启动、暂停或调节后的稳定期 | `KEEP_EV / HOLD` | 默认等待1.5秒；等待期间不累加连续确认 |
+| 同方向确认不足 | `KEEP_EV / HOLD` | 默认需要3条新统计；`reason`显示1/3、2/3；继续输入新图，不逐帧重建实例 |
+| 亮度处于死区 | `KEEP_EV / HOLD` | 已符合保持条件，不需要反复下发相同EV |
+| 中心暗部保护、反差超限、缺少高光余量 | `KEEP_EV / HOLD` | 当前增加或降低曝光可能损失暗部/高光；继续观察新图 |
+| 已达自动或硬件上下限 | `KEEP_EV / HOLD` | 无可调档位，不越界增加范围 |
+| 重复、乱序、间隔不足500ms | `NO_DECISION / SKIPPED` | 分别输出具体原因；不使用这条数据增加确认次数 |
+| 无图、采样失败或空统计 | `NO_DECISION / INVALID_SAMPLE` | 等待有效来源；`evaluate(null)`只能知道没有统计，无法反推截图失败、透明像素等具体根因，宿主保留取图日志 |
+| 未来时间、超过1.5秒的旧数据 | `NO_DECISION / INVALID_SAMPLE` | 检查同一单调时钟、纳秒单位、真实新帧更新；不能给旧图重写当前时间 |
+| Y平面布局/旋转非法、统计越界、五区缺失 | `NO_DECISION / INVALID_SAMPLE` | 原因区分布局错误、数值错误和分区错误；修正输入，不把失败当成全黑 |
+| 相机EV范围或步进不支持 | `NO_DECISION / EXPOSURE_UNSUPPORTED` | 不能输出可执行的曝光请求；读取真实硬件能力 |
+| 上述数据异常且已有自动补偿 | `RESTORE_BASELINE / RESTORE_BASELINE` | 仍会输出基线请求并说明错误原因，必须执行恢复，而不是忽略无效帧 |
+
+边界说明：非法构造参数会抛`IllegalArgumentException`，不会返回`Output`；相机拒绝EV请求、AE关闭、App处于校准/点击测光/面板暂停等由宿主管理，不是算法能凭输入图像判断的失败原因。算法不能保证实际ISO/快门变化，也不能确认设备是否已执行请求，需读取相机结果验证。
+
 ## 可运行的纯Kotlin示例
 
 ```kotlin
@@ -128,7 +170,7 @@ fun main() {
             sampledAtNs = ns, rotationDegrees = 0,
         )
         val result = algorithm.process(frame, ns)
-        println("t=$ms status=${result.status} EV=${result.requestedEv} index=${result.requestedIndex}")
+        println("t=$ms decision=${result.decision} status=${result.status} EV=${result.requestedEv} index=${result.requestedIndex} reason=${result.reason}")
     }
 }
 ```

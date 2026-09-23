@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [metering-output-contract-2026-09-23] - 2026-09-23
+
+作者：Codex Agent。
+
+### 变更
+- 普通TextureView测光截图最长边由320改为640像素，等比例缩小且不放大小图；保持500ms间隔、64x48统计网格、曝光阈值及GL/HDR的YUV路径。
+- 算法输出新增`decision`区分增加、降低、保持、恢复基线及无法判断；确认完成才输出增减，恢复不依赖EV正负号，0EV请求不当空值。
+- 修复诊断原因过于笼统：此前缺图、布局错误和过期共用一条提示，确认不足也未显示进度；现在区分原因并输出连续确认次数，不改变曝光决策数值。
+- 在算法文件头输入约定旁补充输出契约、完整调用示例及无命令原因；同步接入文档与代码资产索引，不包含ISO/快门求解或显示增强。
+- 验证：139项项目单测、45项无Android依赖的单文件算法测试通过；Debug应用/测试APK构建、laserCompare Kotlin编译及差异检查通过。本轮未跑设备仪器测试，不安装真实手机、不上传蒲公英、不启用EIS。
+
 ## [textureview-regional-metering-2026-09-23] - 2026-09-23
 
 作者：Codex Agent。

@@ -19,16 +19,39 @@ import kotlin.math.roundToInt
  *
  * ## 输入约定
  * 1. 构造：相机EV硬件范围[BacklightExposureRange]、用户EV基线、[BacklightBalanceSettings]。
- * 2. 每帧：[FrameInput]的8-bit SDR亮度Y平面。不能直接传JPEG、RGB、RAW或10-bit P010/HLG。
+ * 2. TextureView路径：不透明SDR Bitmap的IntArray，每项0xAARRGGBB、按行连续，长度=width*height。
+ *    先调用HighlightStatistics.sampleArgb(pixels,width,height,sampledAtNs)，再evaluate(statistics,nowNs)。
+ *    宿主最长边640像素等比例缩图（1080x1920 -> 360x640）；核心不依赖TextureView/Android。
+ *    另一入口process接收[FrameInput]的8-bit SDR Y平面，不可直接传RGB、JPEG、RAW、P010/HLG。
  * 3. sampledAtNs和nowNs必须来自同一单调时钟，单位ns；不要把毫秒、Unix时间或不同时间基准混用。
  *    Android可在拿到图像时记录elapsedRealtimeNanos()；不要未经核实直接混用Image.timestamp。
  *
  * ## 输出约定
+ * 曝光决策是输出，不是图像输入参数：[Output.decision]明确表示增加、降低、保持、恢复或无法判断。
+ * 每次process/evaluate都返回非null的[Output]；没有新EV命令不等于没有结果。
  * [Output.requestedEv]非null：新的完整EV补偿请求，不是增量，也不是实测曝光。
  * [Output.requestedIndex]是与之对应的Camera2整数补偿档位，不是EV值。
  * 两者是同一个请求的两种表示，只需下发其中一种。null表示不下发；0表示需要下发零补偿。
  * [Output.statistics]包含五区统计/G/P20/P99；其亮度单位是Y编码值，占比是0..1。
  * 不输出ISO、快门、光圈或处理后的图像；由宿主开启AE并提交EV，等待AE调节实际采集曝光。
+ *
+ * ## 输入旁的输出示例（普通TextureView路径）
+ * val algorithm = BacklightMeteringAlgorithm(BacklightExposureRange(-9, 9, 1f / 3f)) // 每会话创建一次
+ * val statistics = HighlightStatistics.sampleArgb(pixels, width, height, sampledAtNs)
+ * val output = algorithm.evaluate(statistics, nowNs)
+ * // 偏暗且完成确认后的示例输出：decision=INCREASE_EV、status=UPDATE_EXPOSURE、requestedEv=1/3、requestedIndex=1。
+ * // 默认首次有效数据开始，先等1.5s，再连续3条同方向新统计；未确认时decision=KEEP_EV、EV=null。
+ * // output.reason说明等待/保护/边界/数据错误；输出0EV必须下发，null才是不下发。
+ * output.requestedIndex?.let { index -> /* 宿主提交相机整数曝光补偿档位index */ }
+ *
+ * ## 没有新曝光命令的原因
+ * HOLD/KEEP_EV：正常结果，可能是等待曝光稳定、连续确认不足、亮度在死区、暗部/高光保护或已达边界。
+ * SKIPPED/NO_DECISION：同一帧、乱序帧或距离上次有效统计不足500ms；不参与确认。
+ * INVALID_SAMPLE/NO_DECISION：无统计、时间在未来/过期、布局无效、统计越界或五区不完整。
+ * EXPOSURE_UNSUPPORTED/NO_DECISION：硬件EV范围或步进不可用。NO_DECISION不代表画面需要0EV。
+ * 数据异常且已有自动补偿时，返回RESTORE_BASELINE而非空命令，宿主须执行恢复。
+ * sampleArgb返回null时无法从null反推具体取图失败原因，宿主需保留自己的取图日志。
+ * 非法构造参数会抛IllegalArgumentException，不会产生Output；相机下发失败也属于宿主错误。
  *
  * ## 生命周期与线程
  * 每个相机会话持有一个实例，只从一个串行线程调用process/evaluate/pause/reset，不可每帧new。
@@ -95,6 +118,11 @@ class BacklightMeteringAlgorithm(
         UPDATE_EXPOSURE,     // 需要宿主下发新的完整EV补偿。
     }
 
+    /** 曝光动作，相对于本次调用前的期望EV；只有实际确认并产生请求才输出增加/降低。 */
+    enum class ExposureDecision {
+        INCREASE_EV, DECREASE_EV, KEEP_EV, RESTORE_BASELINE, NO_DECISION,
+    }
+
     /**
      * 单次调用结果，为值快照，不持有源图像。
      * @property statistics 本次有效统计；非法/不支持/跳帧时为null，按status区分。
@@ -105,6 +133,8 @@ class BacklightMeteringAlgorithm(
      * @property subjectProtected 中心P20保护锁存状态。
      * @property status 机器可读状态码。
      * @property reason 中文决策/等待原因，用于日志或显示。
+     * @property decision 曝光决策输出；KEEP_EV是有效保持，NO_DECISION是本次未进行有效曝光判断。
+     *   RESTORE_BASELINE优先于数值方向；恢复可能增加或降低EV。它不是预测ISO/快门的结果。
      */
     data class Output(
         val statistics: HighlightStatistics?,
@@ -115,6 +145,7 @@ class BacklightMeteringAlgorithm(
         val subjectProtected: Boolean,
         val status: Status,
         val reason: String,
+        val decision: ExposureDecision,
     )
 
     private var policy = HighlightExposurePolicy(range, manualEv, settings)
@@ -124,10 +155,12 @@ class BacklightMeteringAlgorithm(
     /** 输入原始Y平面，输出统计与可选EV请求；所有调用必须使用同一串行线程。 */
     fun process(frame: FrameInput?, nowNs: Long): Output {
         if (!range.supported) return result(null, null, Status.EXPOSURE_UNSUPPORTED, "相机不支持曝光补偿")
-        if (frame == null || !fresh(frame.sampledAtNs, nowNs)) return evaluate(null, nowNs)
-        if (tooSoon(frame.sampledAtNs)) return result(null, null, Status.SKIPPED, "等待新的500ms采样")
+        if (frame == null) return invalidSample(nowNs, "没有输入图像")
+        timestampIssue(frame.sampledAtNs, nowNs)?.let { return invalidSample(nowNs, it) }
+        skippedReason(frame.sampledAtNs)?.let { return result(null, null, Status.SKIPPED, it) }
         val sample = HighlightStatistics.sample(frame.yPlane, frame.width, frame.height,
             frame.rowStrideBytes, frame.pixelStrideBytes, frame.sampledAtNs, frame.rotationDegrees)
+            ?: return invalidSample(nowNs, "Y平面尺寸、步长、容量或旋转无效")
         return evaluate(sample, nowNs)
     }
 
@@ -138,21 +171,25 @@ class BacklightMeteringAlgorithm(
      */
     fun evaluate(sample: HighlightStatistics?, nowNs: Long): Output {
         if (!range.supported) return result(null, null, Status.EXPOSURE_UNSUPPORTED, "相机不支持曝光补偿")
-        if (sample == null || !fresh(sample.sampledAtNs, nowNs) ||
-            !sample.brightFraction.isFinite() || sample.brightFraction !in 0f..1f ||
-            sample.percentile99 !in 0..255 || sample.centerDarkLuma !in 0..255 || sample.regions?.valid != true) {
-            // 与原App断流保护一致：只有存在自动补偿时才请求恢复，避免每次空输入都重写相机。
-            val restore = policy.correctionEv != 0f
-            if (restore) policy = HighlightExposurePolicy(range, manualEv, settings)
-            pause(nowNs)
-            return result(null, if (restore) policy.ev else null,
-                if (restore) Status.RESTORE_BASELINE else Status.INVALID_SAMPLE, "等待有效五区亮度")
-        }
-        if (tooSoon(sample.sampledAtNs)) return result(null, null, Status.SKIPPED, "等待新的500ms采样")
+        if (sample == null) return invalidSample(nowNs, "没有有效统计：未取到图像或采样失败，具体原因请查看宿主取图日志")
+        timestampIssue(sample.sampledAtNs, nowNs)?.let { return invalidSample(nowNs, it) }
+        if (!sample.brightFraction.isFinite() || sample.brightFraction !in 0f..1f ||
+            sample.percentile99 !in 0..255 || sample.centerDarkLuma !in 0..255)
+            return invalidSample(nowNs, "亮度统计越界或不是有限数值")
+        if (sample.regions?.valid != true) return invalidSample(nowNs, "五区统计不完整或区域数据无效")
+        skippedReason(sample.sampledAtNs)?.let { return result(null, null, Status.SKIPPED, it) }
         if (!started) pause(nowNs)
         lastAcceptedNs = sample.sampledAtNs
+        val previousEv = policy.ev
         val request = policy.update(sample, nowNs)
-        return result(sample, request, if (request == null) Status.HOLD else Status.UPDATE_EXPOSURE, policy.decisionText)
+        val decision = when {
+            request == null -> ExposureDecision.KEEP_EV
+            request > previousEv -> ExposureDecision.INCREASE_EV
+            request < previousEv -> ExposureDecision.DECREASE_EV
+            else -> ExposureDecision.KEEP_EV
+        }
+        return result(sample, request, if (request == null) Status.HOLD else Status.UPDATE_EXPOSURE,
+            policy.decisionText, decision)
     }
 
     /** 保留当前EV、清空连续确认并从nowNs开始稳定等待；此函数不产生相机命令。 */
@@ -173,17 +210,37 @@ class BacklightMeteringAlgorithm(
         else result(null, null, Status.EXPOSURE_UNSUPPORTED, "相机不支持曝光补偿")
     }
 
-    private fun fresh(sampleNs: Long, nowNs: Long): Boolean =
-        nowNs >= sampleNs && nowNs - sampleNs in 0..BacklightBalanceSettings.MAX_SAMPLE_AGE_NS
+    private fun timestampIssue(sampleNs: Long, nowNs: Long): String? = when {
+        nowNs < sampleNs -> "采样时间晚于决策时间，请检查单调时钟基准和纳秒单位"
+        nowNs - sampleNs !in 0..BacklightBalanceSettings.MAX_SAMPLE_AGE_NS -> "采样数据已超过1.5秒有效期"
+        else -> null
+    }
 
-    private fun tooSoon(sampleNs: Long): Boolean = lastAcceptedNs?.let {
-        sampleNs <= it || sampleNs - it < HighlightStatistics.INTERVAL_NS
-    } ?: false
+    private fun skippedReason(sampleNs: Long): String? = lastAcceptedNs?.let {
+        when {
+            sampleNs == it -> "重复采样帧，不累计确认次数"
+            sampleNs < it -> "采样帧乱序，不累计确认次数"
+            sampleNs - it < HighlightStatistics.INTERVAL_NS -> "新采样间隔不足500ms，不累计确认次数"
+            else -> null
+        }
+    }
 
-    private fun result(sample: HighlightStatistics?, request: Float?, status: Status, reason: String) = Output(
+    private fun invalidSample(nowNs: Long, reason: String): Output {
+        // 只有存在自动补偿时才恢复，避免每次空输入都重写相机。
+        val restore = policy.correctionEv != 0f
+        if (restore) policy = HighlightExposurePolicy(range, manualEv, settings)
+        pause(nowNs)
+        return result(null, if (restore) policy.ev else null,
+            if (restore) Status.RESTORE_BASELINE else Status.INVALID_SAMPLE,
+            if (restore) "$reason；请求恢复手动EV基线" else reason)
+    }
+
+    private fun result(sample: HighlightStatistics?, request: Float?, status: Status, reason: String,
+                       decision: ExposureDecision = if (status == Status.RESTORE_BASELINE)
+                           ExposureDecision.RESTORE_BASELINE else ExposureDecision.NO_DECISION) = Output(
         sample, request, request?.let(range::indexFor),
         if (range.supported) policy.ev else 0f,
-        if (range.supported) policy.correctionEv else 0f, policy.subjectProtected, status, reason,
+        if (range.supported) policy.correctionEv else 0f, policy.subjectProtected, status, reason, decision,
     )
 }
 
@@ -578,7 +635,10 @@ class HighlightExposurePolicy(
         confirmations = if (nextDirection != 0 && nextDirection == direction) confirmations + 1
             else if (nextDirection != 0) 1 else 0
         direction = nextDirection
-        if (confirmations < settings.confirmations) return null
+        if (confirmations < settings.confirmations) {
+            if (nextDirection != 0) decisionText = "等待连续确认 $confirmations/${settings.confirmations}：$decisionText"
+            return null
+        }
         current = (current + direction * stepCount).coerceIn(lower, upper)
         confirmations = 0
         direction = 0

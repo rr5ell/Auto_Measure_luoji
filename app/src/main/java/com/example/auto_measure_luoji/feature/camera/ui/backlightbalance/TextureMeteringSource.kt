@@ -12,11 +12,21 @@ import kotlin.math.roundToInt
 /**
  * 普通预览测光适配器；所有公开方法在主线程调用，算法计算转移到Default线程。
  * onFrame只记录TextureView新画面的身份与接收时间，不逐帧截图；调用方每500ms调用sample。
- * 截图最长边320像素，不含控件/检测框及View的RenderEffect；不是整个窗口的截图。
+ * 截图最长边640像素，不放大小图；统计仍最多64x48点，不含控件/检测框及View的RenderEffect。
  * 同一画面沿用原时间戳，冻结超过1.5秒返回null。切换视图/销毁会使在途计算失效。
  * 不适用于GLSurfaceView/HLG；该路径由宿主明确保留YUV来源，不静默拿旧TextureView截图。
  */
 class TextureMeteringSource {
+    companion object {
+        /** 等比例缩图：s=min(1,640/max(w,h))；四舍五入至像素，窄边至少1像素。 */
+        internal fun captureSize(width: Int, height: Int): Pair<Int, Int> {
+            require(width > 0 && height > 0)
+            val ratio = minOf(1.0, 640.0 / maxOf(width, height))
+            return (width * ratio).roundToInt().coerceAtLeast(1) to
+                (height * ratio).roundToInt().coerceAtLeast(1)
+        }
+    }
+
     private var view: TextureView? = null
     private var surfaceTimestamp: Long? = null
     private var receivedAtNs = Long.MIN_VALUE
@@ -60,9 +70,7 @@ class TextureMeteringSource {
         if (timestamp == cachedTimestamp) return cached
         val epoch = generation
         val sampledAt = receivedAtNs
-        val ratio = minOf(1.0, 320.0 / maxOf(source.width, source.height))
-        val width = (source.width * ratio).roundToInt().coerceAtLeast(1)
-        val height = (source.height * ratio).roundToInt().coerceAtLeast(1)
+        val (width, height) = captureSize(source.width, source.height)
         val pixels = try {
             val bitmap = source.getBitmap(width, height) ?: return reject("截图为空")
             try {
