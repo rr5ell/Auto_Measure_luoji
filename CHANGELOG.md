@@ -5,6 +5,21 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [single-file-backlight-algorithm-2026-09-23] - 2026-09-23
+
+作者：Codex Agent。
+
+### 重构
+- 按集成需求把五区采样、分区统计、曝光决策与参数类型合并为`BacklightMeteringAlgorithm.kt`，删除原四个分散源文件，保留同名数据类型与默认算法。
+- 核心只依赖Kotlin标准库/ByteBuffer，使用独立硬件范围类型，不再依赖项目EV类、Android或界面；偏好存储与相机驱动仍留在宿主侧。
+- 新增统一`FrameInput`/`Output`接口，明确Y平面布局、时间单位、方向、完整EV与整数档位、状态码及线程生命周期；文件内中文注释和接入文档包含完整示例。
+- 统一入口处理初始等待、500ms新统计节流及无效/过期/断流时恢复基线；CameraScreen复用该入口，保留独立分析线程、设置互斥及曝光提交失败恢复。
+
+### 验证
+- 单文件与算法测试在无Android SDK/无其他项目源码的JVM环境编译运行，36项算法测试通过。
+- 全项目127项单测、Debug应用/测试APK、laserCompare Kotlin构建通过。不变更应用版本、不上传蒲公英、不启用EIS。
+- 本轮模拟器参数面板与相机工具栏5项回归通过，未安装真实手机。
+
 ## [0.8.36] - 2026-09-22
 
 作者：Codex Agent。

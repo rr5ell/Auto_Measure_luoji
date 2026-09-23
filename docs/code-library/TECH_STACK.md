@@ -34,6 +34,8 @@
 
 ## 注意事项
 
+- 五区测光核心：`feature/camera/domain/backlightbalance/BacklightMeteringAlgorithm.kt`为独立Kotlin/JVM单文件，仅使用标准库及ByteBuffer，无Android/Compose依赖；编译器版本仍取上表2.0.21，独立验证目标字节码为JVM 1.8。相机接入和偏好存储保留在Android侧，源码输入输出契约与说明见`docs/integration/backlight-metering.md`。
+
 - 预览增强：Android 13+ RuntimeShader/AGSL（无新增依赖），GL/HLG10 使用现有 OpenGL ES Shader；暗部曲线位于 feature/camera/ui/backlightshadow，局部色调映射/Retinex 共用邻域位于 feature/camera/ui/localtone，SDK 来源 app/build.gradle.kts。
 
 - 当前项目随包携带 Sherpa-ONNX native 推理库，但不把 SenseVoice / Silero VAD 模型权重打进 APK；模型仍由 `ThirdPartyVoiceModelDownloader` 下载到应用私有目录。

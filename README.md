@@ -2,6 +2,8 @@
 
 Android 自动测量工具应用。
 
+五区测光独立集成：[单文件算法源码](app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/backlightbalance/BacklightMeteringAlgorithm.kt) / [输入输出与接入说明](docs/integration/backlight-metering.md)。算法仅依赖Kotlin标准库与ByteBuffer，包含统计、曝光判断、配置及统一输入输出，不包含相机驱动和显示增强。
+
 当前蒲公英测试版：`0.8.36（836）`，包含逆光平衡参数面板。[下载测试版](https://www.pgyer.com/automeasureluoji)。
 
 “更多 -> 逆光平衡”现为参数面板：开关、亮度目标/死区、中心 P20 保护/解除/优先恢复、高亮占比/区域数、P99 回升余量、EV 步幅/增减上限、连续确认次数和稳定等待共14项参数。保存并应用后持久化，取消不保存，恢复默认参数须保存后生效。编辑期间暂停自动 EV、恢复手动基线；关闭面板后重新等待与累计，五区几何、权重、Y>=235 高亮定义和显示增强不变。参数范围见[逆光平衡资产说明](docs/code-library/entries/android-camera-backlight-balance.md)。

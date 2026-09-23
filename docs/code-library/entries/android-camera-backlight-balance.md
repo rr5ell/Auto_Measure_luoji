@@ -5,15 +5,12 @@
 - 技术栈：Android、Kotlin、Camera2、AGSL、OpenGL ES
 - 标签：camera, exposure, histogram, regional-metering, local-tone-mapping
 - 标准代码路径：
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\BacklightBalanceSettings.kt
+  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\BacklightMeteringAlgorithm.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\BacklightBalancePreferences.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\backlightbalance\BacklightBalanceDialog.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\HighlightStatistics.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\HighlightExposurePolicy.kt
-  - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\domain\backlightbalance\RegionalMetering.kt
   - E:\StudioProjects\Auto_Measure_luoji\app\src\main\java\com\example\auto_measure_luoji\feature\camera\ui\localtone\LocalToneShader.kt
 - 接入：Camera2Controller.kt、CameraScreen.kt、PreviewToneMode.kt。
-- 最后更新：2026-09-22
+- 最后更新：2026-09-23
 - 作者：Codex Agent
 
 ## 适用场景
@@ -39,6 +36,10 @@
 | 显示 | 暗部最多 3 倍，高光最多压低 15% | Y=0.005..0.03 平滑开放增益，纯黑不变；通道同比例缩放，最后应用用户对比度 |
 
 ## 复用方式
+- 集成交付只需`BacklightMeteringAlgorithm.kt`，详细契约见[单文件集成说明](../../integration/backlight-metering.md)。旧四个算法源文件已合并，其同名类型保留在新文件中，旧文件路径标记为superseded；禁止再维护另一份算法副本。
+- 统一入口`process(FrameInput?, nowNs)`同步读取8-bit SDR Y平面，`evaluate(HighlightStatistics?, nowNs)`接收已有采样快照。输出包含统计、状态、可选完整EV和对应整数档位；每会话单实例串行使用，禁止逐帧重建。
+- 核心仅依赖Kotlin标准库与ByteBuffer；`BacklightExposureRange`承接硬件范围，UI侧从既有相机范围类型转换。显示Shader、SharedPreferences、Camera2仍留在宿主，不属于单文件。
+- 入口统一处理初始等待、至少500ms的新统计节流、非法/过期/断流恢复基线；无图像时宿主仍需定时调用null输入。EV下发失败应停止并恢复/重置。关闭用reset并提交其返回值，pause仅清计数并重新等待。
 - “更多 -> 逆光平衡”打开草稿面板，保存并应用同时更新参数与开关；取消不保存，恢复默认只修改草稿。关闭状态也可编辑参数，编辑期间恢复手动EV基线并暂停自动EV/HDR判断，关闭面板重建策略，不能沿用旧确认计数。
 - 可调范围：目标Y 1..254，死区0.05..2档，深暗P20 0..254、保护P20 1..254、解除P20 2..255且深暗<=保护<解除；高亮加权/单区占比各1..100%，区域数1..5；目标步幅0.1..1 EV、相对增减上限各0..3 EV；连续确认1..10次、等待0.5..10秒；P99额外余量0..64。默认值仍取上表。
 - `BacklightParameter`统一定义标签、范围、整数约束和稳定存储键。构造策略必须校验设置；存储于现有SharedPreferences的`backlight_balance_*`字段，非法存储整体回退默认，不引入第二份曝光状态。
@@ -55,7 +56,7 @@
 - 中心暗部回归：暗中心亮天空不减曝、突然变暗恢复、64/96 迟滞、小尺寸与背景隔离、5/255 深暗输入的两路实际渲染。
 - 设备回归：TextureShadowInstrumentedTest、GlFrameBindingInstrumentedTest、CameraToolbarInstrumentedTest。
 - 五区回归：方向与角点归属、截尾均值、边缘变化贡献、单区高光/多区反差保护、正负补偿上限、无效数据及简化场景闭环稳定性。
-- 最新结果：119项单测、Debug应用/测试APK、laserCompare Kotlin编译通过；BacklightBalanceDialogTest四项及CameraToolbarInstrumentedTest一项模拟器回归通过，1.3倍字体截图检查通过。先前显示/GL专项验证沿用历史记录，本轮未重复验证全部渲染模式。
+- 最新结果：127项项目单测、Debug应用/测试APK、laserCompare Kotlin编译通过；单文件无Android独立编译，36项算法测试通过。本轮参数面板与工具栏5项模拟器回归通过；1.3倍字体截图检查为先前验证，本轮未重复验证全部显示/GL模式。
 - 风险：真实手机 AE/HLG 的响应、运动闪烁、ISP YUV 处理差异、模型准确率与长期帧率，不能由模拟器确认。
 
 ## 给 AI 的指令

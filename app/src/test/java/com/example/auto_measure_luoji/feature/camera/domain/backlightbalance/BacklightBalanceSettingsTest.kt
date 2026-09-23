@@ -1,6 +1,6 @@
 package com.example.auto_measure_luoji.feature.camera.domain.backlightbalance
 
-import com.example.auto_measure_luoji.feature.camera.domain.imageadjustment.ExposureCompensationRange
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightExposureRange as ExposureCompensationRange
 import org.junit.Assert.*
 import org.junit.Test
 

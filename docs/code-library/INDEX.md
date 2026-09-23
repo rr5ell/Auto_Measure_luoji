@@ -14,7 +14,7 @@
 
 ## 可复用能力
 - [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：点击 AE/AF 同区域、普通/GL 坐标反算、单次对焦触发、5秒恢复及真实曝光/AF 状态；三星模式3/4和探针已移除，禁止复用其历史实现。
-- [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：五区截尾亮度统计、对数域综合测光、受限正负 EV 闭环、中心保护、14项可持久化判断参数面板、自动 HDR 隔离及局部预览映射。
+- [android-camera-backlight-balance](entries/android-camera-backlight-balance.md)：独立单文件BacklightMeteringAlgorithm（五区统计、受限EV闭环、统一输入输出、断流恢复），配套14项参数面板、自动HDR隔离及独立显示映射。
 - [android-camera2-center-metering](entries/android-camera2-center-metering.md)：Camera2 中心 AE 区域、变焦/宽高比换算、模板恢复、能力回退及持久化开关。
 - [android-preview-glare-suppression](entries/android-preview-glare-suppression.md)：显示端受限白雾扣除、平坦区与高光保护、普通/GL 共享 Shader 和互斥设置。
 - [android-preview-local-tone-retinex](entries/android-preview-local-tone-retinex.md)：保边局部色调映射、单尺度 Retinex、普通/GL 显示端共用邻域滤波及互斥开关。

@@ -92,8 +92,8 @@ import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.ImageAdj
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.ShadowEnhancement
 import com.example.auto_measure_luoji.feature.camera.ui.backlightshadow.TexturePreviewAdjustments
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
-import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.HighlightExposurePolicy
-import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalanceSettings
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightMeteringAlgorithm
+import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightExposureRange
 import com.example.auto_measure_luoji.feature.camera.domain.backlightbalance.BacklightBalancePreferences
 import com.example.auto_measure_luoji.feature.camera.ui.backlightbalance.BacklightBalanceDialog
 import com.example.auto_measure_luoji.feature.camera.domain.centermetering.CenterMeteringRegion
@@ -4698,40 +4698,34 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             backlightBalanceText = "逆光平衡：仅局部映射（无" + (if (!range.supported) "曝光补偿）" else "分析流）")
             return@LaunchedEffect
         }
-        var policy = HighlightExposurePolicy(range, targetEv, backlightBalanceSettings)
-        policy.pause(android.os.SystemClock.elapsedRealtimeNanos())
+        val algorithm = BacklightMeteringAlgorithm(
+            BacklightExposureRange(range.minimum, range.maximum, range.stepEv), targetEv, backlightBalanceSettings)
+        algorithm.pause(android.os.SystemClock.elapsedRealtimeNanos())
         cameraController.highlightAnalysisEnabled = true
         try {
             while (true) {
                 val now = android.os.SystemClock.elapsedRealtimeNanos()
                 if (hdrSwitchBlocked() || hdrPreviewChecking || hdrTransitionPending != null) {
-                    policy.pause(now)
+                    algorithm.pause(now)
                     backlightBalanceText = "逆光平衡：曝光调节暂停"
                     delay(500)
                     continue
                 }
-                val sample = cameraController.latestHighlightStatistics?.takeIf {
-                    now >= it.sampledAtNs && now - it.sampledAtNs <= BacklightBalanceSettings.MAX_SAMPLE_AGE_NS && it.regions?.valid == true
+                val output = algorithm.evaluate(cameraController.latestHighlightStatistics, now)
+                output.requestedEv?.let { ev ->
+                    cameraController.setExposureCompensationEv(ev).getOrThrow()
+                    Log.i("BacklightBalance", "statistics=${output.statistics} requestedEV=$ev reason=${output.reason}")
                 }
-                if (sample == null) {
-                    // 数据丢失时撤销自动正负补偿，恢复用户的手动基线。
-                    if (policy.correctionEv != 0f) {
-                        cameraController.setExposureCompensationEv(targetEv).getOrThrow()
-                        policy = HighlightExposurePolicy(range, targetEv, backlightBalanceSettings)
-                    }
-                    policy.pause(now)
+                val sample = output.statistics
+                if (output.status == BacklightMeteringAlgorithm.Status.INVALID_SAMPLE ||
+                    output.status == BacklightMeteringAlgorithm.Status.RESTORE_BASELINE) {
                     backlightBalanceText = "逆光平衡：等待五区亮度"
-                } else {
+                } else if (sample != null) {
                     val regions = sample.regions!!
-                    policy.update(sample, now)?.let { ev ->
-                        cameraController.setExposureCompensationEv(ev).getOrThrow()
-                        Log.i("BacklightBalance", "regions=$regions weighted=${regions.weightedLuma} " +
-                            "p99=${sample.percentile99} centerP20=${sample.centerDarkLuma} requestedEV=$ev reason=${policy.decisionText}")
-                    }
                     backlightBalanceText = String.format(java.util.Locale.US,
                         "五区测光 %+.2f EV\n上%.0f 下%.0f\n左%.0f 右%.0f\n中%.0f 合%.0f\n%s",
-                        policy.correctionEv, regions.top.mean, regions.bottom.mean, regions.left.mean, regions.right.mean,
-                        regions.center.mean, regions.weightedLuma, policy.decisionText)
+                        output.correctionEv, regions.top.mean, regions.bottom.mean, regions.left.mean, regions.right.mean,
+                        regions.center.mean, regions.weightedLuma, output.reason)
                 }
                 delay(500)
             }
