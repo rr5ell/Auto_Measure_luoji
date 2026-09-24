@@ -2,7 +2,7 @@
 
 作者：Codex Agent；更新日期：2026-09-24。
 
-关于EV含义、正负号、完整值与增量、硬件整数档位及相机下发示例，优先阅读[算法曝光输出与相机下发说明](backlight-exposure-output.md)。
+本文直接包含输入输出格式、EV与整数档位的含义、Camera2唯一接法及下发示例；接入方无需跳转其他说明文档。
 
 ## 交付文件
 
@@ -192,6 +192,60 @@ val algorithm = BacklightMeteringAlgorithm(
 | `SKIPPED` | 重复、乱序或间隔不足500ms，不计确认次数，不提交EV |
 | `HOLD` | 稳定等待、确认不足、死区、保护或到边界，保持曝光 |
 | `UPDATE_EXPOSURE` | 原样提交返回的requestedIndex |
+
+## 相机下发交接规范（必须按此接入）
+
+### 收到什么，传给相机什么
+
+接入方调用`algorithm.process(...)`或`algorithm.evaluate(...)`，收到一个`BacklightMeteringAlgorithm.Output`对象。**只读取其中的`requestedIndex`作为相机控制参数，直接设置Camera2的`CONTROL_AE_EXPOSURE_COMPENSATION`，然后提交预览请求。** 不提供其他下发方式。
+
+| 数据 | 类型 | 接入方用途 |
+|---|---|---|
+| `output.requestedIndex` | `Int?`，带符号的完整目标档位 | 唯一下发字段；如2、0、-2，原样传给相机 |
+| `output.requestedEv` | `Float?`，单位EV的完整补偿值 | 仅用于显示和日志；如0.4f、0f、-0.4f，不传给Camera2 |
+| `output.correctionEv` | `Float`，相对手动基线的自动补偿 | 仅用于显示和诊断，不作为完整命令下发 |
+
+例如手机每档0.2 EV时，输出`requestedIndex=2`、`requestedEv=0.4f`，接入方传给相机的就是**整数2**。界面可以显示“+0.4 EV”，但不能把字符串或小数0.4传给相机曝光补偿键。
+
+### 硬件换算由算法完成
+
+初始化时，接入方必须从**当前相机**读取`CONTROL_AE_COMPENSATION_RANGE`（整数档位范围）与`CONTROL_AE_COMPENSATION_STEP`（每档EV），填入`BacklightExposureRange`。不同手机或相机的能力可能不同，不可写死每档0.2或1/3。
+
+`BacklightBalanceSettings.stepEv=0.4f`是算法每次希望调整的目标步幅，不是相机硬件步进，也不是每次固定输出0.4。算法会根据设备能力计算可执行的档位并限幅，接入方下发时**不再换算、取整或累加**。
+
+以下假设从0 EV开始，硬件范围足够，使用默认参数且首次满足增加/降低条件：
+
+| 手机每档EV | 增加：算法输出 / 实际下发 | 降低：算法输出 / 实际下发 |
+|---|---|---|
+| 0.2 | requestedEv=0.4，requestedIndex=2；下发整数2 | requestedEv=-0.4，requestedIndex=-2；下发整数-2 |
+| 1/3 | requestedEv约0.6667，requestedIndex=2；下发整数2 | requestedEv约-0.6667，requestedIndex=-2；下发整数-2 |
+
+`requestedEv = requestedIndex × 硬件每档EV`。同样下发整数2，在不同硬件上对应的EV可能不同；接入方无需自行修正这个结果。切换相机或会话后重新读取能力并重建算法，不向新相机提交旧相机的输出。
+
+### 唯一下发代码
+
+```kotlin
+// output来自algorithm.evaluate/process。
+// builder、session、captureCallback、cameraHandler由接入方的相机会话管理器提供。
+// 前提：会话有效、AE开启，算法使用的能力与当前相机一致；串行更新请求。
+output.requestedIndex?.let { index ->
+    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, index)
+    session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+}
+```
+
+保留已有预览目标、回调及其他相机设置；仅修改builder而不提交请求不会生效。示例只展示输出字段到Camera2的映射，生产接入还必须处理会话关闭、提交失败及相机回传。
+
+### 必须遵守的处理规则
+
+- **null不下发**：表示本次没有新命令，按status/reason处理等待或异常；禁止用`requestedIndex ?: 0`把空值变成零命令。
+- **0必须下发**：表示设置零补偿，不是关闭AE。**负数原样下发**，不取绝对值、不单独传符号。
+- **完整档位，不是增量**：例如硬件每档0.2 EV，当前为2档（+0.4 EV），下一次输出4档（+0.8 EV），应设置4，不能计算2+4。输出已包含量化后的手动基线，也不能再叠加manualEv或correctionEv。
+- **不重复换算**：不能把requestedEv转Int，也不能把requestedIndex再乘除硬件步进；显示四舍五入不影响相机控制。
+- **恢复也走同一入口**：关闭功能时调用`algorithm.reset(nowNs)`，将返回的requestedIndex按上面代码下发；非零手动基线对应的恢复档位不一定是0。
+- **请求不等于执行结果**：currentEv和requestedEv是算法期望值，不是实际ISO/快门。提交失败时停止闭环，按有效会话恢复基线并重置/重建；提交成功后仍需检查相机回传，不能让算法持续使用未执行的状态。
+
+本交接规范统一外部接入方式，不修改现有App内部EV转档位封装。接入方只需使用本节整数档位接口，不需要复制内部封装。
 
 ## 为什么没有新的曝光命令
 
