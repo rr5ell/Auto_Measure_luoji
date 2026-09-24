@@ -39,7 +39,8 @@ import kotlin.math.roundToInt
  * val algorithm = BacklightMeteringAlgorithm(BacklightExposureRange(-9, 9, 1f / 3f)) // 每会话创建一次
  * val statistics = HighlightStatistics.sampleArgb(pixels, width, height, sampledAtNs)
  * val output = algorithm.evaluate(statistics, nowNs)
- * // 偏暗且完成确认后的示例输出：decision=INCREASE_EV、status=UPDATE_EXPOSURE、requestedEv=1/3、requestedIndex=1。
+ * // 偏暗且完成确认后的示例输出：decision=INCREASE_EV、status=UPDATE_EXPOSURE、requestedEv=2/3、requestedIndex=2。
+ * // 默认目标步幅0.4 EV；本例硬件每档1/3 EV，向上量化为两档，实际步幅约0.67 EV。
  * // 默认首次有效数据开始，先等1.5s，再连续3条同方向新统计；未确认时decision=KEEP_EV、EV=null。
  * // output.reason说明等待/保护/边界/数据错误；输出0EV必须下发，null才是不下发。
  * output.requestedIndex?.let { index -> /* 宿主提交相机整数曝光补偿档位index */ }
@@ -275,13 +276,14 @@ data class BacklightExposureRange(val minimum: Int = 0, val maximum: Int = 0, va
  * @property weightedHighlightPercent 加权高亮占比达到此百分数触发大范围高光保护；默认35%，允许1..100。
  * @property zoneHighlightPercent 单区高亮占比达标阈值；默认25%，允许1..100。
  * @property highlightZoneCount 达标区域至少几个时触发保护，与加权条件为或关系；默认3，允许1..5。
- * @property stepEv 一次调节目标步幅，默认1/3 EV，允许0.1..1，实际向上量化到硬件档位。
+ * @property stepEv 一次调节目标步幅，默认0.4 EV，允许0.1..1，实际向上量化到硬件档位。
+ *   不改变设备硬件步进：每档0.2 EV时移动两档=0.4 EV，每档1/3 EV时移动两档=2/3 EV；边界处可能截短。
  * @property maxDecreaseEv 相对手动基线最大降低量的正值，默认2/3 EV，允许0..3；0禁用负补偿。
  * @property maxIncreaseEv 相对手动基线最大增加量，默认1 EV，允许0..3；0禁用正补偿。
  * @property confirmations 连续同方向新统计数量，默认3，允许整数1..10。
  * @property settleSeconds 初始/暂停/调整后稳定等待，默认1.5秒，允许0.5..10。
  * @property recoveryMargin P99恢复上限公式的额外扣除量，默认8 Y，允许整数0..64；越大越保守。
- *   默认T=floor(16+219/2^(实际步幅)-8)，1/3 EV时T=181。
+ *   默认T=floor(16+219/2^(实际步幅)-8)，实际0.4 EV时T=173，实际2/3 EV时T=145。
  */
 data class BacklightBalanceSettings(
     val targetLuma: Float = 112f,
@@ -292,7 +294,7 @@ data class BacklightBalanceSettings(
     val weightedHighlightPercent: Float = 35f,
     val zoneHighlightPercent: Float = 25f,
     val highlightZoneCount: Int = 3,
-    val stepEv: Float = 1f / 3f,
+    val stepEv: Float = 0.4f,
     val maxDecreaseEv: Float = 2f / 3f,
     val maxIncreaseEv: Float = 1f,
     val confirmations: Int = 3,
@@ -562,7 +564,7 @@ class HighlightExposurePolicy(
         minOf(range.maximum, baseline + floor((settings.maxIncreaseEv.toDouble() + 0.0001) / range.stepEv).toInt()) else baseline
     // 仅凭阈值占比会在 234/235 两侧来回变档。恢复还要求 P99 留出一档余量。
     // 以有限范围黑端16、白端235估计：T=floor(16+219/2^(硬件量化步幅)-余量)。
-    // 编码Y并非线性辐射量，此式是保守迟滞门槛而非曝光预测；默认1/3 EV、余量8时为181。
+    // 编码Y并非线性辐射量，此式是保守迟滞门槛而非曝光预测；余量8、实际0.4 EV时为173，2/3 EV时为145。
     private val recoveryCeiling = if (range.supported)
         floor(16 + 219 / 2.0.pow((stepCount * range.stepEv).toDouble()) - settings.recoveryMargin).toInt() else 0
     private var current = baseline

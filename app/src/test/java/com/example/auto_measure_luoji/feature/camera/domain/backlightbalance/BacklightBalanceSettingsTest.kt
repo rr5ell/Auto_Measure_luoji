@@ -14,9 +14,34 @@ class BacklightBalanceSettingsTest {
     private fun feed(policy: HighlightExposurePolicy, sample: HighlightStatistics) = policy.update(sample, sample.sampledAtNs)
 
     @Test fun defaultsRoundTripWithoutChangingFractionalSteps() {
+        assertEquals(0.4f, defaults.stepEv, 0f)
+        assertEquals("0.4", defaults.fields().getValue(BacklightParameter.STEP))
         assertEquals(defaults, BacklightBalanceSettings.parse(defaults.fields()))
         assertNull(defaults.validationError)
         assertEquals(1_500_000_000L, defaults.settleNs)
+    }
+
+    @Test fun previouslySavedStepIsNotReplacedByTheNewDefault() {
+        val saved = defaults.fields() + (BacklightParameter.STEP to (1f / 3f).toString())
+        assertEquals(1f / 3f, BacklightBalanceSettings.parse(saved)!!.stepEv, 0f)
+    }
+
+    @Test fun defaultTargetStepQuantizesToDeviceStepsInBothDirections() {
+        for ((hardwareStep, expected) in listOf(0.1f to 0.4f, 0.2f to 0.4f, (1f / 3f) to (2f / 3f), 0.5f to 0.5f)) {
+            val hardware = ExposureCompensationRange(-20, 20, hardwareStep)
+            for (direction in listOf(-1, 1)) {
+                val policy = HighlightExposurePolicy(hardware, 0f, defaults.copy(confirmations = 1))
+                assertEquals(expected * direction,
+                    feed(policy, sample(0, mean = if (direction > 0) 60f else 240f))!!, 0.0001f)
+            }
+        }
+    }
+
+    @Test fun finalStepIsClippedAtTheUnchangedIncreaseLimit() {
+        val policy = HighlightExposurePolicy(range, 0f, defaults.copy(confirmations = 1))
+        assertEquals(2f / 3f, feed(policy, sample(0))!!, 0.0001f)
+        assertEquals(1f, feed(policy, sample(1500))!!, 0.0001f)
+        assertNull(feed(policy, sample(3000)))
     }
 
     @Test fun fieldsRejectNonFiniteOutOfRangeAndFractionalIntegerValues() {
@@ -85,7 +110,7 @@ class BacklightBalanceSettingsTest {
         assertTrue(zones.hasBroadClipping(defaults.copy(weightedHighlightPercent = 8f)))
         val policy = HighlightExposurePolicy(range, 0f, defaults.copy(highlightZoneCount = 2, confirmations = 1))
         assertNotNull(feed(policy, sample(0, mean = 112f).copy(regions = zones)))
-        assertEquals(-1f / 3f, policy.correctionEv, 0.0001f)
+        assertEquals(-2f / 3f, policy.correctionEv, 0.0001f)
     }
 
     @Test fun customSubjectProtectionAndRecoveryMarginReachPolicy() {
@@ -100,7 +125,7 @@ class BacklightBalanceSettingsTest {
         fun recovery(margin: Int): Float? {
             val p = HighlightExposurePolicy(range, 0f, defaults.copy(confirmations = 1, recoveryMargin = margin))
             feed(p, sample(0, mean = 240f))
-            return feed(p, sample(1500, p99 = 185))
+            return feed(p, sample(1500, p99 = 150))
         }
         assertNull(recovery(8))
         assertEquals(0f, recovery(0)!!, 0.0001f)

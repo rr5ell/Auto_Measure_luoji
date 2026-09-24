@@ -72,7 +72,7 @@ class RegionalMeteringTest {
         assertFalse(regions.broadClipping)
         val policy = HighlightExposurePolicy(range, 0f)
         assertNull(feed(policy, 0, regions, 30)); assertNull(feed(policy, 500, regions, 30))
-        assertEquals(1f / 3f, feed(policy, 1000, regions, 30)!!, 0.0001f)
+        assertEquals(2f / 3f, feed(policy, 1000, regions, 30)!!, 0.0001f)
         for (ms in 1500L..20000L step 500) feed(policy, ms, regions, 30)
         assertEquals(1f, policy.correctionEv, 0.0001f)
         assertEquals("已达提亮上限", policy.decisionText)

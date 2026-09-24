@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [backlight-default-step-2026-09-24] - 2026-09-24
+
+作者：Codex Agent。
+
+### 变更
+- 五区测光默认目标调整步幅由1/3 EV改为0.4 EV；算法、参数面板初始值与恢复默认共用同一配置，已有保存值不覆盖。
+- 保留设备上报硬件步进、向上量化规则、相对基线-2/3..+1 EV边界、连续确认和稳定等待。每档1/3 EV的设备默认实际移动两档，约0.67 EV，不能保证实际0.4 EV。
+- 同步源码注释、README、接入文档与代码资产说明，补充量化表、输出示例、关联死区/高光余量门槛和旧配置更新方式。
+- 补充默认值、旧字段兼容、不同硬件正负方向量化与末次边界截短回归；142项项目单测、48项独立算法测试通过，Debug应用/测试APK及laserCompare Kotlin构建通过。未安装真机或上传发布。
+
 ## [metering-integration-boundary-2026-09-23] - 2026-09-23
 
 作者：Codex Agent。

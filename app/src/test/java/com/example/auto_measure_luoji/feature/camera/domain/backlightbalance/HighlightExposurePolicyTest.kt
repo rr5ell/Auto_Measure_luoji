@@ -16,16 +16,16 @@ class HighlightExposurePolicyTest {
     private fun update(p: HighlightExposurePolicy, ms: Long, bright: Float = 0.1f) = p.update(sample(ms, bright), ms * 1_000_000L)
 
     @Test fun requiresThreeDistinctSamplesAndWaitsForAeToSettle() {
-        val p = HighlightExposurePolicy(range, 0f)
+        val p = HighlightExposurePolicy(range, 0f, BacklightBalanceSettings(maxDecreaseEv = 4f / 3f))
         assertNull(update(p, 0))
         assertNull(update(p, 0))
         assertNull(update(p, 500))
-        assertEquals(-1f / 3f, update(p, 1000)!!, 0.0001f)
+        assertEquals(-2f / 3f, update(p, 1000)!!, 0.0001f)
         assertNull(update(p, 1500))
         assertNull(update(p, 2000))
         assertNull(update(p, 2500))
         assertNull(update(p, 3000))
-        assertEquals(-2f / 3f, update(p, 3500)!!, 0.0001f)
+        assertEquals(-4f / 3f, update(p, 3500)!!, 0.0001f)
     }
 
     @Test fun deadbandInterruptsConfirmationAndSmallHighlightsAreIgnored() {
@@ -35,7 +35,7 @@ class HighlightExposurePolicyTest {
         assertNull(update(p, 1500)); assertNull(update(p, 2000))
         assertNotNull(update(p, 2500))
         for (ms in 4000L..10000L step 500) assertNull(update(p, ms, 0.01f))
-        assertEquals(-1f / 3f, p.correctionEv, 0.0001f)
+        assertEquals(-2f / 3f, p.correctionEv, 0.0001f)
     }
 
     @Test fun boundedTwoSidedCorrectionUsesManualBaseline() {
@@ -75,7 +75,7 @@ class HighlightExposurePolicyTest {
         for (ms in 2500L..20000L step 500) {
             assertNull(p.update(HighlightStatistics(ms * 1_000_000L, 0f, 228, 120, regions(60f)), ms * 1_000_000L))
         }
-        assertEquals(-1f / 3f, p.ev, 0.0001f)
+        assertEquals(-2f / 3f, p.ev, 0.0001f)
         assertNull(update(p, 20500, 0f)); assertNull(update(p, 21000, 0f))
         assertEquals(0f, update(p, 21500, 0f)!!, 0.0001f)
     }
@@ -114,7 +114,7 @@ class HighlightExposurePolicyTest {
         for (ms in 5000L..10000L step 500) assertNull(center(ms, 80))
         assertTrue(p.subjectProtected)
         assertNull(center(10500, 96)); assertNull(center(11000, 96))
-        assertEquals(-1f / 3f, center(11500, 96)!!, 0.0001f)
+        assertEquals(-2f / 3f, center(11500, 96)!!, 0.0001f)
     }
 
     @Test fun centerPercentileIsNotDilutedByBrightBackgroundAndTinyFramesAreValid() {

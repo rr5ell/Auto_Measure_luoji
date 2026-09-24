@@ -91,7 +91,7 @@ class BacklightMeteringAlgorithmTest {
         val negativeRequest = increasing.process(frame(1500), 1_500_000_000L)
         assertTrue(negativeRequest.requestedEv!! < 0f)
         assertEquals(BacklightMeteringAlgorithm.ExposureDecision.INCREASE_EV, negativeRequest.decision)
-        val decreasing = BacklightMeteringAlgorithm(range, manualEv = 1f / 3f,
+        val decreasing = BacklightMeteringAlgorithm(range, manualEv = 2f / 3f,
             settings = BacklightBalanceSettings(confirmations = 1))
         decreasing.process(frame(0, 200), 0)
         val zeroRequest = decreasing.process(frame(1500, 200), 1_500_000_000L)
@@ -105,8 +105,8 @@ class BacklightMeteringAlgorithmTest {
         for (ms in 0L..2000L step 500) assertNull(algorithm.process(frame(ms), ms * 1_000_000L).requestedEv)
         val result = algorithm.process(frame(2500), 2_500_000_000L)
         assertEquals(BacklightMeteringAlgorithm.Status.UPDATE_EXPOSURE, result.status)
-        assertEquals(1f / 3f, result.requestedEv!!, 0.0001f)
-        assertEquals(1, result.requestedIndex)
+        assertEquals(2f / 3f, result.requestedEv!!, 0.0001f)
+        assertEquals(2, result.requestedIndex)
         assertEquals(result.currentEv, result.correctionEv, 0f)
         assertEquals(60f, result.statistics!!.regions!!.weightedLuma, 0.001f)
         assertEquals(60, result.statistics.centerDarkLuma)
@@ -196,7 +196,7 @@ class BacklightMeteringAlgorithmTest {
         val algorithm = BacklightMeteringAlgorithm(range, manualEv = 0.4f,
             settings = BacklightBalanceSettings(confirmations = 1, settleSeconds = 0.5f))
         algorithm.process(frame(0), 0)
-        assertEquals(2, algorithm.process(frame(500), 500_000_000L).requestedIndex)
+        assertEquals(3, algorithm.process(frame(500), 500_000_000L).requestedIndex)
         val reset = algorithm.reset(600_000_000L)
         assertEquals(1, reset.requestedIndex)
         assertEquals(1f / 3f, reset.requestedEv!!, 0.0001f)
@@ -204,7 +204,7 @@ class BacklightMeteringAlgorithmTest {
         assertNull(algorithm.process(frame(1000), 1_000_000_000L).requestedEv)
         algorithm.pause(1_500_000_000L)
         assertNull(algorithm.process(frame(1500), 1_500_000_000L).requestedEv)
-        assertEquals(2, algorithm.process(frame(2000), 2_000_000_000L).requestedIndex)
+        assertEquals(3, algorithm.process(frame(2000), 2_000_000_000L).requestedIndex)
     }
 
     @Test fun freshFacadeMatchesExistingPolicyForRegularSamples() {
