@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [backlight-camera2-contract-2026-09-24] - 2026-09-24
+
+作者：Codex Agent。
+
+### 文档
+- 对外接入统一使用requestedIndex直接设置CONTROL_AE_EXPOSURE_COMPENSATION并提交预览请求，移除两种接法选择；requestedEv仅用于显示与日志。
+- 同步两份接入文档与资产条目，明确null/0/负数、完整档位非增量、禁止再次换算、恢复基线和相机切换处理。
+- 仅修改文档，明确现有App内部EV封装没有变更；检查文档链接与差异格式，不构建或安装应用。
+
 ## [backlight-exposure-output-doc-2026-09-24] - 2026-09-24
 
 作者：Codex Agent。

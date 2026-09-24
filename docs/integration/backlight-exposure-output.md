@@ -8,7 +8,7 @@
 
 **算法输出的`requestedEv`是带正负号、单位为EV的完整曝光补偿请求，类型是`Float?`；不是本次增加量，不是ISO或快门时间，也不是图像亮度。**
 
-**最终写入相机`CONTROL_AE_EXPOSURE_COMPENSATION`的是`Int`整数档位，不是EV小数。** 算法同时输出对应的`requestedIndex`，接入方可直接使用它，或将`requestedEv`交给接受EV的相机封装，二选一即可。
+**唯一对外接法：将`output.requestedIndex`直接写入Camera2的`CONTROL_AE_EXPOSURE_COMPENSATION`，然后提交预览请求。** 下发的是`Int`整数档位，不是EV小数。`requestedEv`对外接入仅用于显示和日志，不作为下发参数。
 
 例如手机每档为0.2 EV时，算法输出`requestedEv=0.4f`、`requestedIndex=2`，两者表示同一个请求：把相机曝光补偿设为+0.4 EV。数字2表示相对于零补偿的第2档，不是“再增加2档”。
 
@@ -28,8 +28,8 @@
 
 | 字段 | 类型 | 含义与处理 |
 |---|---|---|
-| `requestedEv` | `Float?` | 本次新的完整EV补偿请求；交给接受EV的封装，不再叠加旧值或手动基线 |
-| `requestedIndex` | `Int?` | 同一请求的整数档位；适合直接写Camera2曝光补偿键，不再除以步进 |
+| `requestedEv` | `Float?` | 同一请求对应的完整EV值，仅用于显示和日志，不参与相机下发 |
+| `requestedIndex` | `Int?` | 唯一相机下发字段：完整整数档位，原样写Camera2曝光补偿键，不换算、不累加 |
 | `currentEv` | `Float` | 算法期望的当前完整补偿值，包含本次请求；不证明相机已执行 |
 | `correctionEv` | `Float` | 相对于量化后手动基线的自动补偿，不是应直接写给相机的完整值 |
 | `decision` | 枚举 | 本次动作，如增加、降低、保持、恢复基线、无法判断 |
@@ -43,13 +43,14 @@ currentEv = 量化后手动基线EV + correctionEv
 requestedEv非null时，requestedEv = currentEv
 ```
 
-手动基线已经是+0.4 EV，算法再增加0.4 EV时，输出是`requestedEv=0.8`、`correctionEv=0.4`。应设置+0.8 EV，不能把0.8再加到旧值上。这个例子假设硬件每档0.2 EV且范围足够。
+手动基线已经是+0.4 EV，算法再增加0.4 EV时，输出是`requestedIndex=4`、`requestedEv=0.8`、`correctionEv=0.4`。直接下发整数4，不再加上旧档位或手动基线。这个例子假设硬件每档0.2 EV且范围足够。
 
 ### 正负号、零与空值
 
 - `0.4f`本身就是正数，`-0.4f`本身就是负数，不需要另外传符号。`+0.40 EV`只是界面格式，不能作为相机数值参数。
-- `requestedEv == null`：本次不下发新命令，继续按`status/reason`等待或处理异常；不等于0 EV。
-- `requestedEv == 0f`：明确要求设置零补偿，必须下发；零补偿仍然可以由AE自动调整ISO和快门，不是关闭自动曝光。
+- `requestedIndex == null`：本次不下发新命令，继续按`status/reason`等待或处理异常。禁止用`requestedIndex ?: 0`把空值变成零命令。
+- `requestedIndex == 0`：必须下发整数0，表示零补偿，不是关闭自动曝光。
+- `requestedIndex == -2`：原样下发整数-2；负号已经包含在数值中，不取绝对值，也不按决策重新添加符号。
 - 增加/降低是相对于上一次期望值：从-0.6变为-0.2是增加，虽然新请求仍为负数。不要对结果取绝对值后按`decision`重新拼符号。
 - 恢复基线按输出值执行。手动基线不是0时，恢复也不一定返回0。
 
@@ -74,34 +75,24 @@ requestedEv非null时，requestedEv = currentEv
 
 这是连续单方向的示例，不是固定档位列表。中途反向调整会出现其他硬件允许的补偿值；到边界后不再发出同方向新请求。已有保存步幅不会被新默认覆盖，需修改参数或恢复默认后保存。
 
-## 本项目实际下发链路
+## 统一对外下发链路
 
 ```text
 BacklightMeteringAlgorithm.evaluate(...)
-    输出 requestedEv（已按硬件量化的完整补偿值）
+    输出 requestedIndex（已量化、限幅的完整整数档位）
         ↓
-CameraScreen：cameraController.setExposureCompensationEv(ev)
+requestedIndex为null：不提交；非null：原样使用，包括0和负数
         ↓
-Camera2Controller.applyExposureCompensation
-    requestedSteps = roundToInt(ev / 设备每档EV)
-    clampedSteps = 将requestedSteps限制到设备整数档位范围
-        ↓
-builder.set(CONTROL_AE_EXPOSURE_COMPENSATION, clampedSteps)
+builder.set(CONTROL_AE_EXPOSURE_COMPENSATION, requestedIndex)
         ↓
 提交预览请求，之后用相机回传验证
 ```
 
-注意两处取整不同：算法对**单次目标步幅向上取整**；控制器对**完整EV转换档位四舍五入**。算法输出已落在硬件档位上，只要两边使用同一个相机范围/步进，控制器会得到相同的`requestedIndex`。
-
-因此，直接调用控制器设置0.4 EV，与把算法目标步幅设置0.4 EV不是同一件事。例如硬件每档1/3 EV：前者四舍五入到1档（约0.3333 EV）；后者从零首次增加时算法向上量化到2档（约0.6667 EV）。
-
-当前控制器无预览builder/session时会保留待设置EV并提前返回；方法返回成功不能单独证明相机已经执行。算法也没有读取实际ISO/快门来确认命令执行，接入方必须管理会话有效性与回传。
+初始化算法时仍须提供当前相机真实的`CONTROL_AE_COMPENSATION_RANGE`和`CONTROL_AE_COMPENSATION_STEP`，由算法完成量化与限幅。下发时不再乘除步进、四舍五入或将requestedEv转Int。切换相机/会话后重新读取能力并重建算法，不复用旧相机输出。
 
 ## 给接入方的下发示例
 
-以下为两种替代接法，不要同时执行。均要求有效会话、匹配的硬件能力、启用AE，并由宿主串行管理相机请求。
-
-**方式一：直接使用整数输出。**
+以下是唯一对外接法。要求有效会话、匹配的硬件能力、启用AE，并由宿主串行管理相机请求。
 
 ```kotlin
 // output来自algorithm.evaluate/process；builder/session/handler由宿主管理。
@@ -113,17 +104,13 @@ output.requestedIndex?.let { index ->
 
 保留宿主已有的预览目标、回调和其他相机设置；只修改builder而不重新提交请求不会下发。生产接入还须处理会话关闭、请求失败与回传，这段仅展示字段映射。
 
-**方式二：使用接受EV的相机封装。本项目采用此方式。**
+不得再加上旧档位，也不通过`manualEv`、`correctionEv`或`requestedEv`重新计算下发值。关闭功能时`algorithm.reset(nowNs)`返回的requestedIndex也按同一方式执行；恢复值不一定为0。相机拒绝请求时停止闭环，按宿主生命周期恢复基线并重建/重置算法，不能让期望状态继续与实际相机状态分离。
 
-```kotlin
-output.requestedEv?.let { ev ->
-    cameraController.setExposureCompensationEv(ev).getOrThrow()
-}
-```
+requestedEv显示可以保留两位小数，例如0.6666667显示为+0.67 EV；控制只使用原始requestedIndex整数，禁止解析显示字符串下发。提交成功不证明设备已执行，仍需检查相机回传。
 
-不得再加上旧EV、`manualEv`或`correctionEv`。相机拒绝请求时停止闭环，按宿主生命周期恢复基线并重建/重置算法，不能让期望状态继续与实际相机状态分离。
+### 与现有App内部实现的区别
 
-显示可以保留两位小数，但控制必须使用原始`Float`或`Int`。例如0.6666667显示为+0.67 EV只是格式化，不能先转成显示字符串再解析下发。独立集成推荐整数输出，避免多一层EV换算。
+本次只统一对外接入文档，不修改运行代码。现有App内部仍通过CameraScreen把requestedEv交给Camera2Controller，再转换为整数档位提交；这是已有内部实现，不作为对外接入方案，接入方无需复制这层EV封装。当前控制器无有效会话时可能仅保留待设置值，不能将其返回成功等同设备执行成功。
 
 ## 与原相机显示的EV怎样比较
 

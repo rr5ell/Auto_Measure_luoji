@@ -25,7 +25,7 @@
 | 准备输入 | 接入方 | 读取缩好图像的ARGB像素数组，传入这张图的实际宽高及同一单调时钟时间 |
 | 亮度转换与统计 | 算法 | `sampleArgb`把RGB转换为亮度Y，再进行五区采样、均值及分位数统计；不缩放图片 |
 | 曝光判断 | 算法 | `evaluate`返回`Output`，包括曝光动作、可选EV/整数档位、状态与原因；不直接控制相机 |
-| 执行曝光请求 | 接入方 | 向相机下发非null的EV或档位请求，并处理设备拒绝、会话切换及实际曝光结果 |
+| 执行曝光请求 | 接入方 | 仅将非null的requestedIndex直接写入Camera2曝光补偿键并提交请求，处理设备拒绝、会话切换及回传 |
 
 **640只是本App普通预览取图的尺寸上限，不是单文件算法的输入尺寸硬性限制。** 传入更大的合法图像时，算法不会自动缩到640；ARGB入口会为输入像素转换并分配亮度数组，因此大图仍会增加转换耗时和内存占用。输入过小导致某个分区没有采样时，不能驱动曝光决策。
 
@@ -68,7 +68,8 @@ s = min(1, 640 / max(W, H))             // 使用浮点除法
 | 图像布局输入 | `width`、`height` | 缩图后的像素宽高，正整数；`pixels.size == width * height`，不是原图宽高 |
 | 时间输入 | `sampledAtNs`、`nowNs` | 新画面接收时间、当前决策时间；同一个单调时钟的纳秒，重复帧不更新接收时间 |
 | 曝光决策输出 | `output.decision` | `INCREASE_EV`增加、`DECREASE_EV`降低、`KEEP_EV`保持、`RESTORE_BASELINE`恢复、`NO_DECISION`无法判断或跳帧 |
-| 曝光命令输出 | `requestedEv` / `requestedIndex` | 新的完整EV / 对应整数档位，二选一下发；不是增量；`null`不下发，`0`需要下发 |
+| 曝光命令输出 | `requestedIndex` | 唯一下发字段，完整整数档位，不是增量；`null`不下发，`0`和负数原样下发 |
+| 曝光显示输出 | `requestedEv` | 同一请求对应的完整EV值，仅用于显示和日志，不参与相机下发 |
 | 原因输出 | `status`、`reason` | 稳定状态码和中文原因，包括确认进度、稳定等待、保护、边界或输入错误 |
 | 统计输出 | `statistics` | 五区均值、高亮占比、综合亮度G、P20、P99；不返回处理后的图像 |
 
@@ -161,8 +162,8 @@ val algorithm = BacklightMeteringAlgorithm(
 | 字段 | 类型 | 含义 |
 |---|---|---|
 | `statistics` | `HighlightStatistics?` | 有效帧的不可变五区统计；无效/跳帧/不支持时为null，结合status判断 |
-| `requestedEv` | `Float?` | 要提交的完整EV补偿值；不是增量；null表示本次不要写相机 |
-| `requestedIndex` | `Int?` | 同一请求的硬件整数档位，EV=index×stepEv；与requestedEv二选一提交 |
+| `requestedEv` | `Float?` | 完整EV补偿值，仅用于显示和日志，不是增量，不作为相机下发参数 |
+| `requestedIndex` | `Int?` | 唯一下发字段，完整整数档位；直接设置CONTROL_AE_EXPOSURE_COMPENSATION后提交请求 |
 | `currentEv` | `Float` | 算法期望的当前完整EV，不是CaptureResult实际曝光 |
 | `correctionEv` | `Float` | currentEv减去量化后手动基线，负数为自动降曝 |
 | `subjectProtected` | `Boolean` | 中心暗部保护是否生效 |
@@ -170,7 +171,7 @@ val algorithm = BacklightMeteringAlgorithm(
 | `reason` | `String` | 中文状态说明，供显示/日志，禁止解析文案作为业务协议 |
 | `decision` | `ExposureDecision` | 明确曝光动作；增加/降低相对于本次调用前的期望EV，不是相对于0EV；恢复基线优先单独标记 |
 
-**`requestedEv=0f`意味着提交零补偿，不等于null。算法已更新内部期望值，但未操作相机，宿主必须成功执行请求。**
+**统一使用requestedIndex下发：null不提交，0提交零补偿，负数原样提交；不累加、不再次换算。算法已更新内部期望值，但未操作相机，宿主必须成功执行请求。**
 
 例如硬件每档0.2 EV时，从-0.6 EV回升到-0.2 EV，输出`INCREASE_EV`，尽管返回值仍为负数。数据异常后恢复0EV输出`RESTORE_BASELINE`，不能当作普通提亮。等待连续确认期间输出`KEEP_EV`，原因注明`等待连续确认 1/3：分区提亮`，这时仍不能提前写相机。
 
@@ -187,10 +188,10 @@ val algorithm = BacklightMeteringAlgorithm(
 |---|---|
 | `EXPOSURE_UNSUPPORTED` | 不提交EV |
 | `INVALID_SAMPLE` | 等待有效五区数据，目前没有自动补偿要撤销 |
-| `RESTORE_BASELINE` | 提交返回的基线EV/档位 |
+| `RESTORE_BASELINE` | 原样提交返回的requestedIndex以恢复基线，不假设为0 |
 | `SKIPPED` | 重复、乱序或间隔不足500ms，不计确认次数，不提交EV |
 | `HOLD` | 稳定等待、确认不足、死区、保护或到边界，保持曝光 |
-| `UPDATE_EXPOSURE` | 提交返回的新EV/档位 |
+| `UPDATE_EXPOSURE` | 原样提交返回的requestedIndex |
 
 ## 为什么没有新的曝光命令
 
@@ -239,7 +240,7 @@ fun main() {
 
 1. 单个相机会话只创建一个实例，串行调用。每帧可调用`process`，入口限制新统计间隔至少500ms；不要每帧重建，否则无法完成等待与确认。
 2. 独立分析线程可调用同文件的`HighlightStatistics.sample`，再把快照交给曝光线程`evaluate(snapshot, nowNs)`。二者是同一算法的两种接入方式，不要重复提交同一帧；本项目使用这一方式保持采样/控制线程解耦。
-3. 宿主启用AE后，把`requestedIndex`下发为`CONTROL_AE_EXPOSURE_COMPENSATION`；或者使用接受EV的封装提交`requestedEv`，不要把EV浮点数直接当整数档位。
+3. 唯一对外接法：宿主启用AE后，把非null的`requestedIndex`直接写入`CONTROL_AE_EXPOSURE_COMPENSATION`并提交预览请求；`requestedEv`仅用于显示/日志。不要累加旧档位、乘除步进或用EV浮点数替代整数档位。reset返回的基线请求也使用requestedIndex执行。
 4. 当图像丢失，仍需每约500ms调用`process(null, nowNs)`或`evaluate(null, nowNs)`，否则算法不会自行运行，也无法发出基线恢复请求。过期超过1.5秒、布局非法或缺少五区都会触发保护。
 5. `pause(nowNs)`只清确认、重新等待，保留当前EV；退出/关闭功能应执行`reset(nowNs)`并下发返回的基线请求。场景切换涉及手动曝光/校准等时，宿主负责控制优先级，禁止多个EV控制器同时改曝光。
 6. 算法假定每个非null请求都被及时成功提交。若相机拒绝，停止循环、恢复基线并重置或重建算法；不要把算法期望值当成真实采集结果。
