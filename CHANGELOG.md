@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [backlight-exposure-output-doc-2026-09-24] - 2026-09-24
+
+作者：Codex Agent。
+
+### 文档
+- 新增算法曝光输出与相机下发说明，明确requestedEv是带符号的完整EV请求、requestedIndex是对应整数档位，两者二选一下发；说明null、0和相对基线补偿的区别。
+- 按当前源码梳理算法量化、控制器换算及请求提交链路，补充不同硬件的正负序列、基线示例、两种接法，以及请求成功不等于实际生效的边界。
+- 接入文档与代码资产条目增加入口；仅修改文档，不修改算法、构建或安装应用。
+
 ## [backlight-default-step-2026-09-24] - 2026-09-24
 
 作者：Codex Agent。
