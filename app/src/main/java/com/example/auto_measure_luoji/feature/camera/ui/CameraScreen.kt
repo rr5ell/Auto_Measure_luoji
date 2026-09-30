@@ -1,6 +1,8 @@
 package com.example.auto_measure_luoji.feature.camera.ui
 
 import android.Manifest
+import com.example.auto_measure_luoji.feature.camera.ui.outdoorbrightness.OutdoorBrightnessDialog
+import com.example.auto_measure_luoji.feature.camera.ui.outdoorbrightness.rememberOutdoorBrightnessControl
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -754,6 +756,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     val isBleConnected = bleManager.state == BleConnectionManager.State.CONNECTED
 
     var statusText by remember { mutableStateOf("正在扫描镜头...") }
+    val outdoorBrightness = rememberOutdoorBrightnessControl { statusText = it }
     var isVoiceListening by remember { mutableStateOf(false) }
     var voiceDownloadDialogVisible by remember { mutableStateOf(false) }
     var voiceDownloadState by remember { mutableStateOf<VoiceModelDownloadState?>(null) }
@@ -5470,6 +5473,14 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             onClick = { toolsMenuExpanded = false; showImageAdjustmentDialog = true },
                         )
                         ToolMenuItem(
+                            text = "HBM / 户外高亮",
+                            onClick = {
+                                toolsMenuExpanded = false
+                                statusText = outdoorBrightness.open()
+                                Log.i("OutdoorBrightness", statusText)
+                            },
+                        )
+                        ToolMenuItem(
                             text = "自动 HDR",
                             active = autoHdrEnabled || hdrPreviewEnabled,
                             onClick = { toolsMenuExpanded = false; showAutoHdrDialog = true },
@@ -6440,6 +6451,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        OutdoorBrightnessDialog(outdoorBrightness) { statusText = it }
         if (showImageAdjustmentDialog) {
             val calibrationActive = showCalPanel || showDualCalPanel || isDualCalibMode
             val busy = isProcessing || statMeasuring || isDeviceMeasuring || measureTrigger ||

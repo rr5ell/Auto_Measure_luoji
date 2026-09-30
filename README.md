@@ -2,6 +2,8 @@
 
 Android 自动测量工具应用。
 
+“更多 -> HBM / 户外高亮”提供能力失败说明与独立的“请求窗口最高亮度”操作。当前未接入厂商HBM控制/回读接口，不能强制开启或确认HBM，不把窗口亮度1.0当作HBM成功；窗口高亮不修改系统亮度，手动恢复、退到后台或离开页面时尝试释放。恢复失败保留重试状态并显示原因，不持久化高亮请求。
+
 主界面左侧状态区默认收起，保留实时帧率和当前状态；点击箭头展开曝光、ISO、HDR、五区测光及模型等详情，再点箭头收起。详情限制高度并支持滚动；展开状态随页面状态恢复，冷启动默认收起。折叠仅影响显示，不停止测光、识别或相机取帧，不折叠顶部操作栏和蓝牙控制。
 
 五区测光独立集成：[单文件算法源码](app/src/main/java/com/example/auto_measure_luoji/feature/camera/domain/backlightbalance/BacklightMeteringAlgorithm.kt) / [输入输出与接入说明](docs/integration/backlight-metering.md)。算法仅依赖Kotlin标准库与ByteBuffer，包含统计、曝光判断、配置及统一输入输出，不包含相机驱动和显示增强。

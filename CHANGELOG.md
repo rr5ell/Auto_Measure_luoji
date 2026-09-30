@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [outdoor-brightness-2026-09-30] - 2026-09-30
+
+作者：Codex Agent。
+
+### 新增
+- “更多”增加“HBM / 户外高亮”入口，显示当前应用未接入厂商HBM控制/回读接口的失败原因，不误报为设备不支持或已开启。
+- 提供单独的窗口最高亮度请求与恢复按钮；状态同时写入主面板和日志。仅显式操作改变窗口亮度，不改系统设置、相机曝光、HDR或EIS。
+- 首次请求保存原值，重复点击不覆盖，后台/离开页面尝试释放；失败保留恢复能力并显示原因。新增单元与Compose交互回归。
+- 149项项目单测、2项模拟器弹窗测试通过；Debug应用/测试APK、laserCompare Kotlin编译通过。实际相机页完整交互/后台恢复受模拟器UI树失败和黑屏截图阻挡，未验证真实HBM；未安装真机或上传蒲公英。
+
 ## [backlight-camera2-contract-2026-09-24] - 2026-09-24
 
 作者：Codex Agent。
