@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.37] - 2026-09-30
+
+作者：Codex Agent。
+
+### 发布
+- 版本递增至0.8.37（837），已构建并上传蒲公英，服务端版本复核通过：[下载测试版](https://www.pgyer.com/automeasureluoji)。包含户外高亮入口、HBM能力失败提示、窗口最高亮度请求及原值恢复。
+- 包含五区测光默认目标步幅0.4 EV更新；已有保存参数不覆盖，仍按设备硬件步进量化。
+- HBM厂商控制与状态回读尚未接入；不宣称窗口最高亮度等于HBM开启。功能提交5013e99的149项单测和2项模拟器弹窗测试通过，真机亮度/HBM未验证。
+- 发布构建与单测任务通过（149项结果复用缓存），APK签名校验通过；SHA-256：E7DC66A122C3D49F46C641737B57B1C2259F4E5DEEA6CF3205A7AB1E4EFA8622。未安装真机，未包含已有PPT工作区修改。
+
 ## [outdoor-brightness-2026-09-30] - 2026-09-30
 
 作者：Codex Agent。
