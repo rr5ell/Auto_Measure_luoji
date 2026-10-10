@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.auto_measure_luoji.MainActivity
@@ -18,9 +19,9 @@ import org.junit.Test
 class PreviewSaveCameraTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @Test fun moreMenuSavesPreviewWithoutChangingTopToolbar() = saveFromCamera(false)
+    @Test fun toolbarSavesPreviewBesideWakeButton() = saveFromCamera(false)
 
-    @Test fun moreMenuSavesGlCameraPreview() = saveFromCamera(true)
+    @Test fun toolbarSavesGlCameraPreview() = saveFromCamera(true)
 
     private fun saveFromCamera(gl: Boolean) {
         assumeTrue(Build.VERSION.SDK_INT >= 33)
@@ -48,9 +49,22 @@ class PreviewSaveCameraTest {
                 compose.waitUntil(30_000) {
                     compose.onAllNodes(hasText("识别") and isEnabled()).fetchSemanticsNodes().size == 1
                 }
-                compose.onNodeWithText("保存当前预览").assertDoesNotExist()
-                compose.onNodeWithText("更多").performClick()
-                compose.onNodeWithText("保存当前预览").performScrollTo().assertIsEnabled().performClick()
+                // 顶部入口无需先打开菜单；等首帧实际显示，避免把软件GPU冷启动计入保存超时。
+                compose.waitUntil(30_000) {
+                    compose.onAllNodes(SemanticsMatcher("预览已有画面") { node ->
+                        node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.any {
+                            it.text.startsWith("预览 FPS：") && (it.text.substringAfter('：').toFloatOrNull() ?: 0f) > 0f
+                        } == true
+                    }).fetchSemanticsNodes().isNotEmpty()
+                }
+                val save = compose.onNodeWithContentDescription("保存当前预览")
+                save.assertIsDisplayed().assertIsEnabled()
+                val wakeBounds = compose.onNodeWithText("唤醒").fetchSemanticsNode().boundsInRoot
+                val saveBounds = save.fetchSemanticsNode().boundsInRoot
+                val moreBounds = compose.onNodeWithText("更多").fetchSemanticsNode().boundsInRoot
+                assertTrue("保存必须在唤醒右侧", saveBounds.left >= wakeBounds.right)
+                assertTrue("保存不能遮挡更多", saveBounds.right <= moreBounds.left)
+                save.performClick()
                 compose.waitUntil(15_000) { savedIds().size > before.size }
                 compose.waitUntil(10_000) {
                     compose.onAllNodes(hasText("已保存到相册 Pictures/AutoMeasure", substring = true))

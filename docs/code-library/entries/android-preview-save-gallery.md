@@ -30,6 +30,7 @@
 | 输出格式/目录 | PNG / Pictures/AutoMeasure | HDR经HLG到sRGB映射转SDR |
 
 ## 复用方式
+- 顶部唤醒右侧使用PreviewSaveButton：固定尺寸系统保存图标、悬停/长按提示与无障碍名称；更多菜单不重复入口。
 - 主线程调用普通/GL capturePreviewBitmap，调用者拥有返回Bitmap；后台IO调用GallerySaver.savePreview，finally回收。
 - TexturePreviewAdjustments记录实际生效设置，保存使用独立shader避免并发uniform变化；离屏ImageReader只连接HardwareRenderer，不占用相机流。
 - GallerySaver保留原savePng入口及LaserNative相册，新增savePreview流式编码；编码/发布失败删除新记录。

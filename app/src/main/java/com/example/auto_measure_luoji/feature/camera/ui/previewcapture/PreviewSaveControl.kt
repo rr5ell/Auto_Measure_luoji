@@ -10,6 +10,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.auto_measure_luoji.feature.calibration.util.GallerySaver
 import kotlinx.coroutines.CancellationException
@@ -25,6 +35,23 @@ import java.util.UUID
 internal data class SavedPreviewFrame(val bitmap: Bitmap, val hdrConverted: Boolean)
 
 internal class PreviewSaveControl(val busy: Boolean, val save: () -> Unit)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun PreviewSaveButton(busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val label = if (busy) "正在保存预览" else "保存当前预览"
+    TooltipBox(positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(label) } }, state = rememberTooltipState()) {
+        Button(onClick = onClick, enabled = enabled && !busy,
+            modifier = Modifier.height(36.dp).width(48.dp),
+            shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.12f),
+                disabledContainerColor = Color.White.copy(alpha = 0.06f))) {
+            Icon(painter = painterResource(android.R.drawable.ic_menu_save), contentDescription = label,
+                tint = Color.White.copy(alpha = if (enabled && !busy) 1f else 0.38f), modifier = Modifier.size(22.dp))
+        }
+    }
+}
 
 /** 仅点击时申请旧系统存储权限；不改变相机曝光、GL/HDR 或防抖设置。 */
 @Composable

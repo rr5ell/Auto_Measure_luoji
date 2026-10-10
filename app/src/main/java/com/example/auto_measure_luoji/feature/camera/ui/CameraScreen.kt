@@ -5,6 +5,7 @@ import com.example.auto_measure_luoji.feature.camera.ui.outdoorbrightness.Outdoo
 import com.example.auto_measure_luoji.feature.camera.ui.outdoorbrightness.rememberOutdoorBrightnessControl
 import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.rememberPreviewSaveControl
 import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.SavedPreviewFrame
+import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.PreviewSaveButton
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -5382,6 +5383,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                         accent = Color(0xFF9C27B0),
                         onClick = { toggleVoiceRecognition() },
                     )
+                    PreviewSaveButton(
+                        busy = previewSave.busy,
+                        enabled = isCameraReady && cameraScreenResumed && !hdrPreviewChecking &&
+                            hdrTransitionPending == null && !showCalPanel && !showDualCalPanel && !isDualCalibMode,
+                        onClick = previewSave.save,
+                    )
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 Box {
@@ -5513,13 +5520,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 statusText = outdoorBrightness.open()
                                 Log.i("OutdoorBrightness", statusText)
                             },
-                        )
-                        ToolMenuItem(
-                            text = if (previewSave.busy) "正在保存预览…" else "保存当前预览",
-                            enabled = !previewSave.busy && isCameraReady && cameraScreenResumed &&
-                                !hdrPreviewChecking && hdrTransitionPending == null &&
-                                !showCalPanel && !showDualCalPanel && !isDualCalibMode,
-                            onClick = { toolsMenuExpanded = false; previewSave.save() },
                         )
                         ToolMenuItem(
                             text = "自动 HDR",

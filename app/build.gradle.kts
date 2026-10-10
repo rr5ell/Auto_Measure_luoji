@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.auto_measure_luoji"
         minSdk = 24
         targetSdk = 36
-        versionCode = 837
-        versionName = "0.8.37"
+        versionCode = 838
+        versionName = "0.8.38"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

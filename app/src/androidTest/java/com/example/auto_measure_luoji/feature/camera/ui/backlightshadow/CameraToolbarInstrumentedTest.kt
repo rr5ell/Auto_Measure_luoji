@@ -23,7 +23,7 @@ import org.junit.runner.RunWith
 class CameraToolbarInstrumentedTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @Test fun topHasOnlyFourActionsAndMoreKeepsSettingsAndShadowPreference() {
+    @Test fun topHasFiveActionsAndMoreKeepsSettingsAndShadowPreference() {
         assumeTrue(Build.VERSION.SDK_INT >= 33)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -46,7 +46,8 @@ class CameraToolbarInstrumentedTest {
                 waitForCamera()
                 compose.onAllNodes(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role,
                     androidx.compose.ui.semantics.Role.Button) and hasAnyAncestor(hasContentDescription("相机顶部操作栏")))
-                    .assertCountEquals(4)
+                    .assertCountEquals(5)
+                compose.onNodeWithContentDescription("保存当前预览").assertIsDisplayed()
                 for (text in listOf("识别", "校准", "唤醒", "更多")) compose.onNodeWithText(text).assertIsDisplayed()
                 compose.onNodeWithText("EV / 对比度").assertDoesNotExist()
                 compose.onNodeWithText("自动 HDR").assertDoesNotExist()
