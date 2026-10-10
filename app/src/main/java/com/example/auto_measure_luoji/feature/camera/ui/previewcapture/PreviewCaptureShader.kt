@@ -1,7 +1,7 @@
 package com.example.auto_measure_luoji.feature.camera.ui.previewcapture
 
 /**
- * 仅供算法取帧，不改变屏幕上的 HLG10 输出，也不是显示器色调映射的复制品。
+ * 供算法取帧及预览保存的 SDR 导出，不改变屏幕 HLG10 输出，也不是显示器色调映射的复制品。
  * HLG 逆 OETF 依 BT.2100：E'=0..1，E=E'^2/3 (E'<=0.5)，
  * 否则 E=(exp((E'-c)/a)+b)/12；a=0.17883277,b=1-4a,c=0.55991073。
  * 在线性域将 BT.2020 D65 转为 BT.709 D65，负分量裁零。

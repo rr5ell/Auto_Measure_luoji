@@ -3,6 +3,8 @@ package com.example.auto_measure_luoji.feature.camera.ui
 import android.Manifest
 import com.example.auto_measure_luoji.feature.camera.ui.outdoorbrightness.OutdoorBrightnessDialog
 import com.example.auto_measure_luoji.feature.camera.ui.outdoorbrightness.rememberOutdoorBrightnessControl
+import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.rememberPreviewSaveControl
+import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.SavedPreviewFrame
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -5138,6 +5140,38 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         detectionBoxes = emptyList()
         detectionPerfText = ""
     }
+    val previewSave = rememberPreviewSaveControl(onStatus = { statusText = it }) {
+        check(isCameraReady && cameraScreenResumed && !hdrPreviewChecking && hdrTransitionPending == null) {
+            "相机未就绪或正在切换预览，请稍后重试"
+        }
+        val gl = glPreviewViewRef
+        val texture = textureViewRef
+        val lens = selectedLens
+        val hdr = hdrPreviewEnabled
+        val generation = cameraController.latestExposureReading?.sessionGeneration
+        val bitmap = if (gyroPreviewGlRenderEnabled) {
+            checkNotNull(gl) { "GL 预览未就绪" }
+            check(gl.width > 0 && gl.height > 0) { "GL 预览尺寸未就绪" }
+            // 保持宽高比且不放大小图；限制为既有 GL 取帧接口支持的最大尺寸。
+            val scale = minOf(1f, 2160f / gl.width, 3840f / gl.height)
+            gl.capturePreviewBitmap((gl.width * scale).toInt().coerceAtLeast(1),
+                (gl.height * scale).toInt().coerceAtLeast(1), cameraController.latestSensorTimestampNs,
+                includeDisplayEffects = true)
+        } else {
+            texturePreviewAdjustments.capturePreviewBitmap(checkNotNull(texture) { "普通预览未就绪" })
+        }
+        try {
+            check(isCameraReady && cameraScreenResumed && gl === glPreviewViewRef && texture === textureViewRef &&
+                lens == selectedLens && hdr == hdrPreviewEnabled &&
+                generation == cameraController.latestExposureReading?.sessionGeneration && hdrTransitionPending == null) {
+                "取图期间相机或预览模式已切换，请重试"
+            }
+            SavedPreviewFrame(bitmap, hdr)
+        } catch (error: Throwable) {
+            bitmap.recycle()
+            throw error
+        }
+    }
     // UI
     Box(modifier = modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         // 预览区域：FrameLayout 包裹 TextureView，变换应用在 FrameLayout 上
@@ -5479,6 +5513,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                 statusText = outdoorBrightness.open()
                                 Log.i("OutdoorBrightness", statusText)
                             },
+                        )
+                        ToolMenuItem(
+                            text = if (previewSave.busy) "正在保存预览…" else "保存当前预览",
+                            enabled = !previewSave.busy && isCameraReady && cameraScreenResumed &&
+                                !hdrPreviewChecking && hdrTransitionPending == null &&
+                                !showCalPanel && !showDualCalPanel && !isDualCalibMode,
+                            onClick = { toolsMenuExpanded = false; previewSave.save() },
                         )
                         ToolMenuItem(
                             text = "自动 HDR",

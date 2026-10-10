@@ -22,6 +22,9 @@ import org.junit.runner.RunWith
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 @RunWith(AndroidJUnit4::class)
 class TextureShadowInstrumentedTest {
@@ -92,6 +95,17 @@ class TextureShadowInstrumentedTest {
                         Thread.sleep(50)
                     }
                     assertTrue("普通预览效果不符：模式=$tone 暗部=$shadows 对比度=$contrast，像素=${Color.red(bitmap.getPixel(30, 100))},${Color.red(bitmap.getPixel(118, 100))}", matched)
+                    if (!legacy) {
+                        lateinit var view: android.view.TextureView
+                        scenario.onActivity { view = it.texturePreview }
+                        val saved = runBlocking { withContext(Dispatchers.Main) { adjustments.capturePreviewBitmap(view) } }
+                        try {
+                            for (x in listOf(30, 118, 180)) {
+                                assertTrue("保存图与上屏效果不符：$tone/$shadows/$contrast x=$x",
+                                    abs(Color.red(saved.getPixel(x, 100)) - Color.red(bitmap.getPixel(x, 100))) <= 4)
+                            }
+                        } finally { saved.recycle() }
+                    }
                     scenario.onActivity {
                         val source = it.texturePreview.bitmap ?: error("算法取帧失败")
                         try { assertEquals("原图被修改：暗部=$shadows 对比度=$contrast 旧系统路径=$legacy", (dark * 255f).toInt(), Color.red(source.getPixel(30, 100))) }

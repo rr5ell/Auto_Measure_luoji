@@ -1,6 +1,8 @@
 package com.example.auto_measure_luoji.feature.camera.ui.backlightshadow
 
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
@@ -13,10 +15,16 @@ import com.example.auto_measure_luoji.feature.camera.ui.imageadjustment.PreviewC
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.LocalToneShader
 import com.example.auto_measure_luoji.feature.camera.ui.localtone.PreviewToneMode
 import com.example.auto_measure_luoji.feature.camera.ui.glaresuppression.GlareSuppressionShader
+import com.example.auto_measure_luoji.feature.camera.ui.previewcapture.PreviewBitmapRenderer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 仅处理 TextureView 的显示节点；TextureView.bitmap 和相机 YUV 保持原样。 */
 class TexturePreviewAdjustments {
     private var effect: ShadowEffect? = null
+    private var appliedContrast = 1f
+    private var appliedShadows = false
+    private var appliedTone = PreviewToneMode.OFF
 
     fun apply(view: TextureView, contrast: Float, shadows: Boolean, tone: PreviewToneMode = PreviewToneMode.OFF): Result<Unit> = runCatching {
         val k = PreviewContrast.normalize(contrast)
@@ -28,6 +36,9 @@ class TexturePreviewAdjustments {
         } else {
             applyLegacyContrast(view, k)
         }
+        appliedContrast = k
+        appliedShadows = false
+        appliedTone = PreviewToneMode.OFF
         if (shadows || tone != PreviewToneMode.OFF) {
             check(supported) { "当前 Android 版本的预览增强需要 GL 预览" }
             // 首次布局完成后 CameraScreen 会按实际尺寸重新提交，不能用 0 尺寸做邻域采样。
@@ -37,8 +48,43 @@ class TexturePreviewAdjustments {
                 // 先构造完整效果再移除旧对比度，失败时仍保留可用的对比度设置。
                 val renderEffect = renderer.create(k, shadows, tone, view.width, view.height)
                 view.setRenderEffect(renderEffect)
+                appliedShadows = shadows
+                appliedTone = tone
             }
         }
+    }
+
+    /** 主线程取当前可见纹理（已含显示矩阵），后台重放实际生效的显示效果。不含任何 UI。 */
+    suspend fun capturePreviewBitmap(view: TextureView): Bitmap {
+        check(view.isAvailable && view.width > 0 && view.height > 0) { "预览画面尚未就绪" }
+        val source = checkNotNull(view.bitmap) { "未取得预览画面" }
+        try {
+            val contrast = appliedContrast
+            // 使用独立 shader，避免保存期间 UI 修改 uniform 影响这次快照。
+            val snapshotEffect = if (Build.VERSION.SDK_INT >= 33 && (appliedShadows || appliedTone != PreviewToneMode.OFF)) {
+                ShadowEffect().create(contrast, appliedShadows, appliedTone, source.width, source.height)
+            } else if (Build.VERSION.SDK_INT >= 31 && contrast != 1f) {
+                RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(PreviewContrast.colorMatrix(contrast)))
+            } else null
+            val pixels = withContext(Dispatchers.Default) {
+                val rendered = if (Build.VERSION.SDK_INT >= 31 && snapshotEffect != null) {
+                    PreviewBitmapRenderer.render(source, snapshotEffect)
+                } else if (Build.VERSION.SDK_INT < 31 && contrast != 1f) {
+                    Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also { target ->
+                        Canvas(target).drawBitmap(source, 0f, 0f, Paint().apply {
+                            colorFilter = ColorMatrixColorFilter(PreviewContrast.colorMatrix(contrast))
+                        })
+                    }
+                } else source
+                try {
+                    IntArray(source.width * source.height).also {
+                        rendered.getPixels(it, 0, source.width, 0, 0, source.width, source.height)
+                    }
+                } finally { if (rendered !== source) rendered.recycle() }
+            }
+            // 取消时仅丢弃可 GC 的数组；Bitmap 只在调用者恢复后创建。
+            return Bitmap.createBitmap(pixels, source.width, source.height, Bitmap.Config.ARGB_8888)
+        } finally { source.recycle() }
     }
 
     // API 24~30 只能在专属父容器合成对比度，不能污染 TextureView 或界面叠加元素。

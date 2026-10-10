@@ -49,10 +49,10 @@ class PreviewCaptureInstrumentedTest {
             val window = EGL14.eglCreateWindowSurface(display, configs[0], surface, intArrayOf(EGL14.EGL_NONE), 0)
             check(EGL14.eglMakeCurrent(display, window, window, context))
             try {
-                fun barrier() {
+                fun barrier(timeoutSeconds: Long = 5) {
                     val latch = CountDownLatch(1)
                     preview.queueEvent { latch.countDown() }
-                    assertTrue(latch.await(5, TimeUnit.SECONDS))
+                    assertTrue("GL队列未响应", latch.await(timeoutSeconds, TimeUnit.SECONDS))
                 }
                 fun produce() {
                     GLES20.glViewport(0, 0, 240, 426)
@@ -67,6 +67,8 @@ class PreviewCaptureInstrumentedTest {
                     check(EGL14.eglSwapBuffers(display, window))
                 }
                 repeat(4) { produce(); Thread.sleep(150) }
+                // 软件GPU首次纹理绘制可能触发编译；先等待预热完成，再测取帧超时契约。
+                barrier(30)
                 // 已有缓存不能满足新采集；无新帧必须能超时取消，之后仍可采集。
                 assertNull(runBlocking { withTimeoutOrNull(150) { preview.capturePreviewBitmap(120, 213) } })
                 val bitmap = runBlocking {
@@ -95,6 +97,30 @@ class PreviewCaptureInstrumentedTest {
                     assertEquals(Color.BLACK, translated.getPixel(10, 30))
                     assertTrue(Color.red(translated.getPixel(60, 30)) > 240)
                 } finally { translated.recycle() }
+
+                preview.resetPreviewTransform()
+                preview.setPreviewContrast(0.5f)
+                barrier()
+                for (includeEffects in listOf(true, false)) {
+                    val saved = runBlocking {
+                        val capture = async(start = CoroutineStart.UNDISPATCHED) {
+                            preview.capturePreviewBitmap(120, 213, includeDisplayEffects = includeEffects)
+                        }
+                        barrier()
+                        produce()
+                        capture.await()
+                    }
+                    try {
+                        val upper = saved.getPixel(60, 30)
+                        val lower = saved.getPixel(60, 180)
+                        val high = if (includeEffects) 191 else 255
+                        val low = if (includeEffects) 64 else 0
+                        assertEquals(high.toDouble(), Color.red(upper).toDouble(), 3.0)
+                        assertEquals(low.toDouble(), Color.blue(upper).toDouble(), 3.0)
+                        assertEquals(high.toDouble(), Color.green(lower).toDouble(), 3.0)
+                        assertEquals(low.toDouble(), Color.red(lower).toDouble(), 3.0)
+                    } finally { saved.recycle() }
+                }
             } finally {
                 EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
                 EGL14.eglDestroySurface(display, window)

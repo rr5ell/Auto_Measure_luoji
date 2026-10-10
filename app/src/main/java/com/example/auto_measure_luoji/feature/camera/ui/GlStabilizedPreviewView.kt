@@ -76,12 +76,12 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
 
     /** 只读下一张完成渲染的画面，不含检测框；超时/取消不遗留 Bitmap 或占用图像流。 */
     suspend fun capturePreviewBitmap(width: Int = 1080, height: Int = 1920,
-        minimumTimestampNs: Long = 0L): Bitmap {
+        minimumTimestampNs: Long = 0L, includeDisplayEffects: Boolean = false): Bitmap {
         require(width in 1..2160 && height in 1..3840)
         check(captureBusy.compareAndSet(false, true)) { "预览采集正在进行" }
         val result = CompletableDeferred<ByteBuffer>()
         try {
-            queueEvent { previewRenderer.requestCapture(width, height, minimumTimestampNs, result) }
+            queueEvent { previewRenderer.requestCapture(width, height, minimumTimestampNs, result, includeDisplayEffects) }
             requestRender()
             val bytes = withTimeout(1500L) { result.await() }
             val pixels = withContext(Dispatchers.Default) {
@@ -358,7 +358,8 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 28f; color = Color.WHITE }
         private var labelBitmap: Bitmap? = null
         private data class CaptureRequest(val width: Int, val height: Int,
-            val afterSequence: Long, val minimumTimestampNs: Long, val result: CompletableDeferred<ByteBuffer>)
+            val afterSequence: Long, val minimumTimestampNs: Long, val result: CompletableDeferred<ByteBuffer>,
+            val includeDisplayEffects: Boolean)
         private var pendingCapture: CaptureRequest? = null
         private var captureProgram = 0
         private var contrastProgram = 0
@@ -366,10 +367,11 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
         var shadowEnhancement = false
         var toneMode = PreviewToneMode.OFF
 
-        fun requestCapture(width: Int, height: Int, minimumTimestampNs: Long, result: CompletableDeferred<ByteBuffer>) {
+        fun requestCapture(width: Int, height: Int, minimumTimestampNs: Long, result: CompletableDeferred<ByteBuffer>,
+            includeDisplayEffects: Boolean) {
             if (!result.isActive) return
             pendingCapture?.result?.completeExceptionally(IllegalStateException("预览采集被替换"))
-            pendingCapture = CaptureRequest(width, height, drawSequence, minimumTimestampNs, result)
+            pendingCapture = CaptureRequest(width, height, drawSequence, minimumTimestampNs, result, includeDisplayEffects)
         }
 
         private fun captureOutputIfRequested() {
@@ -378,12 +380,24 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             if (!hasOutput || drawSequence <= request.afterSequence || renderedTimestampNs < request.minimumTimestampNs) return
             pendingCapture = null
             val target = RenderTarget(false)
+            val adjusted = RenderTarget(hdrEnabled)
             try {
                 if (captureProgram == 0) captureProgram = createProgram(VERTEX_SHADER, PreviewCaptureShader.FRAGMENT)
+                var sourceTexture = outputTarget.textureId
+                if (request.includeDisplayEffects &&
+                    (previewContrast != 1f || shadowEnhancement || toneMode != PreviewToneMode.OFF)) {
+                    // 按上屏分辨率执行同一个 shader，保持邻域半径一致，再缩放/转 SDR。
+                    // 不改 outputTarget，避免增强结果进入识别、测光或校准输入。
+                    adjusted.ensure(viewportWidth, viewportHeight)
+                    GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, adjusted.framebufferId)
+                    GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+                    drawTexture(outputTarget.textureId, false, identity, identity, overrideProgram = contrastProgram)
+                    sourceTexture = adjusted.textureId
+                }
                 target.ensure(request.width, request.height)
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, target.framebufferId)
                 GLES20.glViewport(0, 0, request.width, request.height)
-                drawTexture(outputTarget.textureId, false, identity, identity, overrideProgram = captureProgram)
+                drawTexture(sourceTexture, false, identity, identity, overrideProgram = captureProgram)
                 val bytes = ByteBuffer.allocateDirect(request.width * request.height * 4)
                 GLES20.glReadPixels(0, 0, request.width, request.height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, bytes)
                 val error = GLES20.glGetError()
@@ -393,6 +407,7 @@ class GlStabilizedPreviewView @JvmOverloads constructor(
             } catch (error: Exception) {
                 request.result.completeExceptionally(error)
             } finally {
+                adjusted.release()
                 target.release()
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
                 GLES20.glViewport(0, 0, viewportWidth, viewportHeight)

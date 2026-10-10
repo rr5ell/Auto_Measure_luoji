@@ -13,6 +13,7 @@
 | 当前主要分支 | `feature/manual-shutter-aperture` |
 
 ## 可复用能力
+- [android-preview-save-gallery](entries/android-preview-save-gallery.md)：普通/GL显示效果快照、HDR转SDR、相册发布与失败清理、重复请求保护。
 - [android-window-outdoor-brightness](entries/android-window-outdoor-brightness.md)：HBM能力失败提示、独立窗口最高亮度请求、原值恢复与生命周期释放；不将窗口属性回读当成HBM成功。
 - [android-camera-collapsible-status-panel](entries/android-camera-collapsible-status-panel.md)：相机状态区默认收起、箭头展开、详情限高滚动和状态恢复；只管理显示，不拥有相机或算法生命周期。
 - [android-camera2-tap-metering](entries/android-camera2-tap-metering.md)：点击 AE/AF 同区域、普通/GL 坐标反算、单次对焦触发、5秒恢复及真实曝光/AF 状态；三星模式3/4和探针已移除，禁止复用其历史实现。
