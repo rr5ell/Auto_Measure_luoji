@@ -114,6 +114,8 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.toggleableState
 import com.example.auto_measure_luoji.feature.camera.domain.SelectLensUseCase
 import com.example.auto_measure_luoji.feature.detection.domain.YoloDetector
+import com.example.auto_measure_luoji.feature.detection.modelselection.YoloModelDialog
+import com.example.auto_measure_luoji.feature.detection.modelselection.YoloModelOption
 import com.example.auto_measure_luoji.feature.detection.domain.YoloPostprocessOptions
 import com.example.auto_measure_luoji.feature.detection.ui.DetectionOverlay
 import com.example.auto_measure_luoji.feature.detection.ui.RecognitionArea
@@ -1409,6 +1411,12 @@ fun CameraScreen(modifier: Modifier = Modifier) {
 
     // 检测状态
     var modelLoadStatus by remember { mutableStateOf("未加载") }
+    var selectedYoloModel by remember {
+        mutableStateOf(YoloModelOption.fromAssetPath(cameraPrefs.getString(YoloModelOption.PREFERENCE_KEY, null)))
+    }
+    var modelLoading by remember { mutableStateOf(true) }
+    var modelLoadAttempt by remember { mutableIntStateOf(0) }
+    var showYoloModelDialog by remember { mutableStateOf(false) }
     var yoloDetector by remember { mutableStateOf<YoloDetector?>(null) }
     // GPU delegate 的创建、执行与释放固定在同一线程，不与 GL 渲染线程混用 EGL 上下文。
     val yoloExecutor = remember { Executors.newSingleThreadExecutor { Thread(it, "YoloInference") } }
@@ -1442,26 +1450,34 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     var yoloFilterError by remember { mutableStateOf<String?>(null) }
 
     // 在后台线程加载模型（避免 Tasks.await 阻塞主线程）
-    LaunchedEffect(Unit) {
-        modelLoadStatus = "加载中..."
-        Log.d("CameraScreen", "开始加载 YOLO 模型...")
+    LaunchedEffect(selectedYoloModel, modelLoadAttempt) {
+        modelLoading = true
+        yoloDetector = null
+        modelLoadStatus = "${selectedYoloModel.label} 加载中..."
+        Log.d("CameraScreen", "开始加载 YOLO 模型: ${selectedYoloModel.assetPath}")
         try {
             val det = withContext(yoloDispatcher) {
+                // 与推理串行：等已开始的推理结束后释放，避免 GPU delegate 跨线程或使用已关闭模型。
+                yoloModelRef.getAndSet(null)?.close()
                 YoloDetector(
                     context = context,
-                    modelAssetPath = "bestV34_float32.tflite",
+                    modelAssetPath = selectedYoloModel.assetPath,
                     labelsAssetPath = "classes.txt",
                     useGpu = true,
                 ).also { yoloModelRef.set(it) }
             }
             yoloDetector = det
-            modelLoadStatus = "已加载 (${det.runtimeInfo})"
+            modelLoadStatus = "${selectedYoloModel.label} 已加载 (${det.runtimeInfo})"
+            cameraPrefs.edit().putString(YoloModelOption.PREFERENCE_KEY, selectedYoloModel.assetPath).apply()
             Log.d("CameraScreen", "模型加载成功: ${det.runtimeInfo}")
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e("CameraScreen", "模型加载失败", e)
-            modelLoadStatus = "加载失败: ${e.message}"
+            modelLoadStatus = "${selectedYoloModel.label} 加载失败: ${e.message ?: e.javaClass.simpleName}"
+            statusText = "模型: $modelLoadStatus"
+        } finally {
+            modelLoading = false
         }
     }
     var detectionEnabled by remember { mutableStateOf(false) }
@@ -4960,7 +4976,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                         sourceLabel = "PreviewBitmap ${captureMode.label} ${snapshot.width}x${snapshot.height} $lensDebug"
                                         Log.d("CameraScreen", "YOLO source: $sourceLabel")
                                         withContext(yoloDispatcher) {
-                                            detector.detect(snapshot, postprocessOptions)
+                                            if (yoloModelRef.get() === detector) detector.detect(snapshot, postprocessOptions) else null
                                         }
                                     } finally {
                                         snapshot.recycle()
@@ -4995,7 +5011,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                                             // YUV 必须先送入模型；GL 只处理结果显示，不拥有推理准入权。
                                             Log.d("CameraScreen", "YOLO source: $sourceLabel timestamp=$timestampNs")
                                             val inferred = withContext(yoloDispatcher) {
-                                                detector.detectFromYuv(image, rotation, postprocessOptions)
+                                                if (yoloModelRef.get() === detector) detector.detectFromYuv(image, rotation, postprocessOptions) else null
                                             }
                                             if (gyroPreviewGlRenderEnabled) {
                                                 glTicket = detectionGlView?.acquireDetectionFrame(
@@ -5011,6 +5027,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             }
                         }
 
+                        // 切换模型后丢弃旧推理结果，不能重新显示旧框或触发测距。
+                        if (!detectionEnabled || detector !== yoloDetector) continue
                         if (result != null && glTicket != null && detectionGlView != null) {
                             glPresentation = detectionGlView.presentDetection(glTicket!!, result.detections.map {
                                 GlDetectionBox(it.box.left, it.box.top, it.box.right, it.box.bottom,
@@ -5608,6 +5626,10 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                             },
                         )
                         ToolMenuItem(
+                            text = "识别模型 ${selectedYoloModel.label}",
+                            onClick = { toolsMenuExpanded = false; showYoloModelDialog = true },
+                        )
+                        ToolMenuItem(
                             text = "图源 ${yoloCaptureMode.label}",
                             active = yoloCaptureMode == YoloCaptureMode.UHD4K,
                             enabled = !gyroPreviewGlRenderEnabled,
@@ -5768,11 +5790,8 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     backlightBalanceText = backlightBalanceText,
                     statusText = statusText,
                     gyroText = gyroHudText,
-                    modelText = when {
-                        yoloDetector == null -> "模型: $modelLoadStatus"
-                        detectionEnabled -> detectionPerfText
-                        else -> ""
-                    },
+                    modelNameText = if (yoloDetector != null) "模型: ${selectedYoloModel.label}" else "模型: $modelLoadStatus",
+                    modelText = if (yoloDetector != null && detectionEnabled) detectionPerfText else "",
                     statText = when {
                         statMeasuring -> "统计中 ${"%.1f".format(leftMs / 1000f)}s · $statHit/$statTotal"
                         statResultText.isNotEmpty() -> statResultText
@@ -6428,6 +6447,34 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 dismissButton = {
                     TextButton(onClick = { showCoordInputDialog = false }) { Text("取消") }
                 },
+            )
+        }
+
+        if (showYoloModelDialog) {
+            YoloModelDialog(
+                selected = selectedYoloModel,
+                loading = modelLoading,
+                failed = yoloDetector == null && !modelLoading,
+                status = modelLoadStatus,
+                onSelect = { model ->
+                    if (!modelLoading && model != selectedYoloModel) {
+                        detectionEnabled = false
+                        yoloDetector = null
+                        detectionBoxes = emptyList()
+                        detectionPerfText = ""
+                        showMeasurePrompt = false
+                        measureTrigger = false
+                        wasTargetInArea = false
+                        glDetectionExpiresNs = 0L
+                        glPreviewViewRef?.setDetectionEnabled(false)
+                        modelLoading = true
+                        modelLoadStatus = "${model.label} 加载中..."
+                        selectedYoloModel = model
+                        statusText = "切换模型至 ${model.label}，识别已停止"
+                    }
+                },
+                onRetry = { if (!modelLoading) { modelLoading = true; modelLoadAttempt++ } },
+                onDismiss = { showYoloModelDialog = false },
             )
         }
 
@@ -7675,6 +7722,7 @@ private fun StatusHud(
     backlightBalanceText: String,
     statusText: String,
     gyroText: String,
+    modelNameText: String,
     modelText: String,
     statText: String,
     lensText: String,
@@ -7684,7 +7732,7 @@ private fun StatusHud(
 ) {
     val lines = listOf(lensText, gyroText, modelText, statText, zoomText, anchorText).filter { it.isNotBlank() }
 
-    CollapsibleStatusPanel(fpsText = fpsText, statusText = statusText, modifier = modifier) {
+    CollapsibleStatusPanel(fpsText = fpsText, statusText = statusText, modelNameText = modelNameText, modifier = modifier) {
         Text(
             text = ambientLightText,
             color = Color(0xFFFFD54F),

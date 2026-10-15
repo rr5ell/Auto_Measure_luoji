@@ -26,6 +26,22 @@ import org.junit.runner.RunWith
 class CollapsibleStatusPanelTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun modelNameRemainsVisibleWhenCollapsedAndUpdates() {
+        val model = mutableStateOf("模型: V34")
+        compose.setContent { MaterialTheme {
+            CollapsibleStatusPanel("30 FPS", "相机就绪", Modifier.width(180.dp), modelNameText = model.value) {
+                Text("推理详情")
+            }
+        } }
+        compose.onNodeWithContentDescription("当前识别模型").assertTextEquals("模型: V34").assertIsDisplayed()
+        compose.onNodeWithText("推理详情").assertDoesNotExist()
+        compose.runOnIdle { model.value = "模型: V29 加载中..." }
+        compose.onNodeWithContentDescription("当前识别模型").assertTextEquals("模型: V29 加载中...")
+        compose.runOnIdle { model.value = "模型: V29" }
+        compose.onNodeWithContentDescription("当前识别模型").assertTextEquals("模型: V29").assertIsDisplayed()
+        capture("status-panel-model.png")
+    }
+
     @Test fun startsCompactAndExpandsWithLatestData() {
         val reading = mutableStateOf("合112")
         compose.setContent { MaterialTheme {

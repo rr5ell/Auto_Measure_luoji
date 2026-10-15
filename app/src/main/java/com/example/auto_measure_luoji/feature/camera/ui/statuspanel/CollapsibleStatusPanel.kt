@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,6 +31,7 @@ internal fun CollapsibleStatusPanel(
     fpsText: String,
     statusText: String,
     modifier: Modifier = Modifier,
+    modelNameText: String = "",
     details: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -55,6 +57,9 @@ internal fun CollapsibleStatusPanel(
                 }
             }
         }
+        if (modelNameText.isNotBlank()) Text(modelNameText, color = Color(0xFFFFCC80),
+            fontSize = 11.sp, lineHeight = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.semantics { contentDescription = "当前识别模型" })
         if (statusText.isNotBlank()) Text(statusText, color = Color.White.copy(alpha = 0.9f),
             fontSize = 11.sp, lineHeight = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         if (expanded) {

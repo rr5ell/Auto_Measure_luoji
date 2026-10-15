@@ -13,6 +13,7 @@
 | 当前主要分支 | `feature/manual-shutter-aperture` |
 
 ## 可复用能力
+- [android-yolo-model-selection](entries/android-yolo-model-selection.md)：内置V34/V29选择、成功持久化、同线程模型替换及旧推理结果拦截。
 - [android-preview-save-gallery](entries/android-preview-save-gallery.md)：普通/GL显示效果快照、HDR转SDR、相册发布与失败清理、重复请求保护。
 - [android-window-outdoor-brightness](entries/android-window-outdoor-brightness.md)：HBM能力失败提示、独立窗口最高亮度请求、原值恢复与生命周期释放；不将窗口属性回读当成HBM成功。
 - [android-camera-collapsible-status-panel](entries/android-camera-collapsible-status-panel.md)：相机状态区默认收起、箭头展开、详情限高滚动和状态恢复；只管理显示，不拥有相机或算法生命周期。

@@ -1,5 +1,7 @@
 # android-camera-collapsible-status-panel
 
+2026-10-15（Codex Agent）：新增可选`modelNameText`参数，在收起/展开时均显示当前模型名称或加载状态，默认空串保持其他调用兼容；推理明细仍放在详情区。增加模型切换后名称实时更新测试。
+
 ## 元数据
 - 状态：active
 - 技术栈：Android、Kotlin、Jetpack Compose、Material3
