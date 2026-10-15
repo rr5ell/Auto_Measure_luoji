@@ -12,10 +12,11 @@
 - 作者：Codex Agent
 
 ## 适用场景与参数
-- 更多菜单选择内置V34/V29模型，默认V34，偏好键`yolo_model_asset`记录assets相对路径。
+- 更多菜单选择内置V35/V34/V29模型，默认V34，偏好键`yolo_model_asset`记录assets相对路径。
 - 成功加载才保存，未知偏好回退V34；失败仍可重试或选择另一模型。
 - 主面板通过`CollapsibleStatusPanel.modelNameText`常驻显示模型名；加载中/失败显示明确状态，折叠详情不隐藏模型名。
 - 复用`YoloDetector`现有输入/解析/阈值，普通Bitmap及GL/YUV共用当前实例。
+- V35资产为`app/src/main/assets/bestV35_float32.tflite`；实测FLOAT32输入`[1,1280,1280,3]`、输出`[1,5,40000]`，对应单类`cx/cy/w/h/conf`，无需改动现有解析器。格式兼容不代表识别精度已经验证。
 
 ## 线程与生命周期
 - 切换立即停止识别并清空旧框，GPU创建、推理、释放必须串行固定在`YoloInference`线程。
@@ -29,7 +30,7 @@
 
 ## 测试与验证
 - `:app:testDebugUnitTest`；`YoloModelAssetsTest`、`YoloModelDialogTest`、`YoloModelCameraTest`。
-- 覆盖未知偏好、真实模型CPU推理、加载中不可切换、错误重试、普通/GL页面切换及重开页面恢复。
+- 覆盖未知偏好、三模型张量格式与真实CPU推理、加载中不可切换、错误重试、普通/GL页面切换V29/V35及重开页面恢复。
 - 厂商GPU和HDR组合需真机验证；模拟器推理不能证明识别精度。
 
 ## 给AI的指令

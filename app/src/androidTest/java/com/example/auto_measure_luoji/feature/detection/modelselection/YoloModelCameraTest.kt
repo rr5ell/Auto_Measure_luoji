@@ -18,8 +18,10 @@ class YoloModelCameraTest {
 
     @Test fun ordinaryPreviewSwitchesAndRemembersModel() = switchModels(false)
     @Test fun glPreviewSwitchesAndRemembersModel() = switchModels(true)
+    @Test fun ordinaryPreviewSwitchesToV35() = switchModels(false, YoloModelOption.V35)
+    @Test fun glPreviewSwitchesToV35() = switchModels(true, YoloModelOption.V35)
 
-    private fun switchModels(gl: Boolean) {
+    private fun switchModels(gl: Boolean, target: YoloModelOption = YoloModelOption.V29) {
         assumeTrue(Build.VERSION.SDK_INT >= 33)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -49,20 +51,20 @@ class YoloModelCameraTest {
                 compose.onNodeWithContentDescription("当前识别模型").assertTextEquals("模型: V34").assertIsDisplayed()
                 compose.onNodeWithText("识别").performClick()
                 openModels("V34")
-                compose.onNodeWithText("V29").performClick()
+                compose.onNodeWithText(target.label).performClick()
                 compose.waitUntil(60_000) {
-                    compose.onAllNodes(hasText("V29 已加载", substring = true)).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodes(hasText("${target.label} 已加载", substring = true)).fetchSemanticsNodes().isNotEmpty()
                 }
-                assertEquals(YoloModelOption.V29.assetPath, prefs.getString(modelKey, null))
+                assertEquals(target.assetPath, prefs.getString(modelKey, null))
                 compose.onNodeWithText("关闭").performClick()
-                compose.onNodeWithContentDescription("当前识别模型").assertTextEquals("模型: V29").assertIsDisplayed()
+                compose.onNodeWithContentDescription("当前识别模型").assertTextEquals("模型: ${target.label}").assertIsDisplayed()
                 compose.onNodeWithText("识别").assertIsEnabled()
                 compose.onNodeWithText("识别中").assertDoesNotExist()
             }
             ActivityScenario.launch(MainActivity::class.java).use {
                 waitReady()
-                openModels("V29")
-                compose.onNodeWithText("V29").assertIsSelected()
+                openModels(target.label)
+                compose.onNodeWithText(target.label).assertIsSelected()
                 compose.onNodeWithText("V34").performClick()
                 compose.waitUntil(60_000) {
                     compose.onAllNodes(hasText("V34 已加载", substring = true)).fetchSemanticsNodes().isNotEmpty()

@@ -13,6 +13,6 @@ class YoloModelOptionTest {
         YoloModelOption.values().forEach {
             assertEquals(it, YoloModelOption.fromAssetPath(it.assetPath))
         }
-        assertEquals(2, YoloModelOption.values().map { it.assetPath }.distinct().size)
+        assertEquals(3, YoloModelOption.values().map { it.assetPath }.distinct().size)
     }
 }
